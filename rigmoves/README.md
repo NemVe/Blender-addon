@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.9.9
+# RigMoves (experiment) - v0.10.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.9.9.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.10.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -110,6 +110,25 @@ Only the parts you actually moved are saved into a step. Anything you leave
 alone carries on through that point on its own path, so a step can speak for
 one part of a group without disturbing the rest.
 
+### How fast each stretch goes
+
+Steps cut the move into stretches: Before to Step 1, Step 1 to Step 2, and on
+into After. Between every two rows is a **Speed** slider for the stretch that
+joins them, from -50 to 50. 0 is even. Every 15 points is about twice as fast,
+50 is ten times, and below 0 is slower the same way; the note beside the
+slider says by how much.
+
+A sword swing: Before is the raised sword, Step 1 mid swing, After the
+follow-through. Speed -30 into Step 1 and +30 into After, and it gathers
+slowly and then strikes.
+
+The move always fills its whole control, so a speed only counts against the
+other stretches - every stretch at -50 plays exactly like every stretch at 0.
+How fast the whole move plays is still how fast the control is moved. A
+speed takes effect as soon as it is changed, so scrub the control to judge
+it, and it slows or hurries every part of the move together, including the
+ones that have no key at that step.
+
 The frames are only a place to draw the shape in. The control always runs the
 whole of it, however many frames long it is.
 
@@ -131,6 +150,9 @@ A combined control has the same box per member.
 The **Ease** menu shapes the whole move: even speed, smooth, slow start, slow
 stop. It sits on top of whatever path was recorded, so a hand-shaped path with
 Smooth on it eases into and out of your own curve.
+
+For exact control of each stretch use the speeds instead, with Ease left on
+Even speed. The two stack, the ease first.
 
 ## Everything else on the card
 
@@ -158,6 +180,14 @@ stack, with its evaluation time driven from the move's number:
     t = (number - from) / (to - from)         how far across the move
     t = (t - delay) / (done - delay)          this part's own window, clamped
     t = ease(t)                               the shaping
+    t = speeds(t)                             the stretches' shares, with steps
+
+The speeds are not in the expression, which a delay and an ease already bring
+close to the 256 characters Blender will hold. They are keys on the driver's
+own curve - Blender reads a driver curve that has keys as a map from what the
+expression says to the value written - one key per pose, at the share of the
+control the speeds give it. With every stretch even the curve has no keys at
+all, and the driver is exactly what it was before speeds existed.
 
 Top of the stack matters: whatever constraints the bone already had still run
 afterwards, so a hand-built rig can be given a control without being taken

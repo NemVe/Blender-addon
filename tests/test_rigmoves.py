@@ -23,6 +23,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import bpy  # noqa: E402
+from mathutils import Matrix  # noqa: E402
 
 import rigmoves  # noqa: E402
 
@@ -173,6 +174,63 @@ class TestObjects(RigMovesCase):
         self.assertLess(drift(self.arm, self.after["Arm"]), TOLERANCE)
         # The lid was not moved for the step, so it keeps its own path.
         self.assertLess(drift(self.lid, self.after["Lid"]), TOLERANCE)
+
+    def add_mid_step(self, z):
+        """One step, with the arm dragged to this height for it, then Build."""
+        self.assertEqual(bpy.ops.rigmoves.add_step(index=0), {"FINISHED"})
+        self.arm.location.z = z
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="STEP", step=0),
+                         {"FINISHED"})
+        bpy.ops.rigmoves.build()
+
+    def test_slow_stretch_takes_more_of_the_control(self):
+        # The step half way up, so at even speed the arm climbs steadily.
+        self.add_mid_step(1.5)
+        # Ten times slower into the step: it takes ten parts of the control
+        # to the last stretch's one. Takes effect without a Build.
+        self.move.steps[0].speed = -50
+        reach = 10.0 / 11.0
+        drive(self.move, reach / 2.0)
+        self.assertAlmostEqual(centre(self.arm).z, 1.25, places=4)
+        drive(self.move, reach)
+        self.assertAlmostEqual(centre(self.arm).z, 1.5, places=4)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.arm, self.after["Arm"]), TOLERANCE)
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.arm, self.before["Arm"]), TOLERANCE)
+        # And a Build keeps it.
+        bpy.ops.rigmoves.build()
+        drive(self.move, reach)
+        self.assertAlmostEqual(centre(self.arm).z, 1.5, places=4)
+
+    def test_part_without_a_step_key_keeps_the_same_time(self):
+        self.add_mid_step(1.5)
+        self.move.steps[0].speed = -50
+        # The lid was never moved for the step, so it has no key there - but
+        # the move's time is what is bent, so it is half way round exactly
+        # when the arm reaches the step.
+        drive(self.move, 10.0 / 11.0)
+        half_turn = [Matrix.Translation((0.0, 0.0, 1.0))
+                     @ Matrix.Rotation(math.radians(45.0), 4, "X") @ v.co
+                     for v in self.lid.data.vertices]
+        self.assertLess(drift(self.lid, half_turn), TOLERANCE)
+
+    def test_equal_speeds_play_as_even(self):
+        self.add_mid_step(1.5)
+        self.move.steps[0].speed = 30
+        self.move.speed_after = 30
+        drive(self.move, 0.25)
+        self.assertAlmostEqual(centre(self.arm).z, 1.25, places=4)
+
+    def test_even_speeds_leave_the_drivers_plain(self):
+        self.add_mid_step(1.5)
+        self.assertEqual([len(c.keyframe_points) for c in self.our_drivers()], [0, 0])
+        self.move.steps[0].speed = -20
+        self.assertEqual([len(c.keyframe_points) for c in self.our_drivers()], [3, 3])
+        # With the step gone there is one stretch again, and nothing to share.
+        self.assertEqual(bpy.ops.rigmoves.drop_step(index=0, step=0), {"FINISHED"})
+        self.assertEqual([len(c.keyframe_points) for c in self.our_drivers()], [0, 0])
 
     def test_remove_leaves_nothing_behind(self):
         drive(self.move, 0.0)

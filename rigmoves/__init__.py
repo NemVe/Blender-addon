@@ -31,7 +31,7 @@ from mathutils import Matrix, Vector
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
     "author": "AutoRigger experiments",
-    "version": (0, 9, 9),
+    "version": (0, 10, 0),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -727,6 +727,26 @@ def _frames_changed(self, context):
     self.frames_applied = wanted
 
 
+def _speed_changed(self, context):
+    """Put a new speed into effect at once, so it can be judged by scrubbing
+    the control rather than by pressing Build after every nudge."""
+    rig = self.id_data
+    if hasattr(self, "steps"):
+        move = self
+    else:
+        mine = self.as_pointer()
+        move = next((m for m in rig.rigmoves.moves
+                     if any(s.as_pointer() == mine for s in m.steps)), None)
+    if move is not None:
+        apply_timing(rig, move)
+
+
+SPEED_HELP = ("How fast the parts travel on this stretch, against the rest of "
+              "the move. 0 is even; 15 is about twice as fast and 50 ten times, "
+              "below 0 slower the same way. The move always fills its whole "
+              "control, so only the differences between stretches count")
+
+
 class RIGMOVES_Step(bpy.types.PropertyGroup):
     """One pose between Before and After.
 
@@ -737,6 +757,11 @@ class RIGMOVES_Step(bpy.types.PropertyGroup):
     """
     frame: bpy.props.FloatProperty(default=0.0)
     done: bpy.props.BoolProperty(default=False)
+    # The stretch on the way into this step. The one into After is the
+    # move's own.
+    speed: bpy.props.IntProperty(
+        name="Speed", default=0, min=-50, max=50, update=_speed_changed,
+        description=SPEED_HELP)
 
 
 class RIGMOVES_Move(bpy.types.PropertyGroup):
@@ -752,6 +777,11 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
                     "matters - the slider always runs the whole of it")
     frames_applied: bpy.props.IntProperty(default=20)
     steps: bpy.props.CollectionProperty(type=RIGMOVES_Step)
+    # The last stretch, from the last step into After. Each step carries the
+    # stretch into itself, so this is the one left over.
+    speed_after: bpy.props.IntProperty(
+        name="Speed", default=0, min=-50, max=50, update=_speed_changed,
+        description=SPEED_HELP)
     ease: bpy.props.EnumProperty(
         name="Ease",
         items=[("LINEAR", "Even speed", "The same speed the whole way"),
@@ -1588,6 +1618,113 @@ def eval_expression(data, move, part):
 
 
 # ---------------------------------------------------------------------------
+# how fast each stretch goes
+#
+# A move with steps in it has stretches - Before to the first step, one step
+# to the next, the last into After - and each has a speed. A speed decides
+# how much of the control's travel its stretch takes: the poses stay where
+# they are on the path, only the control is shared out differently.
+
+
+def speed_factor(speed):
+    """Every 50 points is ten times, so 15 is about twice."""
+    return 10.0 ** (speed / 50.0)
+
+
+def speed_note(speed):
+    """A stretch's speed in words, against even."""
+    if not speed:
+        return "even"
+    return "{:.1f}× {:s}".format(speed_factor(abs(speed)),
+                                 "faster" if speed > 0 else "slower")
+
+
+def timing_points(move):
+    """Where each pose falls on the control, against where it falls on the
+    path, as (control, path) pairs - or None while every stretch is even.
+
+    Each stretch keeps the share of the path it has, and takes a share of the
+    control that is that much shorter for a fast one and longer for a slow
+    one. So 0 everywhere is the path exactly as recorded, and every stretch
+    at the same speed is too: the move always fills the whole control.
+    """
+    if not len(move.steps):
+        return None
+    speeds = [step.speed for step in move.steps] + [move.speed_after]
+    if not any(speeds):
+        return None
+    span = float(last_frame(move) - FIRST_FRAME)
+    marks = [0.0]
+    marks.extend((step.frame - FIRST_FRAME) / span for step in move.steps)
+    marks.append(1.0)
+    shares = [max(marks[i + 1] - marks[i], 1e-6) / speed_factor(speed)
+              for i, speed in enumerate(speeds)]
+    total = sum(shares)
+    points, reached = [], 0.0
+    for i, mark in enumerate(marks):
+        points.append((reached / total, mark))
+        if i < len(shares):
+            reached += shares[i]
+    return points
+
+
+def time_curve(curve, points):
+    """Share the control out between the stretches, on one part's driver.
+
+    Done with keys on the driver's own curve, which Blender reads as a map
+    from what the expression says to the value it writes. Not in the
+    expression: a delay and an ease already bring that close to the 256
+    characters Blender will hold. And because it is the move's time that is
+    bent rather than any one path, a part with no key at a step still slows
+    and speeds up with the rest.
+    """
+    keys = curve.keyframe_points
+    while len(keys):
+        keys.remove(keys[0], fast=True)
+    for control, along in points or ():
+        key = keys.insert(control, along, options={"FAST"})
+        key.interpolation = "LINEAR"
+    curve.update()
+
+
+def timing_curves(rig, move):
+    """The driver curve of every part this move plays.
+
+    Found by the move's own action, not by constraint name: a name can have
+    been made unique on one bone and not another, but the action is the
+    move's alone.
+    """
+    action = bpy.data.actions.get(move.action_name) if move.action_name else None
+    animation = rig.animation_data
+    if action is None or animation is None:
+        return []
+    out = []
+    for part in move.parts:
+        name = part_bone(part)
+        pose_bone = rig.pose.bones.get(name)
+        if pose_bone is None:
+            continue
+        for constraint in pose_bone.constraints:
+            if (constraint.type != "ACTION" or constraint.action != action
+                    or not constraint.name.startswith(CONSTRAINT)):
+                continue
+            curve = animation.drivers.find(
+                'pose.bones["{:s}"].constraints["{:s}"].eval_time'.format(
+                    bpy.utils.escape_identifier(name),
+                    bpy.utils.escape_identifier(constraint.name)))
+            if curve is not None:
+                out.append(curve)
+    return out
+
+
+def apply_timing(rig, move):
+    points = timing_points(move)
+    for curve in timing_curves(rig, move):
+        time_curve(curve, points)
+    rig.update_tag()
+
+
+# ---------------------------------------------------------------------------
 # operators
 
 
@@ -2106,6 +2243,7 @@ class RIGMOVES_OT_add_step(bpy.types.Operator):
         move = data.moves[self.index]
         move.steps.add()
         respace_steps(move)
+        apply_timing(rig, move)
         set_paused(rig, data, True)
         data.report = ("'{:s}': step {:d} added. Put the parts where they "
                        "should be part way through, then press its Record."
@@ -2137,6 +2275,8 @@ class RIGMOVES_OT_drop_step(bpy.types.Operator):
             drop_keys_at(move, step.frame)
         move.steps.remove(self.step)
         respace_steps(move)
+        # One stretch fewer, so the speeds are shared out again.
+        apply_timing(rig, move)
         data.report = "Step removed from '{:s}'. Build to play it.".format(move.name)
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
@@ -2216,6 +2356,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             if bag is None or not len(bag.fcurves):
                 empty.append(move.name)
                 continue
+            timing = timing_points(move)
             for part in move.parts:
                 pose_bone = rig.pose.bones.get(part_bone(part))
                 if pose_bone is None:
@@ -2272,6 +2413,9 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                 # back is the only way to know it all arrived.
                 if driver.expression != wanted:
                     cramped.append(part_bone(part))
+                # Always written, even with every stretch even: a curve that
+                # was here before can still carry the last build's keys.
+                time_curve(curve, timing)
                 made += 1
             move.built = True
 
@@ -2802,6 +2946,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         # up empty by the + below and filled in afterwards, which is the whole
         # of it: the same gesture as Before and After, one row further in.
         for position, step in enumerate(move.steps):
+            self._draw_speed(body, step, "speed")
             row = body.split(factor=0.4, align=True)
             row.scale_y = 1.15
             gap = row.row(align=True)
@@ -2824,6 +2969,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         add.enabled = bool(before and after and not objects)
         add.operator(RIGMOVES_OT_add_step.bl_idname,
                      text="Step in between", icon="ADD").index = index
+        if len(move.steps):
+            self._draw_speed(body, move, "speed_after")
 
         row = body.split(factor=0.4, align=True)
         row.scale_y = 1.15
@@ -2889,6 +3036,20 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             row.use_property_decorate = True
             row.prop(bone, '["{:s}"]'.format(bpy.utils.escape_identifier(move.prop)),
                      text=move.name)
+
+    def _draw_speed(self, body, holder, prop):
+        """The speed of one stretch, drawn between the two poses it joins.
+
+        Only once there is a step: with Before and After alone the move is a
+        single stretch, and it always fills the whole control whatever its
+        speed, so a slider there would do nothing.
+        """
+        row = body.split(factor=0.4, align=True)
+        note = row.row(align=True)
+        note.enabled = False
+        note.label(text="", icon="BLANK1")
+        note.label(text=speed_note(getattr(holder, prop)))
+        row.prop(holder, prop, text="Speed", slider=True)
 
     def _draw_group(self, layout, context, rig, data, group, index):
         header, body = layout.panel_prop(group, "expanded")
