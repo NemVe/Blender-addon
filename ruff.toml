@@ -1,0 +1,7 @@
+# Correctness only: pyflakes and pycodestyle's errors. The add-on is written
+# with str.format and Blender's property annotations, which the style rule
+# sets would flag on nearly every line for no gain.
+line-length = 100
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
