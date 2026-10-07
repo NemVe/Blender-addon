@@ -31,11 +31,12 @@ from mathutils import Matrix, Vector
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
     "author": "AutoRigger experiments",
-    "version": (0, 10, 0),
+    "version": (0, 11, 0),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
-                   "delays. Works on loose objects with no rig at all, and makes one",
+                   "delays. Works on loose objects with no rig at all, and makes one. "
+                   "Other objects can ride along, each from its own place",
     "category": "Rigging",
 }
 
@@ -677,6 +678,9 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
         name="Done", default=1.0, min=0.01, max=1.0, subtype="FACTOR",
         description="How far along the slider this part has arrived. Below 1 it "
                     "gets there early and then waits")
+    # A rider: an object with no path of its own, that copies the path of the
+    # part named here from where it stands itself. Empty for every other part.
+    leader: bpy.props.StringProperty()
 
 
 def safe_prop_name(text):
@@ -811,6 +815,7 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
     built: bpy.props.BoolProperty(default=False)
     expanded: bpy.props.BoolProperty(default=True)
     show_timing: bpy.props.BoolProperty(default=False)
+    show_riders: bpy.props.BoolProperty(default=True)
 
 
 def _group_renamed(self, context):
@@ -961,14 +966,50 @@ def forget_dead_rig(context):
 
 
 def loose_parts(move):
-    """Parts that are still objects, with no bone made for them yet."""
-    return [p for p in move.parts if p.kind == "OBJECT" and not p.bone_name]
+    """Parts that are still objects, with no bone made for them yet.
+
+    Riders are not among them: they are never posed or recorded, so nothing
+    about Before and After waits on them.
+    """
+    return [p for p in move.parts if p.kind == "OBJECT" and not p.bone_name
+            and not p.leader]
 
 
 def bound_parts(move):
-    """Parts that started as objects and now have a bone of their own."""
+    """Parts that started as objects and now have a bone of their own.
+
+    Riders included: they are bound the same way, and put back on their
+    Before the same way when they drift.
+    """
     return [p for p in move.parts if p.kind == "OBJECT" and p.bone_name
             and p.has_before]
+
+
+def riders_of(move):
+    """The parts that copy another part's path, as (index, part)."""
+    return [(i, p) for i, p in enumerate(move.parts) if p.leader]
+
+
+def unbind_object(rig, part):
+    """Give a bound object its freedom back.
+
+    The group, the modifier and the parent all go, and it stays exactly where
+    it is.
+    """
+    obj = bpy.data.objects.get(part.name)
+    if obj is None:
+        return False
+    world = obj.matrix_world.copy()
+    for modifier in list(obj.modifiers):
+        if modifier.type == "ARMATURE" and modifier.object is rig:
+            obj.modifiers.remove(modifier)
+    group = obj.vertex_groups.get(part.bone_name)
+    if group is not None:
+        obj.vertex_groups.remove(group)
+    if obj.parent is rig:
+        obj.parent = None
+    obj.matrix_world = world
+    return True
 
 
 def hand_moved(part):
@@ -1492,6 +1533,152 @@ def bind_loose(context, rig, data):
     return made
 
 
+# ---------------------------------------------------------------------------
+# riders: objects that copy a part's move from where they stand
+#
+# A flower is eight petals doing one thing, each from its own place: open
+# outwards. Recorded once on one petal, the others ride along - whatever the
+# leader does to its own left, a rider does to *its* own left, not the
+# leader's.
+#
+# Each rider gets a bone turned from the rider exactly as the leader's bone is
+# turned from the leader, and that bone plays a copy of the leader's channels.
+# The same channels on a bone turned the same way are the same move, seen from
+# the rider - at every point along the path, not only at the recorded poses,
+# so steps, delays and speeds all carry over for nothing.
+
+
+def frame_of(matrix):
+    """Where something stands and which way it faces, without its size.
+
+    A half-size petal is still meant to travel as far as the leader does, so
+    scale is kept out of the frames a move is carried between.
+    """
+    location, rotation, _scale = matrix.decompose()
+    return Matrix.Translation(location) @ rotation.to_matrix().to_4x4()
+
+
+def leader_frame(rig, leader):
+    """The frame a leader's move is measured in, in world space."""
+    if leader.kind == "OBJECT":
+        return frame_of(as_matrix(leader.before))
+    bone = rig.data.bones.get(part_bone(leader))
+    return frame_of(rig.matrix_world @ bone.matrix_local)
+
+
+def leader_of(move, rider):
+    """The part a rider copies, if it is still a part that leads."""
+    leader = move.parts.get(rider.leader)
+    if leader is None or leader.leader:
+        return None
+    return leader
+
+
+def bind_riders(context, rig, data):
+    """Give every new rider its bone, turned like its leader's, and bind it.
+
+    After bind_loose, so a leader that was itself a loose object a moment ago
+    already has the bone this one is turned from.
+    """
+    jobs = []
+    for move in data.moves:
+        for _index, rider in riders_of(move):
+            leader = leader_of(move, rider)
+            if (rider.bone_name or not rider.has_before or leader is None
+                    or rig.data.bones.get(part_bone(leader)) is None
+                    or bpy.data.objects.get(rider.name) is None):
+                continue
+            jobs.append((rider, leader))
+    if not jobs:
+        return 0
+
+    for rider, _leader in jobs:
+        bpy.data.objects[rider.name].matrix_world = as_matrix(rider.before)
+    context.view_layer.update()
+
+    world = rig.matrix_world
+    into = world.inverted_safe()
+    seats = []
+    for rider, leader in jobs:
+        bone = rig.data.bones[part_bone(leader)]
+        # The leader's bone as the leader sees it, then stood on the rider.
+        carried = (frame_of(as_matrix(rider.before))
+                   @ leader_frame(rig, leader).inverted_safe()
+                   @ world @ bone.matrix_local)
+        seats.append((rider, frame_of(into @ carried), bone.length))
+
+    if not activate(context, rig):
+        return 0
+    bpy.ops.object.mode_set(mode="EDIT")
+    edit = rig.data.edit_bones
+    root = edit.get("Root") or (edit[0] if len(edit) else None)
+    for rider, seat, length in seats:
+        bone = edit.new(rider.name)
+        bone.head = Vector((0.0, 0.0, 0.0))
+        bone.tail = Vector((0.0, max(length, 1e-3), 0.0))
+        bone.matrix = seat
+        bone.use_deform = True
+        bone.parent = root if (root is not None and root.name != bone.name) else None
+        rider.bone_name = bone.name
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    for rider, leader in jobs:
+        bind_object(rig, bpy.data.objects[rider.name], rider.bone_name)
+        rig.data.bones[rider.bone_name][PART_MARK] = True
+        pose_bone = rig.pose.bones[rider.bone_name]
+        pose_bone.rotation_mode = rig.pose.bones[part_bone(leader)].rotation_mode
+        pose_bone.matrix_basis = Matrix()
+    context.view_layer.update()
+    return len(jobs)
+
+
+def copy_path(rig, move, leader, rider):
+    """Give a rider its leader's channels, key for key."""
+    _action, _slot, bag = action_bits(move, make=True)
+    if bag is None:
+        return
+    source = bone_path(part_bone(leader), "")
+    target = bone_path(part_bone(rider), "")
+    for curve in list(bag.fcurves):
+        if curve.data_path.startswith(target):
+            bag.fcurves.remove(curve)
+    for curve in [c for c in bag.fcurves if c.data_path.startswith(source)]:
+        copy = bag.fcurves.new(target + curve.data_path[len(source):],
+                               index=curve.array_index)
+        copy.keyframe_points.add(len(curve.keyframe_points))
+        for was, now in zip(curve.keyframe_points, copy.keyframe_points):
+            now.co = was.co
+            now.interpolation = was.interpolation
+            now.handle_left_type = was.handle_left_type
+            now.handle_right_type = was.handle_right_type
+            now.handle_left = was.handle_left
+            now.handle_right = was.handle_right
+        copy.update()
+    pose_bone = rig.pose.bones.get(part_bone(rider))
+    leading = rig.pose.bones.get(part_bone(leader))
+    if pose_bone is not None and leading is not None:
+        pose_bone.rotation_mode = leading.rotation_mode
+
+
+def follow_leaders(rig, data):
+    """Copy every leader's path onto its riders, as it stands now.
+
+    Every build, because the leader's path is recorded and re-recorded on
+    its own - a step added, After taken again - and a rider is only ever its
+    leader's path, never anything of its own. Returns the riders whose leader
+    has gone.
+    """
+    lost = []
+    for move in data.moves:
+        for _index, rider in riders_of(move):
+            leader = leader_of(move, rider)
+            if leader is None:
+                lost.append(rider.name)
+            elif rider.bone_name:
+                copy_path(rig, move, leader, rider)
+    return lost
+
+
 def armatures_in(context):
     return [o for o in context.view_layer.objects if o.type == "ARMATURE"]
 
@@ -1927,6 +2114,123 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def leaders(context, rig):
+    """Parts in the selection that newcomers could ride along with, as
+    (index, move, part) - the active object first, since that is the one
+    somebody clicked last and so most likely means."""
+    if rig is None:
+        return []
+    chosen = {o.name for o in context.selected_objects}
+    active = context.view_layer.objects.active
+    out = [(index, move, part)
+           for index, move in enumerate(rig.rigmoves.moves)
+           for part in move.parts
+           if part.kind == "OBJECT" and not part.leader and part.name in chosen]
+    out.sort(key=lambda row: active is None or row[2].name != active.name)
+    return out
+
+
+class RIGMOVES_OT_ride_along(bpy.types.Operator):
+    bl_idname = "rigmoves.ride_along"
+    bl_label = "Ride Along"
+    bl_description = ("Have the selected objects copy this part's move, each "
+                      "from where it stands: whatever it does to its own "
+                      "left, each of them does to theirs")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    leader: bpy.props.StringProperty()
+    rig_name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        rig = bpy.data.objects.get(self.rig_name) if self.rig_name else None
+        if rig is None:
+            rig = rig_of(context)
+        if not here(context, rig) or rig.type != "ARMATURE":
+            return {"CANCELLED"}
+        data = rig.rigmoves
+        if not 0 <= self.index < len(data.moves):
+            return {"CANCELLED"}
+        move = data.moves[self.index]
+        leader = move.parts.get(self.leader)
+        if leader is None or leader.leader:
+            return {"CANCELLED"}
+        fresh = newcomers(context, rig)
+        if not fresh:
+            data.report = "Select the objects to ride along, then the part they follow."
+            self.report({"WARNING"}, data.report)
+            return {"CANCELLED"}
+        if getattr(context.scene, "rigmoves_rig", None) is not rig:
+            context.scene.rigmoves_rig = rig
+        # Where each stands now is the place it copies the move from. That is
+        # all there is to record: the path itself is the leader's.
+        for obj in fresh:
+            part = move.parts.add()
+            part.name = obj.name
+            part.kind = "OBJECT"
+            part.leader = leader.name
+            part.before = flat(obj.matrix_world)
+            part.has_before = True
+        said = ("'{:s}'".format(short(fresh[0].name, 18)) if len(fresh) == 1
+                else "{:d} objects".format(len(fresh)))
+        if move.built:
+            bpy.ops.rigmoves.build()
+            data.report = ("{:s} ride along with '{:s}'. Give them delays under "
+                           "Timing to set them off one after another."
+                           .format(said, short(leader.name, 18)))
+        else:
+            data.report = ("{:s} will ride along with '{:s}'. Record its After, "
+                           "then Build.".format(said, short(leader.name, 18)))
+        self.report({"INFO"}, data.report)
+        return {"FINISHED"}
+
+
+class RIGMOVES_OT_drop_rider(bpy.types.Operator):
+    bl_idname = "rigmoves.drop_rider"
+    bl_label = "Stop Riding Along"
+    bl_description = ("Take this object out of the move. It is unbound and "
+                      "stays where it is")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    part: bpy.props.IntProperty()
+
+    def execute(self, context):
+        rig = rig_of(context)
+        if not here(context, rig):
+            return {"CANCELLED"}
+        data = rig.rigmoves
+        if not 0 <= self.index < len(data.moves):
+            return {"CANCELLED"}
+        move = data.moves[self.index]
+        if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
+            return {"CANCELLED"}
+        rider = move.parts[self.part]
+        name = rider.name
+        # Its constraints, and with them their drivers, go before its bone
+        # does: a driver left on a bone that is gone is one Blender warns
+        # about on every update.
+        pose_bone = rig.pose.bones.get(part_bone(rider)) if rider.bone_name else None
+        if pose_bone is not None:
+            for constraint in list(pose_bone.constraints):
+                if constraint.type == "ACTION" and constraint.name.startswith(CONSTRAINT):
+                    rig.driver_remove('pose.bones["{:s}"].constraints["{:s}"].eval_time'
+                                      .format(bpy.utils.escape_identifier(pose_bone.name),
+                                              bpy.utils.escape_identifier(constraint.name)))
+                    pose_bone.constraints.remove(constraint)
+        if rider.bone_name:
+            unbind_object(rig, rider)
+            _action, _slot, bag = action_bits(move)
+            if bag is not None:
+                mine = bone_path(rider.bone_name, "")
+                for curve in [c for c in bag.fcurves if c.data_path.startswith(mine)]:
+                    bag.fcurves.remove(curve)
+        move.parts.remove(self.part)
+        # The build sweeps the bone, now that nothing claims it.
+        bpy.ops.rigmoves.build()
+        data.report = "'{:s}' no longer rides along.".format(short(name, 24))
+        self.report({"INFO"}, data.report)
+        return {"FINISHED"}
+
+
 class RIGMOVES_OT_pick_part(bpy.types.Operator):
     bl_idname = "rigmoves.pick_part"
     bl_label = "Select this part"
@@ -2103,6 +2407,10 @@ class RIGMOVES_OT_record(bpy.types.Operator):
         # slider then starts at the wrong end and travels twice as far.
         dragged, touched = 0, set()
         for part in bound_parts(move):
+            # A rider is never posed: its path is its leader's, copied at
+            # every Build, which also puts a dragged one back.
+            if part.leader:
+                continue
             obj, world = hand_moved(part)
             if world is None:
                 continue
@@ -2140,7 +2448,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
         loose_names = {p.name for p in loose}
         bones, kept = set(), 0
         for part in move.parts:
-            if part.name in loose_names and not part.bone_name:
+            if part.leader or (part.name in loose_names and not part.bone_name):
                 continue
             name = part_bone(part)
             if part.kind != "OBJECT":
@@ -2320,6 +2628,11 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         if reseated:
             context.view_layer.update()
         bound = bind_loose(context, rig, data)
+        # Riders after, because each is turned from its leader's bone, which
+        # bind_loose may only just have made; then every rider takes its
+        # leader's path as it stands now.
+        riding = bind_riders(context, rig, data)
+        lost = follow_leaders(rig, data)
 
         # Every move needs a stable name of its own, because a combined
         # control refers to its members by one - names change, this does not.
@@ -2448,6 +2761,12 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         data.report = "{:d} part(s) on {:d} slider(s).".format(made, len(data.moves))
         if bound:
             data.report += " {:d} object(s) were given a bone and bound.".format(bound)
+        if riding:
+            data.report += " {:d} object(s) now ride along.".format(riding)
+        if lost:
+            data.report += (" {:s} rides with a part that is no longer in its "
+                            "move, and was left as it was."
+                            .format(", ".join(lost[:3])))
         if reseated:
             data.report += (" {:d} put back on its Before.".format(reseated)
                             if reseated == 1 else
@@ -2536,20 +2855,8 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
         for part in move.parts:
             if part.kind != "OBJECT" or not part.bone_name:
                 continue
-            obj = bpy.data.objects.get(part.name)
-            if obj is None:
-                continue
-            world = obj.matrix_world.copy()
-            for modifier in list(obj.modifiers):
-                if modifier.type == "ARMATURE" and modifier.object is rig:
-                    obj.modifiers.remove(modifier)
-            group = obj.vertex_groups.get(part.bone_name)
-            if group is not None:
-                obj.vertex_groups.remove(group)
-            if obj.parent is rig:
-                obj.parent = None
-            obj.matrix_world = world
-            gone.append(part.bone_name)
+            if unbind_object(rig, part):
+                gone.append(part.bone_name)
         # The handle's driver goes with the slider it writes. Left behind it
         # points at a property that is gone and a handle about to be, and
         # Blender complains about it on every update from then on.
@@ -2876,6 +3183,22 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         # Selecting the newcomer together with a group says which one is
         # meant, so that one is offered first and large. It is a shortcut,
         # not the only way in - the full list is underneath either way.
+        # Selected with a part that already moves, the newcomers are most
+        # likely meant to do what it does - a petal beside the one that was
+        # recorded - so riding along is offered first.
+        for number, (index, move, part) in enumerate(leaders(context, rig)[:2]):
+            run = box.row()
+            run.scale_y = 1.3
+            riding = run.operator(
+                RIGMOVES_OT_ride_along.bl_idname,
+                text="Ride Along With '{:s}'".format(short(part.name, 14)),
+                icon="LINKED")
+            riding.index, riding.leader, riding.rig_name = index, part.name, rig.name
+            if not number:
+                note = box.row()
+                note.enabled = False
+                note.label(text="each copies its move from where it stands")
+
         singled = {index for index, _move in indicated(context, rig)}
         for index, move in indicated(context, rig)[:2]:
             note = box.row()
@@ -2990,6 +3313,20 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
 
         # Who moves when. The reason a machine reads as built rather than
         # animated: the parts do not all leave at once.
+        riders = riders_of(move)
+        if riders:
+            head, listed = layout.panel_prop(move, "show_riders")
+            head.label(text="Riding along ({:d})".format(len(riders)), icon="LINKED")
+            if listed is not None:
+                for position, part in riders:
+                    line = listed.split(factor=0.5, align=True)
+                    line.label(text=short(part.name, 16), icon="OBJECT_DATA")
+                    right = line.row(align=True)
+                    right.label(text="with " + short(part.leader, 12))
+                    drop = right.operator(RIGMOVES_OT_drop_rider.bl_idname, text="",
+                                          icon="X", emboss=False)
+                    drop.index, drop.part = index, position
+
         head, timing = layout.panel_prop(move, "show_timing")
         head.label(text="Timing", icon="TIME")
         if timing is not None:
@@ -3112,6 +3449,8 @@ CLASSES = (
     RIGMOVES_Rig,
     RIGMOVES_OT_new_move,
     RIGMOVES_OT_add_to_move,
+    RIGMOVES_OT_ride_along,
+    RIGMOVES_OT_drop_rider,
     RIGMOVES_OT_pick_part,
     RIGMOVES_OT_free_keys,
     RIGMOVES_OT_use_selected,

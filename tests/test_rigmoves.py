@@ -245,6 +245,102 @@ class TestObjects(RigMovesCase):
             self.assertLess(drift(obj, before), TOLERANCE)
 
 
+class TestRiders(RigMovesCase):
+    """One petal recorded, another riding along from its own place.
+
+    The leader is turned 20 degrees and the rider 110 and half its size, so
+    the leader's own left, the rider's own left and the world's all differ:
+    copying the move in the wrong frame cannot pass by accident.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.petal = cube("Petal", (1.0, 0.0, 0.0))
+        self.petal.rotation_euler.z = math.radians(20.0)
+        self.rider = cube("Rider", (0.0, 1.0, 0.0))
+        self.rider.rotation_euler.z = math.radians(110.0)
+        self.rider.scale = (0.5, 0.5, 0.5)
+        bpy.context.view_layer.update()
+        self.home = self.petal.matrix_world.copy()
+        self.seat = self.rider.matrix_world.copy()
+
+        def pose():
+            # Out along its own X, and tipped about its own Y.
+            self.petal.matrix_world = (self.home @ Matrix.Translation((1.0, 0.0, 0.0))
+                                       @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
+
+        self.before, self.after = record_move([self.petal], pose)
+
+    def ride(self):
+        select(self.rider, self.petal)
+        bpy.context.view_layer.objects.active = self.petal
+        return bpy.ops.rigmoves.ride_along(index=0, leader="Petal", rig_name=rig().name)
+
+    def expected(self, travel):
+        """The rider's mesh after the leader's own-frame travel, from its seat.
+
+        The travel goes between the rider's frame and its size: a half-size
+        rider still goes as far as the leader does, not half as far.
+        """
+        location, rotation, size = self.seat.decompose()
+        frame = Matrix.Translation(location) @ rotation.to_matrix().to_4x4()
+        return [frame @ travel @ Matrix.Diagonal(size).to_4x4() @ v.co
+                for v in self.rider.data.vertices]
+
+    def check_rides(self):
+        move = rig().rigmoves.moves[0]
+        drive(move, 0.0)
+        self.assertLess(drift(self.rider, self.expected(Matrix())), TOLERANCE)
+        drive(move, 0.5)
+        half = (Matrix.Translation((0.5, 0.0, 0.0))
+                @ Matrix.Rotation(math.radians(15.0), 4, "Y"))
+        self.assertLess(drift(self.rider, self.expected(half)), TOLERANCE)
+        drive(move, 1.0)
+        full = (Matrix.Translation((1.0, 0.0, 0.0))
+                @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
+        self.assertLess(drift(self.rider, self.expected(full)), TOLERANCE)
+        self.assertLess(drift(self.petal, self.after["Petal"]), TOLERANCE)
+
+    def test_rider_copies_the_move_from_its_own_place(self):
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.ride(), {"FINISHED"})
+        self.check_rides()
+
+    def test_rider_added_before_the_first_build(self):
+        self.assertEqual(self.ride(), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        self.check_rides()
+
+    def test_rider_follows_a_step_added_later(self):
+        bpy.ops.rigmoves.build()
+        self.ride()
+        self.assertEqual(bpy.ops.rigmoves.add_step(index=0), {"FINISHED"})
+        self.petal.matrix_world = self.home @ Matrix.Translation((2.0, 0.0, 0.0))
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="STEP", step=0),
+                         {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(rig().rigmoves.moves[0], 0.5)
+        self.assertLess(drift(self.rider, self.expected(Matrix.Translation((2.0, 0.0, 0.0)))),
+                        TOLERANCE)
+
+    def test_rider_can_be_taken_out_again(self):
+        bpy.ops.rigmoves.build()
+        self.ride()
+        move = rig().rigmoves.moves[0]
+        position = next(i for i, p in enumerate(move.parts) if p.leader)
+        self.assertEqual(bpy.ops.rigmoves.drop_rider(index=0, part=position), {"FINISHED"})
+        self.assertIsNone(self.rider.parent)
+        self.assertFalse([m for m in self.rider.modifiers if m.type == "ARMATURE"])
+        self.assertIsNone(rig().data.bones.get("Rider"))
+        for curve in rig().animation_data.drivers:
+            self.assertTrue(curve.driver.is_valid, curve.data_path)
+        # The leader plays on as before, and the rider stays put.
+        drive(move, 1.0)
+        self.assertLess(drift(self.petal, self.after["Petal"]), TOLERANCE)
+        self.assertLess(drift(self.rider, self.expected(Matrix())), TOLERANCE)
+
+
 class TestCombined(RigMovesCase):
 
     def test_combined_control_plays_members_in_order(self):

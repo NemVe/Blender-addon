@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.10.0
+# RigMoves (experiment) - v0.11.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.10.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.11.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -71,6 +71,31 @@ the object belongs:
 
 The group the selection points at is offered first and large. Every other
 group on every rig in view is listed underneath, for when it is not.
+
+When one of the selected objects is a part that already moves, **Ride Along**
+is offered first - see below.
+
+### Riding along
+
+For a flower, record one petal and let the others copy it. Select the petals
+that should follow, then the recorded one last, so it is the active object,
+and press **Ride Along With '...'**. Each of them now does what the recorded
+petal does, but from where it stands and facing its own way: whatever the
+leader does to its own left, a rider does to *its* own left. Eight petals
+round a centre all open outwards, each in its own direction, from one
+control.
+
+A rider pivots on its own origin, as the leader does on its, so put each
+petal's origin at its base, where it hinges.
+
+Riders are parts like any other under **Timing**, so a delay on each sets them
+off one after another round the flower. They follow everything the leader's
+path does - steps in between, speeds, Ease - and a rider half the size of its
+leader still travels as far. They are listed under **Riding along**, where the
+**x** takes one out again and leaves it where it stands.
+
+Riding along can be set up before the leader's After is recorded as well;
+it takes effect at the next Build.
 
 Without this the panel simply went on showing the finished rig, with nothing
 on screen to say how to begin the next thing.
@@ -188,6 +213,12 @@ own curve - Blender reads a driver curve that has keys as a map from what the
 expression says to the value written - one key per pose, at the share of the
 control the speeds give it. With every stretch even the curve has no keys at
 all, and the driver is exactly what it was before speeds existed.
+
+A rider gets a bone of its own, turned from the rider exactly as the leader's
+bone is turned from the leader, and every Build gives it a copy of the
+leader's channels. The same channels on a bone turned the same way are the
+same move, seen from the rider - at every point along the path, not only at
+the recorded poses.
 
 Top of the stack matters: whatever constraints the bone already had still run
 afterwards, so a hand-built rig can be given a control without being taken
@@ -395,6 +426,9 @@ and one lifted 1 m:
 - Two moves sharing a part compose in the order they were made, which is not
   shown anywhere.
 - A move can be in only one combined control at a time.
+- A rider copies its leader from where it stood when it joined. To move one,
+  take it out and add it again. A rider cannot lead others, and only objects
+  can lead - a bone of a hand-built rig is not offered.
 - Combining always takes every move that is not already in one, laid end to
   end. There is no way to pick which ones from the panel yet, only to take
   them out again afterwards.
