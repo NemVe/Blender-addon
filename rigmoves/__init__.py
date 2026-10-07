@@ -31,7 +31,7 @@ from mathutils import Matrix, Vector
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
     "author": "AutoRigger experiments",
-    "version": (0, 11, 0),
+    "version": (0, 12, 0),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -655,6 +655,58 @@ def group_of(data, move):
 # the data, stored on the armature so it travels with the rig
 
 
+def _timing_changed(self, context):
+    """Put a timing change into effect at once - a delay, a lead, an ease, a
+    speed - so it can be judged by scrubbing the control rather than by
+    pressing Build after every nudge."""
+    rig = self.id_data
+    if hasattr(self, "steps"):
+        move = self
+    else:
+        mine = self.as_pointer()
+        move = next((m for m in rig.rigmoves.moves
+                     if any(x.as_pointer() == mine
+                            for x in list(m.steps) + list(m.parts))), None)
+    if move is not None:
+        refresh_drivers(rig, rig.rigmoves, move)
+
+
+def control_of(carrier):
+    """(handle pose bone, slider bone) for a move or combined control - the
+    handle None when it has none."""
+    rig = carrier.id_data
+    handle = rig.pose.bones.get(carrier.handle_name) if carrier.handle else None
+    return handle, rig.pose.bones.get(carrier.control)
+
+
+def _play_get(self):
+    """How far through the control is, 0 to 100, read off whatever drives it."""
+    handle, bone = control_of(self)
+    if handle is not None:
+        share = handle.location.y / (self.rail or 1.0)
+    elif bone is not None and self.prop in bone.keys():
+        share = (bone[self.prop] - self.low) / ((self.high - self.low) or 1.0)
+    else:
+        share = 0.0
+    return 100.0 * min(1.0, max(0.0, share))
+
+
+def _play_set(self, value):
+    """Write it back to the same place, so the panel and the viewport handle
+    are one control and never disagree."""
+    handle, bone = control_of(self)
+    share = min(1.0, max(0.0, value / 100.0))
+    if handle is not None:
+        handle.location.y = share * (self.rail or 1.0)
+    elif bone is not None and self.prop in bone.keys():
+        bone[self.prop] = self.low + share * (self.high - self.low)
+    self.id_data.update_tag()
+
+
+PLAY_HELP = ("Play the whole of it, from the first part that moves to the last "
+             "one to arrive. The handle in the viewport follows")
+
+
 class RIGMOVES_Part(bpy.types.PropertyGroup):
     """One thing in a move, and when it takes its turn.
 
@@ -672,6 +724,7 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     has_after: bpy.props.BoolProperty(default=False)
     start: bpy.props.FloatProperty(
         name="Delay", default=0.0, min=0.0, max=0.99, subtype="FACTOR",
+        update=_timing_changed,
         description="How far along the slider this part waits before it starts. "
                     "0 moves with everything else, 0.5 starts half way")
     end: bpy.props.FloatProperty(
@@ -681,6 +734,14 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # A rider: an object with no path of its own, that copies the path of the
     # part named here from where it stands itself. Empty for every other part.
     leader: bpy.props.StringProperty()
+    # A rider's place in time against its leader; it travels at the leader's
+    # speed either way. Takes the place of the delay, which riders do not use.
+    lead: bpy.props.IntProperty(
+        name="Lead", default=0, min=-50, max=50, update=_timing_changed,
+        description="When this rider moves, against its leader. 0 moves with "
+                    "it. Below 0 it follows behind: -25 sets off when the "
+                    "leader is half way, -50 when it has finished. Above 0 it "
+                    "goes first: 50 has finished before the leader starts")
 
 
 def safe_prop_name(text):
@@ -731,20 +792,6 @@ def _frames_changed(self, context):
     self.frames_applied = wanted
 
 
-def _speed_changed(self, context):
-    """Put a new speed into effect at once, so it can be judged by scrubbing
-    the control rather than by pressing Build after every nudge."""
-    rig = self.id_data
-    if hasattr(self, "steps"):
-        move = self
-    else:
-        mine = self.as_pointer()
-        move = next((m for m in rig.rigmoves.moves
-                     if any(s.as_pointer() == mine for s in m.steps)), None)
-    if move is not None:
-        apply_timing(rig, move)
-
-
 SPEED_HELP = ("How fast the parts travel on this stretch, against the rest of "
               "the move. 0 is even; 15 is about twice as fast and 50 ten times, "
               "below 0 slower the same way. The move always fills its whole "
@@ -764,7 +811,7 @@ class RIGMOVES_Step(bpy.types.PropertyGroup):
     # The stretch on the way into this step. The one into After is the
     # move's own.
     speed: bpy.props.IntProperty(
-        name="Speed", default=0, min=-50, max=50, update=_speed_changed,
+        name="Speed", default=0, min=-50, max=50, update=_timing_changed,
         description=SPEED_HELP)
 
 
@@ -784,7 +831,7 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
     # The last stretch, from the last step into After. Each step carries the
     # stretch into itself, so this is the one left over.
     speed_after: bpy.props.IntProperty(
-        name="Speed", default=0, min=-50, max=50, update=_speed_changed,
+        name="Speed", default=0, min=-50, max=50, update=_timing_changed,
         description=SPEED_HELP)
     ease: bpy.props.EnumProperty(
         name="Ease",
@@ -792,7 +839,7 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
                ("SMOOTH", "Smooth", "Starts and stops gently"),
                ("IN", "Slow start", "Starts gently, arrives at full speed"),
                ("OUT", "Slow stop", "Starts at full speed, arrives gently")],
-        default="LINEAR")
+        default="LINEAR", update=_timing_changed)
     # The bone that carries the slider. Any bone will do; the root is the one
     # an animator can always find.
     control: bpy.props.StringProperty(name="On")
@@ -812,6 +859,11 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
                     "3D view. The panel shows its position either way")
     handle_name: bpy.props.StringProperty()
     rail: bpy.props.FloatProperty(default=0.1)
+    # Not stored: it reads and writes the handle, or the slider when there is
+    # no handle, so it is the same control seen from the panel.
+    play: bpy.props.FloatProperty(
+        name="Play", min=0.0, max=100.0, subtype="PERCENTAGE", precision=0,
+        get=_play_get, set=_play_set, description=PLAY_HELP)
     built: bpy.props.BoolProperty(default=False)
     expanded: bpy.props.BoolProperty(default=True)
     show_timing: bpy.props.BoolProperty(default=False)
@@ -857,6 +909,9 @@ class RIGMOVES_Group(bpy.types.PropertyGroup):
                     "in the 3D view")
     handle_name: bpy.props.StringProperty()
     rail: bpy.props.FloatProperty(default=0.1)
+    play: bpy.props.FloatProperty(
+        name="Play", min=0.0, max=100.0, subtype="PERCENTAGE", precision=0,
+        get=_play_get, set=_play_set, description=PLAY_HELP)
     built: bpy.props.BoolProperty(default=False)
     expanded: bpy.props.BoolProperty(default=True)
 
@@ -1746,15 +1801,27 @@ def window(inner, start, end):
     whole expression three times, so every character saved here is saved three
     times over, and ten-digit floats printed as 0.200000003 were most of it.
     """
-    start = max(0.0, min(0.98, start))
-    end = max(start + 0.01, min(1.0, end))
+    # Four decimals: a ten-thousandth of the control, far finer than it can
+    # be dragged, where a rider's window - a twelfth, a seventh - printed to
+    # six figures took a combined, eased driver over the limit. The span is
+    # taken between the rounded ends, so a window that ends at 1 still does.
+    start = round(max(0.0, min(0.98, start)), 4)
+    end = round(max(start + 0.01, min(1.0, end)), 4)
     if start <= 1e-6 and end >= 1.0 - 1e-6:
         # No slice to take, but the clamp still earns its place: the control
         # itself can be dragged past either end.
         return "min(max({:s},0),1)".format(inner)
+    if start <= 1e-6:
+        return "min(max({:s}/{:s},0),1)".format(inner, decimal(end))
     # start and the span are both positive by the clamps above, so neither
     # needs brackets of its own to keep a minus sign apart from a minus.
-    return "min(max(({:s}-{:.6g})/{:.6g},0),1)".format(inner, start, end - start)
+    return "min(max(({:s}-{:s})/{:s},0),1)".format(
+        inner, decimal(start), decimal(end - start))
+
+
+def decimal(value):
+    """At most four decimals, and none that say nothing: 0.5, not 0.5000."""
+    return "{:.4f}".format(value).rstrip("0").rstrip(".") or "0"
 
 
 def scaled(name, low, span):
@@ -1773,6 +1840,39 @@ def travels_to_end(thing):
     still load, but it is not read and not shown.
     """
     return 1.0
+
+
+def base_window(move, part):
+    """When a part travels, on the move's own time: (start, end).
+
+    For a part of its own that is its delay to the end, 0 to 1 at most. A
+    rider travels for exactly as long as its leader - the same move at the
+    same speed - shifted by its lead, a whole leader's travel at 50 either
+    way. So a rider can start before 0 or finish after 1.
+    """
+    if part.leader:
+        leader = leader_of(move, part)
+        if leader is not None:
+            start = min(max(leader.start, 0.0), 0.99)
+            shift = -part.lead / 50.0 * (1.0 - start)
+            return start + shift, 1.0 + shift
+    return part.start, travels_to_end(part)
+
+
+def part_window(move, part):
+    """A part's share of the control, (start, end) inside 0 to 1.
+
+    The control always plays the whole move: from the first part that sets
+    off - a rider going ahead of its leader - to the last one to arrive. Left
+    as it was when nothing rides ahead or behind, so a move without riders
+    plays exactly as it always has.
+    """
+    windows = [base_window(move, p) for p in move.parts]
+    low = min([0.0] + [w[0] for w in windows])
+    high = max([1.0] + [w[1] for w in windows])
+    start, end = base_window(move, part)
+    span = high - low
+    return (start - low) / span, (end - low) / span
 
 
 def eval_expression(data, move, part):
@@ -1801,7 +1901,7 @@ def eval_expression(data, move, part):
             own, window(scaled(GROUP_VAR, group.low, reach),
                         member.start, travels_to_end(member)))
     return EASE.get(move.ease, "{t}").replace(
-        "{t}", window(own, part.start, travels_to_end(part)))
+        "{t}", window(own, *part_window(move, part)))
 
 
 # ---------------------------------------------------------------------------
@@ -1875,7 +1975,7 @@ def time_curve(curve, points):
 
 
 def timing_curves(rig, move):
-    """The driver curve of every part this move plays.
+    """The driver curve of every part this move plays, as (part, curve).
 
     Found by the move's own action, not by constraint name: a name can have
     been made unique on one bone and not another, but the action is the
@@ -1900,14 +2000,32 @@ def timing_curves(rig, move):
                     bpy.utils.escape_identifier(name),
                     bpy.utils.escape_identifier(constraint.name)))
             if curve is not None:
-                out.append(curve)
+                out.append((part, curve))
     return out
 
 
-def apply_timing(rig, move):
+def refresh_drivers(rig, data, move):
+    """Rewrite what a built move's drivers say, without a Build.
+
+    Every part of the move, whichever setting changed: a rider's lead can
+    widen the whole move, and that changes every part's share of the control.
+    """
     points = timing_points(move)
-    for curve in timing_curves(rig, move):
+    cramped = []
+    for part, curve in timing_curves(rig, move):
+        driver = curve.driver
+        wanted = eval_expression(data, move, part)
+        # A move combined since its last Build reads a slider its driver has
+        # no variable for yet; that waits for the Build.
+        if (GROUP_VAR in wanted) == (driver.variables.get(GROUP_VAR) is not None):
+            driver.expression = wanted
+            if driver.expression != wanted:
+                cramped.append(part_bone(part))
         time_curve(curve, points)
+    if cramped:
+        data.report = ("The driver for {:s} was too long for Blender to hold and "
+                       "got cut short. Use fewer delays, or Even speed, on this "
+                       "move.".format(", ".join(sorted(set(cramped))[:3])))
     rig.update_tag()
 
 
@@ -2174,8 +2292,8 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
                 else "{:d} objects".format(len(fresh)))
         if move.built:
             bpy.ops.rigmoves.build()
-            data.report = ("{:s} ride along with '{:s}'. Give them delays under "
-                           "Timing to set them off one after another."
+            data.report = ("{:s} ride along with '{:s}'. Set each one's Lead "
+                           "under Riding along to send it ahead or behind."
                            .format(said, short(leader.name, 18)))
         else:
             data.report = ("{:s} will ride along with '{:s}'. Record its After, "
@@ -2551,7 +2669,7 @@ class RIGMOVES_OT_add_step(bpy.types.Operator):
         move = data.moves[self.index]
         move.steps.add()
         respace_steps(move)
-        apply_timing(rig, move)
+        refresh_drivers(rig, data, move)
         set_paused(rig, data, True)
         data.report = ("'{:s}': step {:d} added. Put the parts where they "
                        "should be part way through, then press its Record."
@@ -2584,7 +2702,7 @@ class RIGMOVES_OT_drop_step(bpy.types.Operator):
         move.steps.remove(self.step)
         respace_steps(move)
         # One stretch fewer, so the speeds are shared out again.
-        apply_timing(rig, move)
+        refresh_drivers(rig, data, move)
         data.report = "Step removed from '{:s}'. Build to play it.".format(move.name)
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
@@ -2790,6 +2908,39 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                             .format(", ".join(sorted(set(cramped))[:3])))
             self.report({"WARNING"}, data.report)
             return {"FINISHED"}
+        self.report({"INFO"}, data.report)
+        return {"FINISHED"}
+
+
+class RIGMOVES_OT_key_control(bpy.types.Operator):
+    bl_idname = "rigmoves.key_control"
+    bl_label = "Key the Control"
+    bl_description = ("Keyframe the control where it stands, on the current "
+                      "frame - the same key as pressing I on its handle")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    combined: bpy.props.BoolProperty(default=False)
+
+    def execute(self, context):
+        rig = rig_of(context)
+        if not here(context, rig):
+            return {"CANCELLED"}
+        data = rig.rigmoves
+        carriers = data.groups if self.combined else data.moves
+        if not 0 <= self.index < len(carriers):
+            return {"CANCELLED"}
+        carrier = carriers[self.index]
+        handle, bone = control_of(carrier)
+        frame = context.scene.frame_current
+        if handle is not None:
+            handle.keyframe_insert("location", index=1, frame=frame)
+        elif bone is not None and carrier.prop in bone.keys():
+            bone.keyframe_insert('["{:s}"]'.format(
+                bpy.utils.escape_identifier(carrier.prop)), frame=frame)
+        else:
+            return {"CANCELLED"}
+        data.report = "'{:s}' keyed at {:.0f}% on frame {:d}.".format(
+            carrier.name, carrier.play, frame)
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -3311,22 +3462,33 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             said.label(text="+ adds a pose in between, for a path that bends")
         body.prop(move, "ease", text="")
 
-        # Who moves when. The reason a machine reads as built rather than
-        # animated: the parts do not all leave at once.
-        riders = riders_of(move)
+        # Riders have no delay of their own: each is placed against its
+        # leader instead, ahead or behind, and travels at the leader's speed.
+        riders = sorted(riders_of(move), key=lambda row: row[1].leader)
         if riders:
             head, listed = layout.panel_prop(move, "show_riders")
             head.label(text="Riding along ({:d})".format(len(riders)), icon="LINKED")
             if listed is not None:
+                note = listed.row()
+                note.enabled = False
+                note.label(text="lead: below 0 behind, above 0 ahead")
+                shown = None
                 for position, part in riders:
-                    line = listed.split(factor=0.5, align=True)
-                    line.label(text=short(part.name, 16), icon="OBJECT_DATA")
+                    if part.leader != shown:
+                        shown = part.leader
+                        said = listed.row()
+                        said.enabled = False
+                        said.label(text="with '{:s}'".format(short(part.leader, 22)))
+                    line = listed.split(factor=0.42, align=True)
+                    line.label(text=short(part.name, 13), icon="OBJECT_DATA")
                     right = line.row(align=True)
-                    right.label(text="with " + short(part.leader, 12))
+                    right.prop(part, "lead", text="Lead", slider=True)
                     drop = right.operator(RIGMOVES_OT_drop_rider.bl_idname, text="",
                                           icon="X", emboss=False)
                     drop.index, drop.part = index, position
 
+        # Who moves when. The reason a machine reads as built rather than
+        # animated: the parts do not all leave at once.
         head, timing = layout.panel_prop(move, "show_timing")
         head.label(text="Timing", icon="TIME")
         if timing is not None:
@@ -3339,6 +3501,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 said.enabled = False
                 said.label(text="lit: what you have selected", icon="RESTRICT_SELECT_OFF")
             for position, part in enumerate(move.parts):
+                if part.leader:
+                    continue
                 line = timing.split(factor=0.45, align=True)
                 # Everything else goes quiet rather than the chosen one being
                 # shouted: the eye lands on the one row still at full strength.
@@ -3352,27 +3516,26 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 name.label(text=short(part.name))
                 line.prop(part, "start", text="")
 
-        # What the animator actually reaches for. With a handle that is the
-        # bone's own position, shown here as well so it can be typed and keyed
-        # without hunting for it in the viewport.
-        handle = rig.pose.bones.get(move.handle_name) if move.handle else None
-        bone = rig.pose.bones.get(move.control)
-        if move.built and handle is not None:
-            row = body.row(align=True)
-            row.scale_y = 1.3
-            row.use_property_decorate = True
-            row.prop(handle, "location", index=1, text=move.name)
-            said = body.row()
-            said.enabled = False
-            share = min(1.0, max(0.0, handle.location.y / (move.rail or 1.0)))
-            said.label(text="{:.0f}% through - or drag it in the viewport".format(
-                share * 100))
-        elif move.built and bone is not None and move.prop in bone.keys():
-            row = body.row(align=True)
-            row.scale_y = 1.3
-            row.use_property_decorate = True
-            row.prop(bone, '["{:s}"]'.format(bpy.utils.escape_identifier(move.prop)),
-                     text=move.name)
+        self._draw_play(body, move, index, False)
+
+    def _draw_play(self, body, carrier, index, combined):
+        """What the animator actually reaches for: one slider that plays the
+        whole thing, from the first part to set off to the last to arrive.
+
+        The same control as the handle in the viewport, read and written in
+        the same place, so dragging either moves both. A key button beside
+        it, since the slider itself is not something Blender can key.
+        """
+        handle, bone = control_of(carrier)
+        if not carrier.built or (handle is None and (
+                bone is None or carrier.prop not in bone.keys())):
+            return
+        row = body.row(align=True)
+        row.scale_y = 1.4
+        row.prop(carrier, "play", text=carrier.name, slider=True)
+        key = row.operator(RIGMOVES_OT_key_control.bl_idname, text="",
+                           icon="DECORATE_KEYFRAME")
+        key.index, key.combined = index, combined
 
     def _draw_speed(self, body, holder, prop):
         """The speed of one stretch, drawn between the two poses it joins.
@@ -3412,24 +3575,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                                  icon="X", emboss=False)
             drop.group_index, drop.member_index = index, position
 
-        handle = rig.pose.bones.get(group.handle_name) if group.handle else None
-        bone = rig.pose.bones.get(group.control)
-        if group.built and handle is not None:
-            row = body.row(align=True)
-            row.scale_y = 1.3
-            row.use_property_decorate = True
-            row.prop(handle, "location", index=1, text=group.name)
-            said = body.row()
-            said.enabled = False
-            share = min(1.0, max(0.0, handle.location.y / (group.rail or 1.0)))
-            said.label(text="{:.0f}% through - or drag it in the viewport".format(
-                share * 100))
-        elif group.built and bone is not None and group.prop in bone.keys():
-            row = body.row(align=True)
-            row.scale_y = 1.3
-            row.use_property_decorate = True
-            row.prop(bone, '["{:s}"]'.format(bpy.utils.escape_identifier(group.prop)),
-                     text=group.name)
+        self._draw_play(body, group, index, True)
 
     def _draw_report(self, layout, data):
         if not data.report:
@@ -3459,6 +3605,7 @@ CLASSES = (
     RIGMOVES_OT_add_step,
     RIGMOVES_OT_drop_step,
     RIGMOVES_OT_build,
+    RIGMOVES_OT_key_control,
     RIGMOVES_OT_pause,
     RIGMOVES_OT_reset,
     RIGMOVES_OT_remove,

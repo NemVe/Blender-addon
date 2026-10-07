@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.11.0
+# RigMoves (experiment) - v0.12.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.11.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.12.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -52,9 +52,15 @@ is no longer on the panel, but still works from Python (`handle` on the move,
 then Build).
 
 Both write the same number, so switching between them changes nothing about
-how the move plays, and the panel shows the handle's position either way - so
-it can still be typed in and keyed without hunting for it in the viewport. The
-handle is held to its rail, so it cannot be dragged past either end.
+how the move plays. The handle is held to its rail, so it cannot be dragged
+past either end.
+
+Every built move, and every combined control, also has a **Play** slider in
+the panel, 0 to 100%. It plays the whole thing - from the first part to set
+off to the last one to arrive, riders ahead of or behind their leader
+included - and it is the same control as the handle: drag either and the
+other follows. The key button beside it keyframes the control at the current
+frame, the same key as **I** on the handle.
 
 ### Starting the next thing
 
@@ -88,11 +94,21 @@ control.
 A rider pivots on its own origin, as the leader does on its, so put each
 petal's origin at its base, where it hinges.
 
-Riders are parts like any other under **Timing**, so a delay on each sets them
-off one after another round the flower. They follow everything the leader's
-path does - steps in between, speeds, Ease - and a rider half the size of its
-leader still travels as far. They are listed under **Riding along**, where the
-**x** takes one out again and leaves it where it stands.
+Riders are listed under **Riding along**, each with a **Lead** slider from -50
+to 50 that says when it moves against its leader. 0 moves with it. Below 0 it
+follows behind: -25 sets off when the leader is half way, -50 only once the
+leader has finished. Above 0 it goes first, and at 50 it has finished before
+the leader starts. Either way it travels at the leader's speed, for as long
+as the leader does - only when changes. Petals at -8, -16, -24 and on round
+the flower open one after another, in a wave.
+
+The move's control, and the **Play** slider, always cover the whole of it, so
+a rider sent ahead has somewhere to go: the leader simply starts later along
+the control. A lead takes effect as soon as it is changed.
+
+Riders follow everything the leader's path does - steps in between, speeds,
+Ease - and a rider half the size of its leader still travels as far. The
+**x** on a rider's row takes it out again and leaves it where it stands.
 
 Riding along can be set up before the leader's After is recorded as well;
 it takes effect at the next Build.
@@ -167,6 +183,8 @@ Open **Timing**. Every part has a **Delay**, as a fraction of the control's
 travel. Delay 0.2 means that part waits until the control is a fifth of the
 way across before it starts, and then runs to the end. That is what stops a
 machine reading as one rubber object: the parts leave in order, and overlap.
+A delay, like an ease or a speed, takes effect as soon as it is changed.
+Riders are not listed here; their **Lead** does the same job.
 
 A combined control has the same box per member.
 
@@ -203,9 +221,16 @@ constraint** carrying that action, sitting at the top of the bone's constraint
 stack, with its evaluation time driven from the move's number:
 
     t = (number - from) / (to - from)         how far across the move
-    t = (t - delay) / (done - delay)          this part's own window, clamped
+    t = (t - start) / (end - start)           this part's own window, clamped
     t = ease(t)                               the shaping
     t = speeds(t)                             the stretches' shares, with steps
+
+A part's window is its delay to the end. A rider's is its leader's, shifted
+by its lead - a whole leader's travel at 50 either way - so it can begin
+before the move does or finish after it. The windows are then laid on the
+control from the earliest start to the latest finish, which is why the
+control always plays everything. Without riders that is 0 to 1 and nothing
+changes.
 
 The speeds are not in the expression, which a delay and an ease already bring
 close to the 256 characters Blender will hold. They are keys on the driver's
@@ -287,10 +312,12 @@ and one lifted 1 m:
   move inside a combined control came to 284 characters. Ten-digit floats
   printing 0.2 as 0.200000003 were much of the rest. The expression is now
   written without the clamps that only repeat what the last one does - it is
-  monotonic throughout, so they never did anything - and numbers are written
-  to six figures. Worst case across every delay, ease and grouping is 212
-  characters, and the build now reads the expression back and says so if one
-  was ever cut short.
+  monotonic throughout, so they never did anything - and a part's window is
+  written to four decimals. Six figures were enough until riders: a rider's
+  window lands on fractions like a twelfth, and a combined, eased driver
+  printed that way came to 262. Worst case across every delay, lead, ease and
+  grouping is now 236 characters, and the build - and any live change - reads
+  the expression back and says so if one was ever cut short.
 - **Which delay row belonged to which part was guesswork.** Four lids off one
   machine differ in the last character of a truncated name. The row for
   whatever is selected in the viewport is now the one left at full strength

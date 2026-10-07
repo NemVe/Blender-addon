@@ -160,6 +160,16 @@ class TestObjects(RigMovesCase):
             self.assertTrue(curve.driver.is_valid, curve.driver.expression)
             self.assertTrue(curve.driver.is_simple_expression, curve.driver.expression)
 
+    def test_longest_usual_expression_fits(self):
+        # A part in a combined control, eased, with a rider-made window of
+        # awkward fractions: the longest a driver gets without hidden From/To
+        # settings. Blender cuts anything past 256 characters.
+        own = "max({:s},{:s})".format(
+            rigmoves.VAR, rigmoves.window(rigmoves.GROUP_VAR, 1.0 / 3.0, 1.0))
+        expression = rigmoves.EASE["SMOOTH"].replace(
+            "{t}", rigmoves.window(own, 17.0 / 67.0, 50.0 / 67.0))
+        self.assertLess(len(expression), 256, expression)
+
     def test_step_is_passed_through(self):
         self.assertEqual(bpy.ops.rigmoves.add_step(index=0), {"FINISHED"})
         # Drag the object itself, as a user would, overshooting the After.
@@ -174,6 +184,40 @@ class TestObjects(RigMovesCase):
         self.assertLess(drift(self.arm, self.after["Arm"]), TOLERANCE)
         # The lid was not moved for the step, so it keeps its own path.
         self.assertLess(drift(self.lid, self.after["Lid"]), TOLERANCE)
+
+    def test_delay_takes_effect_without_a_build(self):
+        self.move.parts["Arm"].start = 0.5
+        drive(self.move, 0.5)
+        self.assertAlmostEqual(centre(self.arm).z, 1.0, places=4)
+
+    def test_play_slider_is_the_handle(self):
+        self.move.play = 50.0
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(centre(self.arm).z, 1.5, places=4)
+        handle = rig().pose.bones[self.move.handle_name]
+        self.assertAlmostEqual(handle.location.y, self.move.rail * 0.5, places=6)
+        # Dragging the handle shows on the slider.
+        drive(self.move, 0.25)
+        self.assertAlmostEqual(self.move.play, 25.0, places=3)
+
+    def test_play_slider_without_a_handle(self):
+        self.move.handle = False
+        bpy.ops.rigmoves.build()
+        self.move.play = 100.0
+        bpy.context.view_layer.update()
+        self.assertLess(drift(self.arm, self.after["Arm"]), TOLERANCE)
+        self.assertAlmostEqual(self.move.play, 100.0, places=3)
+
+    def test_key_button_keys_the_handle(self):
+        bpy.context.scene.frame_set(12)
+        self.move.play = 40.0
+        self.assertEqual(bpy.ops.rigmoves.key_control(index=0), {"FINISHED"})
+        curves = [c for _h, c in rigmoves.rig_own_curves(rig(), rig().rigmoves)]
+        self.assertEqual([(c.data_path.rsplit(".", 1)[-1], c.array_index) for c in curves],
+                         [("location", 1)])
+        key = curves[0].keyframe_points[0]
+        self.assertAlmostEqual(key.co[0], 12.0)
+        self.assertAlmostEqual(key.co[1], self.move.rail * 0.4, places=6)
 
     def add_mid_step(self, z):
         """One step, with the arm dragged to this height for it, then Build."""
@@ -270,6 +314,10 @@ class TestRiders(RigMovesCase):
                                        @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
 
         self.before, self.after = record_move([self.petal], pose)
+        self.half = (Matrix.Translation((0.5, 0.0, 0.0))
+                     @ Matrix.Rotation(math.radians(15.0), 4, "Y"))
+        self.full = (Matrix.Translation((1.0, 0.0, 0.0))
+                     @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
 
     def ride(self):
         select(self.rider, self.petal)
@@ -292,13 +340,9 @@ class TestRiders(RigMovesCase):
         drive(move, 0.0)
         self.assertLess(drift(self.rider, self.expected(Matrix())), TOLERANCE)
         drive(move, 0.5)
-        half = (Matrix.Translation((0.5, 0.0, 0.0))
-                @ Matrix.Rotation(math.radians(15.0), 4, "Y"))
-        self.assertLess(drift(self.rider, self.expected(half)), TOLERANCE)
+        self.assertLess(drift(self.rider, self.expected(self.half)), TOLERANCE)
         drive(move, 1.0)
-        full = (Matrix.Translation((1.0, 0.0, 0.0))
-                @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
-        self.assertLess(drift(self.rider, self.expected(full)), TOLERANCE)
+        self.assertLess(drift(self.rider, self.expected(self.full)), TOLERANCE)
         self.assertLess(drift(self.petal, self.after["Petal"]), TOLERANCE)
 
     def test_rider_copies_the_move_from_its_own_place(self):
@@ -323,6 +367,41 @@ class TestRiders(RigMovesCase):
         drive(rig().rigmoves.moves[0], 0.5)
         self.assertLess(drift(self.rider, self.expected(Matrix.Translation((2.0, 0.0, 0.0)))),
                         TOLERANCE)
+
+    def riding(self):
+        bpy.ops.rigmoves.build()
+        self.ride()
+        move = rig().rigmoves.moves[0]
+        return move, next(p for p in move.parts if p.leader)
+
+    def test_lead_behind_waits_for_the_leader(self):
+        move, rider = self.riding()
+        # Takes effect without a Build. The control now plays two leader
+        # lengths: the leader in the first half, the rider in the second.
+        rider.lead = -50
+        drive(move, 0.5)
+        self.assertLess(drift(self.petal, self.after["Petal"]), TOLERANCE)
+        self.assertLess(drift(self.rider, self.expected(Matrix())), TOLERANCE)
+        drive(move, 0.75)
+        self.assertLess(drift(self.rider, self.expected(self.half)), TOLERANCE)
+        drive(move, 1.0)
+        self.assertLess(drift(self.rider, self.expected(self.full)), TOLERANCE)
+
+    def test_lead_ahead_goes_first(self):
+        move, rider = self.riding()
+        rider.lead = 50
+        drive(move, 0.25)
+        self.assertLess(drift(self.rider, self.expected(self.half)), TOLERANCE)
+        self.assertLess(drift(self.petal, self.before["Petal"]), TOLERANCE)
+        drive(move, 0.5)
+        self.assertLess(drift(self.rider, self.expected(self.full)), TOLERANCE)
+        self.assertLess(drift(self.petal, self.before["Petal"]), TOLERANCE)
+        drive(move, 1.0)
+        self.assertLess(drift(self.petal, self.after["Petal"]), TOLERANCE)
+        # And a Build keeps it.
+        bpy.ops.rigmoves.build()
+        drive(move, 0.5)
+        self.assertLess(drift(self.rider, self.expected(self.full)), TOLERANCE)
 
     def test_rider_can_be_taken_out_again(self):
         bpy.ops.rigmoves.build()
