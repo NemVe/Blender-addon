@@ -13,5 +13,7 @@
   second.
 - Match the existing style: comments say why, in plain prose; `str.format`,
   not f-strings.
-- On a release bump `bl_info["version"]` and the guide's title and zip name
-  together, and add any bug fixed to the guide's list.
+- After every change to the add-on, the user checks it in their own Blender:
+  bump `bl_info["version"]` (and the guide's title and zip name with it), add
+  any bug fixed to the guide's list, run the tests, build the zip with
+  `python tools/build_zip.py`, and send them the zip from `dist/`.
