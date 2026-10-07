@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.9.2
+# RigMoves (experiment) - v0.9.9
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.9.2.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.9.9.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -46,9 +46,10 @@ A handle stands at the middle of the parts it drives and is sized from them,
 so it sits on the machine rather than hanging in the air above it. The rig is
 drawn in front of the mesh, so a control inside the machine is still there to
 click. Where two would land on top of each other they are stacked upwards,
-just far enough to clear. Grab it, slide it, key it with **I**. Under **Where to
-drive it** you can turn the handle off, and the move becomes a slider in the
-panel instead.
+just far enough to clear. Grab it, slide it, key it with **I**. The handle can
+be turned off, and the move becomes a slider in the panel instead - that switch
+is no longer on the panel, but still works from Python (`handle` on the move,
+then Build).
 
 Both write the same number, so switching between them changes nothing about
 how the move plays, and the panel shows the handle's position either way - so
@@ -65,11 +66,11 @@ the object belongs:
   and the panel names it and offers **Add To This Group**. Where the object
   stands now becomes its Before; then press the eye beside After, put it
   where it should end up, and Record After.
-- **Selected on its own**, and the panel offers **New Rig**, with **New Group
-  On This Rig** underneath for when that is what was meant.
+- **Selected on its own**, and the panel offers **New Group Here** and **New
+  Rig**, for whichever was meant.
 
-There is no menu of every group on the rig. The selection has already said
-which one.
+The group the selection points at is offered first and large. Every other
+group on every rig in view is listed underneath, for when it is not.
 
 Without this the panel simply went on showing the finished rig, with nothing
 on screen to say how to begin the next thing.
@@ -137,9 +138,11 @@ Smooth on it eases into and out of your own curve.
   eye icon beside it puts the model back into that pose so you can check it.
 - **Parts** replaces the move's bones with whatever is selected now, keeping
   the timing of the ones that stay.
-  two ends read as (0 and 1 by default, 0 and 360 reads better for a spin) and
-  how many frames the path is drawn over. Changing the length stretches the
-  path without losing its shape.
+- **From / To** and **Path length** - what numbers the control's two ends read
+  as (0 and 1 by default, 0 and 360 reads better for a spin) and how many
+  frames the path is drawn over - are no longer on the panel, but still work
+  when set from Python. Changing the length stretches the path without losing
+  its shape.
 - **x** on a move deletes it, its control, its path and its constraints, and
   leaves the rig exactly as it was.
 - **Pause** switches the move off so the bones can be posed by hand again;
@@ -341,6 +344,15 @@ and one lifted 1 m:
   the whole rig now.
 - **Long bone names truncated from the front**, so two controllers read as the
   same row in Timing. They are cut from the front with an ellipsis instead.
+- **Removing a move left its handle's driver behind.** The slider went, but
+  the driver that wrote it from the handle stayed, pointing at a property and
+  a bone that no longer existed - and Blender warned about it on every update
+  from then on. Removing a combined control did the same. Both drivers now go
+  with their sliders.
+- **Reloading the add-on failed with "already registered".** Registering
+  looked for an old copy in `bpy.types`, which does not list property groups,
+  so nothing was taken down and the first class refused to register again. The
+  old copy is now asked for through its base type, which does find it.
 
 ## Known rough edges
 

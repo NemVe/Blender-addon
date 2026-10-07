@@ -31,7 +31,7 @@ from mathutils import Matrix, Vector
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
     "author": "AutoRigger experiments",
-    "version": (0, 9, 8),
+    "version": (0, 9, 9),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -2406,6 +2406,10 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
                 obj.parent = None
             obj.matrix_world = world
             gone.append(part.bone_name)
+        # The handle's driver goes with the slider it writes. Left behind it
+        # points at a property that is gone and a handle about to be, and
+        # Blender complains about it on every update from then on.
+        rig.driver_remove(property_path(move.control, move.prop))
         bone = rig.pose.bones.get(move.control)
         if bone is not None and move.prop in bone.keys():
             del bone[move.prop]
@@ -2507,6 +2511,8 @@ class RIGMOVES_OT_remove_group(bpy.types.Operator):
         if not 0 <= self.index < len(data.groups):
             return {"CANCELLED"}
         group = data.groups[self.index]
+        # Same as a move: the handle's driver goes with its slider.
+        rig.driver_remove(property_path(group.control, group.prop))
         bone = rig.pose.bones.get(group.control)
         if bone is not None and group.prop in bone.keys():
             del bone[group.prop]
@@ -2964,14 +2970,41 @@ CLASSES = (
 )
 
 
-def register():
-    for cls in CLASSES:
-        existing = getattr(bpy.types, cls.__name__, None)
+def registered_copy(cls):
+    """The copy of this class Blender already has registered, if any.
+
+    Asked of its base type, not looked up in bpy.types: property groups are
+    not listed there, so a reloaded script found nothing to take down and
+    registering stopped at the first one with "already registered".
+    """
+    for base in (bpy.types.PropertyGroup, bpy.types.Operator, bpy.types.Panel):
+        if issubclass(cls, base):
+            return base.bl_rna_get_subclass_py(cls.__name__)
+    return None
+
+
+def take_down():
+    """Remove whatever copy of this add-on is registered, newest dependants
+    first, so a property group is never taken down while a pointer still
+    holds it."""
+    if hasattr(bpy.types.Scene, "rigmoves_rig"):
+        del bpy.types.Scene.rigmoves_rig
+    if hasattr(bpy.types.Object, "rigmoves"):
+        del bpy.types.Object.rigmoves
+    for cls in reversed(CLASSES):
+        existing = registered_copy(cls)
         if existing is not None:
             try:
                 bpy.utils.unregister_class(existing)
             except RuntimeError:
                 pass
+
+
+def register():
+    # A script reload registers again without unregistering first, so a
+    # copy may still be there.
+    take_down()
+    for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Object.rigmoves = bpy.props.PointerProperty(type=RIGMOVES_Rig)
     # Which rig the panel is on while loose objects, not the armature, are
@@ -2982,14 +3015,4 @@ def register():
 
 
 def unregister():
-    if hasattr(bpy.types.Scene, "rigmoves_rig"):
-        del bpy.types.Scene.rigmoves_rig
-    if hasattr(bpy.types.Object, "rigmoves"):
-        del bpy.types.Object.rigmoves
-    for cls in reversed(CLASSES):
-        existing = getattr(bpy.types, cls.__name__, None)
-        if existing is not None:
-            try:
-                bpy.utils.unregister_class(existing)
-            except RuntimeError:
-                pass
+    take_down()
