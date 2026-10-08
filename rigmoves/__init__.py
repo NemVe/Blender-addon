@@ -770,6 +770,7 @@ def _follows_changed(self, context):
     riders behind.
     """
     if not self.follows:
+        self.follows_kept = ""
         hang_loose(self)
         return
     rig = self.id_data
@@ -784,6 +785,8 @@ def _follows_changed(self, context):
         why = "only objects can follow and be followed"
     elif any(p.leader == self.name for p in move.parts):
         why = "it leads riders, which would be left behind"
+    elif curve_alive(self.path_curve):
+        why = "its path is curved - Straighten it first, as a follower goes where it is carried"
     else:
         seen, chain = {self.name}, target
         while chain is not None and chain.follows:
@@ -795,8 +798,11 @@ def _follows_changed(self, context):
     if why:
         rig.rigmoves.report = "'{:s}' cannot follow '{:s}': {:s}.".format(
             short(self.name, 16), short(self.follows, 16), why)
-        self.follows = ""
+        # Back to the choice it had, not to none: a slip in the list must not
+        # quietly undo a finger that was working.
+        self.follows = self.follows_kept
         return
+    self.follows_kept = self.follows
     hang_loose(self)
 
 
@@ -825,11 +831,24 @@ def hang_loose(part):
     target = bpy.data.objects.get(part.follows) if part.follows else None
     if target is not None:
         if obj.parent is not target:
+            # The parent it had of its own is remembered, to be given back.
+            if obj.parent is not None and not obj.get(FOLLOW_MARK):
+                part.home_parent = obj.parent.name
             keep_world(obj, target)
             obj[FOLLOW_MARK] = True
-    elif obj.get(FOLLOW_MARK):
-        keep_world(obj, None)
-        del obj[FOLLOW_MARK]
+    else:
+        unhang(part)
+
+
+def unhang(part):
+    """Take a loose object off the parent hang_loose gave it, and give it back
+    the one it had of its own, if any."""
+    obj = bpy.data.objects.get(part.name)
+    if obj is None or not obj.get(FOLLOW_MARK):
+        return
+    home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+    keep_world(obj, home if home is not obj else None)
+    del obj[FOLLOW_MARK]
 
 
 AXES = ("X", "Y", "Z")
@@ -899,6 +918,7 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # The part this one hangs from, like the joints of a finger: it moves
     # with that part and plays its own move on top. Empty for none. Put
     # into effect at the next Build, which hangs the bone from that part's.
+    follows_kept: bpy.props.StringProperty()
     follows: bpy.props.StringProperty(
         name="Follows", update=_follows_changed,
         description="The part this one moves with, as the next joint of a "
@@ -2210,6 +2230,8 @@ def deformation(rig, bag, bone_name, frame, fresh=None, parents=None):
     yet, or every bone's pose as it stands; `parents`, a hierarchy about to
     be made, in place of the one the rig has. A bone with nothing on this
     path stands at rest, as every move but the one being played does.
+    `frame` may be a function of the bone's name, for bones that stand on
+    different frames of the path at once - a follower with a delay.
     """
     fresh = fresh if fresh is not None else {}
     parents = parents if parents is not None else {}
@@ -2223,7 +2245,8 @@ def deformation(rig, bag, bone_name, frame, fresh=None, parents=None):
         if name in fresh:
             basis = fresh[name]
         elif bag is not None and name in rig.pose.bones:
-            basis = basis_at(bag, name, rig.pose.bones[name].rotation_mode, frame)
+            at = frame(name) if callable(frame) else frame
+            basis = basis_at(bag, name, rig.pose.bones[name].rotation_mode, at)
         else:
             basis = Matrix.Identity(4)
         rest = bone.matrix_local
@@ -2292,6 +2315,12 @@ def write_basis_keys(bag, bone_name, rotation_mode, rows):
 # carries it - a finger curls, rather than its pieces sliding apart.
 
 
+def pose_frames(move):
+    """The frames a move's poses are recorded on: Before, every step, After."""
+    return sorted({float(FIRST_FRAME), float(last_frame(move))}
+                  | {float(s.frame) for s in move.steps if s.done})
+
+
 def follow_depth(move, part):
     """How many parts a part hangs below, through its follows."""
     depth, seen, name = 0, {part.name}, part.follows
@@ -2300,6 +2329,17 @@ def follow_depth(move, part):
         depth += 1
         above_part = move.parts.get(name)
         name = above_part.follows if above_part is not None else ""
+    return depth
+
+
+def bone_depth(rig, name):
+    """How many bones a bone hangs below, as the rig is now."""
+    depth, seen = 0, set()
+    bone = rig.data.bones.get(name)
+    while bone is not None and bone.parent is not None and bone.name not in seen:
+        seen.add(bone.name)
+        depth += 1
+        bone = bone.parent
     return depth
 
 
@@ -2368,38 +2408,68 @@ def apply_parents(context, rig, data):
                 jobs.append((move, part, want))
                 parents[part.bone_name] = want
     if not jobs:
-        return 0
+        return 0, 0, []
+    # Kept on every pose of the move - Before, every step, After - and not
+    # only the bone's own keys: a part that hangs below it was recorded
+    # against wherever it stood at those, keyed or not. Not on the in-between
+    # keys a curve lays, which would stay behind as turns of their own;
+    # bake_curves lays those again after this.
+    frames = {}
     kept = {}
     for move, part, _want in jobs:
-        _action, _slot, bag = action_bits(move)
-        if bag is not None:
-            for frame in key_frames(bag, part.bone_name):
-                kept[(part.bone_name, frame)] = deformation(rig, bag, part.bone_name, frame)
-    for move, part, _want in sorted(jobs, key=lambda job: follow_depth(job[0], job[1])):
         _action, _slot, bag = action_bits(move)
         if bag is None:
             continue
         name = part.bone_name
+        prefix = bone_path(name, "")
+        turned = {p.co[0] for c in bag.fcurves if c.data_path.startswith(prefix)
+                  and not c.data_path.endswith("location") for p in c.keyframe_points}
+        frames[name] = sorted(set(pose_frames(move)) | turned)
+        for frame in frames[name]:
+            kept[(name, frame)] = deformation(rig, bag, name, frame)
+    for move, part, _want in sorted(jobs, key=lambda job: follow_depth(job[0], job[1])):
+        _action, _slot, bag = action_bits(move)
+        name = part.bone_name
+        if bag is None or name not in frames:
+            continue
         rest = rig.data.bones[name].matrix_local
         rows = {}
-        for frame in key_frames(bag, name):
+        for frame in frames[name]:
             carry = above(rig, bag, name, frame, parents=parents)
             rows[frame] = (rest.inverted_safe() @ carry.inverted_safe()
                            @ kept[(name, frame)] @ rest)
-        if rows:
-            write_basis_keys(bag, name, rig.pose.bones[name].rotation_mode, rows)
+        write_basis_keys(bag, name, rig.pose.bones[name].rotation_mode, rows)
     if not activate(context, rig):
-        return 0
+        return 0, 0, []
     bpy.ops.object.mode_set(mode="EDIT")
     edit = rig.data.edit_bones
-    for _move, part, want in jobs:
+    # Every bone that changes parent is let go first, then hung parents
+    # first. Hung one at a time in list order, a chain turned round asked a
+    # bone to hang from its own child - which Blender refuses without a word,
+    # after the keys had been worked out for the new parent.
+    for _move, part, _want in jobs:
         bone = edit.get(part.bone_name)
         if bone is not None:
             bone.use_connect = False
-            bone.parent = edit.get(want) if want else None
+            bone.parent = None
+    for move, part, want in sorted(jobs, key=lambda job: follow_depth(job[0], job[1])):
+        bone = edit.get(part.bone_name)
+        if bone is not None and want:
+            bone.parent = edit.get(want)
     bpy.ops.object.mode_set(mode="OBJECT")
     context.view_layer.update()
-    return len(jobs)
+    # Read back, so a hanging Blender would not make is said, not hidden.
+    hung, let_go, refused = 0, 0, []
+    for move, part, want in jobs:
+        bone = rig.data.bones.get(part.bone_name)
+        have = bone.parent.name if bone is not None and bone.parent is not None else ""
+        if have != want:
+            refused.append(part.name)
+        elif want in part_bones:
+            hung += 1
+        else:
+            let_go += 1
+    return hung, let_go, refused
 
 
 # ---------------------------------------------------------------------------
@@ -2432,7 +2502,9 @@ def shift_pivot(rig, move, part, shift):
     if bag is None:
         return
     offset = bone.matrix_local.to_3x3().inverted_safe() @ shift
-    frames = key_frames(bag, name)
+    # Every pose of the move as well as the bone's own keys: a follower was
+    # recorded against where this one stood at every step, keyed or not.
+    frames = sorted(set(key_frames(bag, name)) | set(pose_frames(move)))
     # Every new value worked out first: each one reads the path, which the
     # writing would change under the ones still to come.
     wanted = {}
@@ -2719,7 +2791,7 @@ def bake_curves(rig, data):
 # ---------------------------------------------------------------------------
 # the path preview: a line through where each part goes
 
-PATH_SAMPLES = 48
+PATH_SAMPLES = 96
 
 
 def trace(rig, bag, move, part):
@@ -2739,14 +2811,43 @@ def trace(rig, bag, move, part):
     middle = as_matrix(part.before) @ (sum(corners_of(obj), Vector()) / 8.0)
     world = rig.matrix_world
     into = world.inverted_safe()
-    first, last = FIRST_FRAME, last_frame(move)
-    frames = {first + (last - first) * n / float(PATH_SAMPLES)
-              for n in range(PATH_SAMPLES + 1)}
-    frames |= {f for f in key_frames(bag, name) if first <= f <= last}
+    # Sampled along the control, not the path: each bone in the chain stands
+    # on the frame its own delay, lead, ease and speeds put it on, so a
+    # follower that waits for its parent is drawn where it really goes.
+    owners = {part_bone(p): p for p in move.parts}
     out = []
-    for frame in sorted(frames):
+    for number in range(PATH_SAMPLES + 1):
+        share = number / float(PATH_SAMPLES)
+
+        def frame(bone_name, share=share):
+            owner = owners.get(bone_name)
+            return path_frame(move, owner, share) if owner is not None else FIRST_FRAME
+
         out.append(world @ deformation(rig, bag, name, frame) @ into @ middle)
     return out
+
+
+def path_frame(move, part, share):
+    """The frame of its path a part stands on with the move's own control at
+    this share: its window, its ease and the stretch speeds, as its driver
+    works them out."""
+    start, end = part_window(move, part)
+    start = round(max(0.0, min(0.98, start)), 4)
+    end = round(max(start + 0.01, min(1.0, end)), 4)
+    t = min(max((share - start) / (end - start), 0.0), 1.0)
+    if move.ease == "SMOOTH":
+        t = t * t * (3.0 - 2.0 * t)
+    elif move.ease == "IN":
+        t = t * t
+    elif move.ease == "OUT":
+        t = t * (2.0 - t)
+    points = timing_points(move)
+    if points:
+        for (c0, p0), (c1, p1) in zip(points[:-1], points[1:]):
+            if t <= c1 or (c1, p1) == points[-1]:
+                t = p0 + (p1 - p0) * ((t - c0) / (c1 - c0) if c1 > c0 else 0.0)
+                break
+    return FIRST_FRAME + t * (last_frame(move) - FIRST_FRAME)
 
 
 def drop_paths(move):
@@ -3283,6 +3384,11 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
             part.kind = "OBJECT"
             part.before = flat(obj.matrix_world)
             part.has_before = True
+        # A joint modelled hanging from a part of this move, or from another
+        # newcomer, follows it here too, as New Move does.
+        for obj in fresh:
+            if obj.parent is not None and move.parts.get(obj.parent.name) is not None:
+                move.parts[obj.name].follows = obj.parent.name
         data.report = ("{:d} object(s) added to '{:s}', where they stand now. "
                        "Press the eye beside After, put them where they should "
                        "end up, then Record After."
@@ -3558,6 +3664,11 @@ class RIGMOVES_OT_use_selected(bpy.types.Operator):
         data = rig.rigmoves
         move = data.moves[self.index]
         taken = [b.name for b in context.selected_pose_bones]
+        # Objects going out of the move come off what they were hung from to
+        # follow; bones never were.
+        for part in move.parts:
+            if part.name not in taken:
+                unhang(part)
         # Keep the timing already set for parts that stay in.
         timing = {p.name: (p.start, p.kind, p.bone_name) for p in move.parts}
         move.parts.clear()
@@ -3601,6 +3712,19 @@ class RIGMOVES_OT_record(bpy.types.Operator):
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
 
+        # What is on screen, read before anything is paused or put back: every
+        # bone as Blender is showing it - sliders live or not, parents and all
+        # - and every loose part where it stands. A loose follower hangs from
+        # the object it follows, which may be about to go back to its Before.
+        context.view_layer.update()
+        shown = {pb.name: pb.matrix @ pb.bone.matrix_local.inverted_safe()
+                 for pb in rig.pose.bones}
+        loose_seen = {}
+        for part in loose_parts(move):
+            obj = bpy.data.objects.get(part.name)
+            if obj is not None:
+                loose_seen[part.name] = obj.matrix_world.copy()
+
         # A bone under a live Action constraint cannot be posed - the
         # constraint writes it again on every update - so what is on screen
         # would not be what gets recorded. Switch ours off first and say so,
@@ -3625,16 +3749,11 @@ class RIGMOVES_OT_record(bpy.types.Operator):
         # while the object's own rest has moved to where it was dropped. The
         # slider then starts at the wrong end and travels twice as far.
         #
-        # A drag is read as what was on screen: the object's own transform,
-        # carried by its bone - and the bones above it, for a part that
-        # follows another. All of them are read before any bone moves, then
-        # posed parents first, so a follower is set against where its parent
-        # has just been put.
-        dragged, touched = 0, set()
-        posed = {pb.name: pb.matrix_basis.copy() for pb in rig.pose.bones}
+        # A drag is read where it was seen: the object's own transform,
+        # carried by its bone and the bones above it as they were showing.
         world_rig = rig.matrix_world
         drops = []
-        for part in follow_order(move, bound_parts(move)):
+        for part in bound_parts(move):
             # A rider is never posed: its path is its leader's, copied at
             # every Build, which also puts a dragged one back.
             if part.leader:
@@ -3642,35 +3761,22 @@ class RIGMOVES_OT_record(bpy.types.Operator):
             obj, world = hand_moved(part)
             if world is None:
                 continue
-            seen = (world_rig @ deformation(rig, None, part_bone(part), frame, posed)
-                    @ world_rig.inverted_safe() @ world)
-            drops.append((part, obj, seen))
-        _action, _slot, path = action_bits(move)
-        fresh = {}
-        for part, obj, seen in drops:
-            touched.add(part_bone(part))
-            obj.matrix_world = as_matrix(part.before)
-            if self.which == "AFTER":
-                part.after = flat(seen)
-                part.has_after = True
-            carry = above(rig, path, part_bone(part), frame, fresh)
-            fresh[part_bone(part)] = pose_bone_at(rig, part, seen, carry)
-            dragged += 1
-        if dragged:
-            context.view_layer.update()
+            carried = shown.get(part_bone(part), Matrix.Identity(4))
+            drops.append((part, obj, world_rig @ carried @ world_rig.inverted_safe() @ world))
+        touched = {part_bone(part) for part, _obj, _seen in drops}
 
         # Objects with no bone yet are read straight off the object, which is
         # the point: they are moved by hand in object mode, not posed.
         loose = loose_parts(move) if self.which != "STEP" else []
         for part in loose:
-            obj = bpy.data.objects.get(part.name)
-            if obj is None:
+            seen = loose_seen.get(part.name)
+            if seen is None:
                 continue
             if self.which == "BEFORE":
-                part.before = flat(obj.matrix_world)
+                part.before = flat(seen)
                 part.has_before = True
             else:
-                part.after = flat(obj.matrix_world)
+                part.after = flat(seen)
                 part.has_after = True
             count += 1
         # Only what was actually touched this time. A part already in the
@@ -3695,6 +3801,27 @@ class RIGMOVES_OT_record(bpy.types.Operator):
                 bones.add(name)
             else:
                 kept += 1
+
+        # The dragged parts posed last, parents first by the bones that carry
+        # them now - not by Follows, which waits on a Build - and each against
+        # the pose its parent is about to be keyed at: its new one if it was
+        # dragged too, the one it is showing if it is keyed as it stands, its
+        # path otherwise. Solved against anything else, a follower would be
+        # keyed somewhere it was not seen.
+        _action, _slot, path = action_bits(move)
+        fresh = {name: rig.pose.bones[name].matrix_basis.copy()
+                 for name in bones - touched if name in rig.pose.bones}
+        dragged = 0
+        for part, obj, seen in sorted(drops, key=lambda d: bone_depth(rig, part_bone(d[0]))):
+            obj.matrix_world = as_matrix(part.before)
+            if self.which == "AFTER":
+                part.after = flat(seen)
+                part.has_after = True
+            carry = above(rig, path, part_bone(part), frame, fresh)
+            fresh[part_bone(part)] = pose_bone_at(rig, part, seen, carry)
+            dragged += 1
+        if dragged:
+            context.view_layer.update()
         if bones:
             count += key_pose(rig, move, frame, only=bones)
         move.frames_applied = max(1, move.frames)
@@ -3867,7 +3994,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             context.view_layer.update()
         bound = bind_loose(context, rig, data)
         # Followers hung from the parts they follow, their poses kept.
-        hung = apply_parents(context, rig, data)
+        hung, let_go, refused = apply_parents(context, rig, data)
         # Every bone onto its pivot, then every curve onto its path - its ends
         # pinned to wherever the pivot now starts and stops.
         pivoted = apply_pivots(context, rig, data)
@@ -3977,6 +4104,13 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             move.built = True
 
         set_paused(rig, data, False)
+        # Sliders live again, so whatever pose the bones were left in - by the
+        # eye, by a Record - is hidden under them. Cleared, or the next Record
+        # would count a pose nobody can see, or key one into a part nobody
+        # touched. Only bones this add-on made: a hand-built rig keeps its own.
+        for bone in rig.data.bones:
+            if bone.get(PART_MARK) and bone.name in rig.pose.bones:
+                rig.pose.bones[bone.name].matrix_basis = Matrix()
         # The wire box these handles used to wear kept a fake user, so it
         # would sit in the file for ever once nothing wore it.
         stale_shape = bpy.data.objects.get("RM_handle_shape")
@@ -4025,11 +4159,19 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                             "move them.".format(keyed_objects, keyed_bones))
         if hung:
             data.report += " {:d} part(s) hung from the part they follow.".format(hung)
+        if let_go:
+            data.report += " {:d} part(s) let go to move on their own.".format(let_go)
+        if refused:
+            data.report += (" Blender would not hang {:s} where it follows."
+                            .format(", ".join(refused[:3])))
+            warn_parents = True
+        else:
+            warn_parents = False
         if pivoted:
             data.report += " {:d} turned about a new pivot.".format(pivoted)
         if laid:
             data.report += " {:d} path(s) laid along a curve.".format(laid)
-        warn = False
+        warn = warn_parents
         if still_keyed:
             data.report += (" {:s} is animated by hand and was left as it is."
                             .format(", ".join(still_keyed[:3])))
@@ -4144,6 +4286,15 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
         if move is None:
             return {"CANCELLED"}
         chosen = chosen_parts(context, move)
+        # A follower's pivot goes where the part it follows carries it; a curve
+        # fixed in the world would pull it off its parent's joint.
+        if chosen and all(p.follows for p in chosen):
+            data.report = ("'{:s}' follows '{:s}' and goes where it is carried: "
+                           "curve the path of the part it follows instead.".format(
+                               short(chosen[0].name, 16), short(chosen[0].follows, 16)))
+            self.report({"WARNING"}, data.report)
+            return {"CANCELLED"}
+        chosen = [p for p in chosen if not p.follows]
         parts = [p for p in chosen if not curve_alive(p.path_curve)]
         if not parts:
             data.report = ("'{:s}' has a curve already: press Edit beside it.".format(
@@ -4441,7 +4592,10 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
             pose_bone.constraints.remove(constraint)
         # Objects this move bound get their freedom back: the group, the
         # modifier and the parent all go, and they stay exactly where they are.
+        # One never bound only comes off the object it was hung from to follow.
         for part in move.parts:
+            if part.kind == "OBJECT" and not part.bone_name:
+                unhang(part)
             if part.kind != "OBJECT" or not part.bone_name:
                 continue
             if unbind_object(rig, part):

@@ -180,9 +180,15 @@ what is recorded. Leave a follower where it was carried and it rides along
 unbent; drag it from there to bend its own joint. After a Build it is the
 bones that carry it: a part is read where it is seen, carried or not.
 Changing **Follows** on a built move waits for **Build**, which says so in
-red. Objects already parented to one another in the file - a finger
-modelled joint by joint - follow the same way without being asked, and are
-hung from their old parents again if the move is removed.
+red. A pick that cannot be - the part itself, a rider, a loop - is turned
+down with the reason, and the choice it had stays. Objects already parented
+to one another in the file - a finger modelled joint by joint - follow the
+same way without being asked, by **New Move** or **Add To This Group**, and
+are hung from their old parents again if the move is removed.
+
+A follower goes where it is carried, so its path is not curved: curve the
+part it follows instead, and a part with a curved path straightens it
+before it follows.
 
 ### Several moves under one control
 
@@ -618,6 +624,34 @@ and one lifted 1 m:
   with objects, and goes back off when there is nothing to draw.
 - **Curve the Path on a part that had a curve** said to select the part. It
   says the part has one already, and where to edit it.
+- **A pose hidden under live sliders was counted into the next drag.** The
+  eye, or a Record, leaves the bones posed, and Build only hides that under
+  the sliders. A part dragged to z 2 played at z 3. Record reads what is on
+  screen before it pauses anything now, and Build clears those poses.
+- **Turning a chain round on a built move lost its poses for good.** The
+  bones were hung one at a time, so one was asked to hang from its own child,
+  which Blender refuses without a word - after its keys had been worked out
+  for the new parent. Every bone is let go first and hung parents first now,
+  and read back.
+- **A follower dragged on a step was keyed against the wrong parent pose** -
+  its parent's path, while the parent was keyed at the pose it was showing.
+  It is solved against the pose its parent is about to be keyed at, parents
+  first by the bones that carry them, not by a Follows change still waiting.
+- **A loose follower of a built part was pulled back before it was read.**
+  Record put the dragged parent back on its Before first, carrying the
+  follower with it. Every loose part is read where it was seen, first.
+- **A new pivot, or a Follows change, moved the steps of the parts below.**
+  A parent was re-keyed only on its own keys, and a follower's step stood on
+  where the parent was between them. Every pose frame of the move is kept
+  now.
+- **A slip in the Follows list undid the choice that was there**, and the
+  object's own parent was forgotten. The choice it had stays now, and the
+  parent is given back when following stops or the move goes.
+- **Removing a move before its first Build left its objects hung on one
+  another.** They are let go.
+- **The path preview drew a delayed follower where it never goes.** It is
+  traced along the control now, each joint on its own frame.
+- **Build said parts were hung when they had been let go.** It says which.
 - **A part dragged while its bone was posed was recorded somewhere else.**
   Record read a dragged object's own transform - but with its bone posed, by
   the eye on After or by a Record just before, the part is seen carried by

@@ -241,6 +241,19 @@ class TestObjects(RigMovesCase):
         scene.frame_set(21)
         self.assertAlmostEqual(centre(self.arm).z, 1.5, places=4)
 
+    def test_drag_after_the_eye_is_read_where_it_is_seen(self):
+        # The eye leaves the bones posed; Build hides that under live sliders.
+        bpy.ops.rigmoves.show(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.arm.location.z = 3.0
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(centre(self.arm).z, 3.0, places=4)
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.assertAlmostEqual(centre(self.arm).z, 3.0, places=4)
+
     def test_animate_survives_a_longer_rail(self):
         bpy.context.scene.frame_set(1)
         self.move.play_frames = 40
@@ -984,6 +997,124 @@ class TestFollowers(RigMovesCase):
                                                  for v in self.segments[2].data.vertices]),
                         TOLERANCE)
 
+    def built_curl(self):
+        self.chain()
+        self.close()
+        bpy.ops.rigmoves.build()
+
+    def test_a_chain_turned_round(self):
+        self.built_curl()
+        parts = self.move.parts
+        for name in ("Seg2", "Seg3"):
+            parts[name].follows = ""
+        parts["Seg2"].follows = "Seg3"
+        parts["Seg1"].follows = "Seg2"
+        bpy.ops.rigmoves.build()
+        self.assertFalse(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        bones = rig().data.bones
+        self.assertEqual(bones[parts["Seg1"].bone_name].parent.name, parts["Seg2"].bone_name)
+        self.check_curl(1.0, 30.0)
+        self.check_curl(0.0, 0.0)
+        bpy.ops.rigmoves.build()
+        self.check_curl(1.0, 30.0)
+
+    def test_dragged_follower_on_a_step_lands_where_seen(self):
+        self.built_curl()
+        bpy.ops.rigmoves.show(index=0, which="AFTER")
+        bpy.ops.rigmoves.add_step(index=0)
+        bpy.context.view_layer.update()
+        # Seen with its own joint bent 60 instead of 30.
+        wanted = (self.bent(30.0)[0] @ self.homes[0].inverted()
+                  @ Matrix.Translation(self.KNUCKLES[1])
+                  @ Matrix.Rotation(math.radians(60.0), 4, "Y")
+                  @ Matrix.Translation(-self.KNUCKLES[1]) @ self.homes[1])
+        bone = self.move.parts["Seg2"].bone_name
+        pose_bone = rig().pose.bones[bone]
+        carried = (rig().matrix_world @ pose_bone.matrix @ pose_bone.bone.matrix_local.inverted()
+                   @ rig().matrix_world.inverted())
+        self.segments[1].matrix_world = carried.inverted() @ wanted
+        bpy.context.view_layer.update()
+        expected = [wanted @ v.co for v in self.segments[1].data.vertices]
+        self.assertLess(drift(self.segments[1], expected), TOLERANCE)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="STEP", step=0), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertLess(drift(self.segments[1], expected), TOLERANCE)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        self.assertLess(drift(self.segments[1], expected), TOLERANCE)
+
+    def step_on(self, number, degrees):
+        """Record a step with one segment dragged to bend its joint further."""
+        bpy.ops.rigmoves.add_step(index=0)
+        bpy.ops.rigmoves.pause(off=True)
+        bpy.context.view_layer.update()
+        name = self.move.parts["Seg{:d}".format(number + 1)].bone_name
+        pose_bone = rig().pose.bones[name]
+        carried = (rig().matrix_world @ pose_bone.matrix @ pose_bone.bone.matrix_local.inverted()
+                   @ rig().matrix_world.inverted())
+        knuckle = carried @ self.KNUCKLES[number]
+        turn = (Matrix.Translation(knuckle) @ Matrix.Rotation(math.radians(degrees), 4, "Y")
+                @ Matrix.Translation(-knuckle))
+        self.segments[number].matrix_world = carried.inverted() @ turn @ carried @ self.homes[number]
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="STEP", step=0), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        return [world_points(segment) for segment in self.segments]
+
+    def test_a_new_pivot_keeps_a_followers_step(self):
+        self.built_curl()
+        seen = self.step_on(1, 40.0)
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"FINISHED"})
+        drive(self.move, 0.5)
+        for segment, points in zip(self.segments, seen):
+            self.assertLess(drift(segment, points), TOLERANCE, segment.name)
+
+    def test_letting_go_keeps_a_step_below(self):
+        self.built_curl()
+        seen = self.step_on(2, 40.0)
+        self.move.parts["Seg2"].follows = ""
+        bpy.ops.rigmoves.build()
+        self.assertIn("let go", rig().rigmoves.report)
+        drive(self.move, 0.5)
+        for segment, points in zip(self.segments, seen):
+            self.assertLess(drift(segment, points), TOLERANCE, segment.name)
+
+    def test_followers_and_curves_do_not_mix(self):
+        self.built_curl()
+        select(self.segments[1])
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"CANCELLED"})
+        self.assertIn("carried", rig().rigmoves.report)
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.move.parts["Seg1"].follows = "Seg3"
+        self.assertEqual(self.move.parts["Seg1"].follows, "")
+
+    def test_a_slip_keeps_the_choice_it_had(self):
+        self.chain()
+        self.move.parts["Seg3"].follows = "Seg3"
+        self.assertEqual(self.move.parts["Seg3"].follows, "Seg2")
+        self.assertEqual(self.segments[2].parent, self.segments[1])
+
+    def test_remove_before_a_build_lets_go_of_the_objects(self):
+        self.chain()
+        bpy.ops.rigmoves.remove(index=0)
+        for segment in self.segments[1:]:
+            self.assertIsNone(segment.parent)
+            self.assertIsNone(segment.get(rigmoves.FOLLOW_MARK))
+
+    def test_paths_with_delays_go_where_the_parts_go(self):
+        self.built_curl()
+        self.move.parts["Seg2"].start = 0.25
+        self.move.parts["Seg3"].start = 0.5
+        bpy.ops.rigmoves.show_paths(index=0, show=True)
+        line = [Vector(p.co[:3]) for p in self.move.paths_object.data.splines[2].points]
+        for number in range(11):
+            drive(self.move, number / 10.0)
+            here = centre(self.segments[2])
+            self.assertLess(min((here - p).length for p in line), 0.02)
+
     def test_impossible_choices_are_turned_down(self):
         self.chain()
         parts = self.move.parts
@@ -1042,6 +1173,65 @@ class TestModelledHierarchy(RigMovesCase):
         self.assertEqual(one.parent, hand)
         self.assertEqual(two.parent, one)
         self.assertAlmostEqual(two.matrix_world.translation.x, 1.5, places=5)
+
+
+class TestFollowersJoining(RigMovesCase):
+    """A tip added to a finger that is already built."""
+
+    def test_loose_follower_of_a_built_part_is_recorded_where_seen(self):
+        base = cube("Base", (0.5, 0.0, 0.0))
+        tip = cube("Tip", (1.5, 0.0, 0.0))
+        select(base)
+        bpy.ops.rigmoves.new_move()
+        base.location.z += 0.5
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        move = rig().rigmoves.moves[0]
+        select(tip, base)
+        bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name)
+        move.parts["Tip"].follows = "Base"
+        self.assertEqual(tip.parent, base)
+        drive(move, 0.0)
+        # Dragging the base object carries the tip along on screen.
+        base.location.z += 2.0
+        bpy.context.view_layer.update()
+        seen = world_points(tip)
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        drive(move, 1.0)
+        self.assertLess(drift(tip, seen), TOLERANCE)
+
+    def test_add_to_group_takes_up_a_modelled_hierarchy(self):
+        one = cube("One", (0.5, 0.0, 0.0))
+        two = cube("Two", (1.5, 0.0, 0.0))
+        rigmoves.keep_world(two, one)
+        select(one)
+        bpy.ops.rigmoves.new_move()
+        select(two, one)
+        bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name)
+        self.assertEqual(rig().rigmoves.moves[0].parts["Two"].follows, "One")
+
+    def test_following_keeps_the_objects_own_parent(self):
+        hand = cube("Hand", (0.0, 0.0, -3.0))
+        one = cube("One", (0.5, 0.0, 0.0))
+        two = cube("Two", (1.5, 0.0, 0.0))
+        rigmoves.keep_world(two, hand)
+        select(one, two)
+        bpy.ops.rigmoves.new_move()
+        move = rig().rigmoves.moves[0]
+        move.parts["Two"].follows = "One"
+        self.assertEqual(two.parent, one)
+        move.parts["Two"].follows = ""
+        self.assertEqual(two.parent, hand)
+        move.parts["Two"].follows = "One"
+        one.location.z += 1.0
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        drive(move, 0.0)
+        bpy.ops.rigmoves.remove(index=0)
+        self.assertEqual(two.parent, hand)
 
 
 class TestCombined(RigMovesCase):
