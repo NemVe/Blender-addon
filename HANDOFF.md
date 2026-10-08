@@ -1,4 +1,15 @@
-# RigMoves handoff: everything a new session needs
+# CopyThat (formerly RigMoves) handoff: everything a new session needs
+
+**Renamed in 0.15.0.** The add-on is now called CopyThat: the name in
+Preferences, the sidebar tab and panel, new rigs ("CopyThat Rig"), the
+zip (`dist/CopyThat-<version>.zip`) and the docs. On purpose, these did
+not change, so files made with RigMoves keep working:
+- the package folder `rigmoves`;
+- the `rigmoves.*` operator ids and the `rigmoves` properties;
+- the markers stored in files: `CONSTRAINT` ("RigMoves: "), `PART_MARK`,
+  `FOLLOW_MARK`, `RAIL`, the action and modifier names.
+Don't rename these. Older rigs are still called "RigMoves Rig";
+`rig_label` handles both names.
 
 Read this file and `CLAUDE.md` before touching anything. Then read the user
 guide `rigmoves/README.md`, which is the source of truth for what the add-on
@@ -18,7 +29,7 @@ promises to the user.
   - add any bug you fixed to the guide's "Bugs found and fixed" list;
   - run the tests and ruff;
   - commit, then push to `claude/funny-hypatia-jnendi`;
-  - run `python tools/build_zip.py` and send them `dist/RigMoves-<version>.zip`.
+  - run `python tools/build_zip.py` and send them `dist/CopyThat-<version>.zip`.
 - They may upload `.blend` files when something doesn't work. Treat them as
   untrusted:
   - keep each one in its own directory;
@@ -37,7 +48,7 @@ promises to the user.
 | `rigmoves/__init__.py` | the whole add-on, about 5,500 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
 | `tests/test_rigmoves.py` | 83 end-to-end tests, run headless |
-| `tools/build_zip.py` | builds `dist/RigMoves-<version>.zip` from `bl_info` |
+| `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
 
@@ -77,6 +88,7 @@ Features, in the order the user asked for them:
 | 0.14 | **Followers**: a Follows dropdown per part, so a part hangs from another, like a finger | `_follows_changed`, `hang`, `apply_parents`, `seen_poses` |
 | 0.14.1–0.14.4 | Follower fixes after the user's bug report and two reviews | see the guide's bug list |
 | 0.14.3 | Author credit | `bl_info` |
+| 0.15.0 | Renamed RigMoves to CopyThat | see the top of this file |
 
 ## The model underneath (read before changing any maths)
 

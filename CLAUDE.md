@@ -1,5 +1,10 @@
-# RigMoves - notes for Claude
+# CopyThat (formerly RigMoves) - notes for Claude
 
+- The add-on was renamed from RigMoves to CopyThat in 0.15.0. Only shown
+  names changed: the folder `rigmoves`, the `rigmoves.*` operators and
+  properties, and the markers stored in files ("RigMoves: " constraints,
+  "RigMoves part", "RigMoves follows", "RigMoves rail") stay, so older
+  .blend files keep working. Don't rename them.
 - The add-on is one file, `rigmoves/__init__.py`, with its user guide
   `rigmoves/README.md`. Keep the guide in step with what the panel shows.
 - Targets Blender 4.4+, which keeps action curves under slots, layers and

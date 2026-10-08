@@ -1,4 +1,4 @@
-"""RigMoves - record how a machine moves between two poses, get one slider.
+"""CopyThat - record how a machine moves between two poses, get one slider.
 
 An experiment. It shares no code with RigKit / Rigthebot and never touches it.
 
@@ -30,11 +30,11 @@ from mathutils import Euler, Matrix, Quaternion, Vector
 from mathutils.geometry import interpolate_bezier
 
 bl_info = {
-    "name": "RigMoves - Record a Move, Get a Slider",
+    "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 14, 4),
+    "version": (0, 15, 0),
     "blender": (4, 4, 0),
-    "location": "View3D > Sidebar > Moves",
+    "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
                    "delays. Works on loose objects with no rig at all, and makes one. "
                    "Other objects can ride along, each from its own place",
@@ -1755,8 +1755,8 @@ def ensure_rig(context, chosen, force_new=False):
     else:
         centre, reach = Vector((0.0, 0.0, 0.0)), 1.0
 
-    armature = bpy.data.armatures.new("RigMoves")
-    rig = bpy.data.objects.new("RigMoves Rig", armature)
+    armature = bpy.data.armatures.new("CopyThat")
+    rig = bpy.data.objects.new("CopyThat Rig", armature)
     context.collection.objects.link(rig)
     rig.show_in_front = True
     if context.object is not None and context.object.mode != "OBJECT":
@@ -3465,7 +3465,11 @@ def newcomers(context, rig):
 def rig_label(rig):
     """A rig's name, short enough to sit on a button beside a move's."""
     name = rig.name
-    return name[len("RigMoves "):] if name.startswith("RigMoves ") else name
+    # Rigs made before the rename are still called "RigMoves Rig".
+    for prefix in ("CopyThat ", "RigMoves "):
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
 
 
 def working_rigs(context):
@@ -5081,10 +5085,10 @@ def wrapped(text, width=34, most=6):
 
 class RIGMOVES_PT_panel(bpy.types.Panel):
     bl_idname = "RIGMOVES_PT_panel"
-    bl_label = "Moves"
+    bl_label = "CopyThat"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Moves"
+    bl_category = "CopyThat"
 
     # No poll on purpose. A panel that vanishes when the wrong thing is
     # clicked reads as the add-on being broken, and the one moment somebody

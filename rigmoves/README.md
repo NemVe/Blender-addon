@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.14.4
+# CopyThat (experiment) - v0.15.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,10 +12,13 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 By **NemVe3D** - <https://creators.sa/nemve>
 
+Formerly called RigMoves. Installing CopyThat replaces it, and files made
+with RigMoves keep working: the panel is now the **CopyThat** tab.
+
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.4.zip`,
-tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
+Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.15.0.zip`,
+tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
 
 ## Use
 

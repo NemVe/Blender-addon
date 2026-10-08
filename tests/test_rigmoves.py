@@ -1,4 +1,4 @@
-"""RigMoves, driven end to end in Blender without a window.
+"""CopyThat, driven end to end in Blender without a window.
 
 Run from the repository root, with Blender as a Python module (`pip install
 bpy`, see README.md):
@@ -101,7 +101,7 @@ def record_move(objects, pose):
     return before, after
 
 
-class RigMovesCase(unittest.TestCase):
+class CopyThatCase(unittest.TestCase):
 
     def setUp(self):
         bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -112,7 +112,7 @@ class RigMovesCase(unittest.TestCase):
                 if "constraints[" in d.data_path]
 
 
-class TestObjects(RigMovesCase):
+class TestObjects(CopyThatCase):
 
     def setUp(self):
         super().setUp()
@@ -407,7 +407,7 @@ class TestObjects(RigMovesCase):
             self.assertLess(drift(obj, before), TOLERANCE)
 
 
-class TestRiders(RigMovesCase):
+class TestRiders(CopyThatCase):
     """One petal recorded, another riding along from its own place.
 
     The leader is turned 20 degrees and the rider 110 and half its size, so
@@ -538,7 +538,7 @@ class TestRiders(RigMovesCase):
         self.assertLess(drift(self.rider, self.expected(Matrix())), TOLERANCE)
 
 
-class TestPivot(RigMovesCase):
+class TestPivot(CopyThatCase):
     """A lid hinged on its top back edge, opened a quarter turn about it.
 
     Recorded by its two poses only, which are the same whatever the pivot -
@@ -639,7 +639,7 @@ class TestPivot(RigMovesCase):
         self.assertLess(drift(other, expected), TOLERANCE)
 
 
-class TestMirror(RigMovesCase):
+class TestMirror(CopyThatCase):
     """A wing that moves out and tips, and a second one that mirrors it."""
 
     def setUp(self):
@@ -762,7 +762,7 @@ class TestMirror(RigMovesCase):
             self.assertLess(drift(other, expected), 2e-3)
 
 
-class TestCurve(RigMovesCase):
+class TestCurve(CopyThatCase):
     """A box slid from A to B, then sent round an obstacle by a curve."""
 
     def setUp(self):
@@ -860,7 +860,7 @@ class TestCurve(RigMovesCase):
         self.assertLess((centre(self.box) - Vector((2.0, 0.0, 0.5))).length, TOLERANCE)
 
 
-class TestFollowers(RigMovesCase):
+class TestFollowers(CopyThatCase):
     """A finger: three segments end to end, each hinged on its knuckle and
     hanging from the one before. Closed, every joint bends 30 degrees."""
 
@@ -1281,7 +1281,7 @@ class TestFollowers(RigMovesCase):
         self.assertLess((Vector(tip[-1].co[:3]) - middle).length, TOLERANCE)
 
 
-class TestModelledHierarchy(RigMovesCase):
+class TestModelledHierarchy(CopyThatCase):
     """A finger already parented joint by joint in the file."""
 
     def test_parents_become_follows_and_come_back(self):
@@ -1309,7 +1309,7 @@ class TestModelledHierarchy(RigMovesCase):
         self.assertAlmostEqual(two.matrix_world.translation.x, 1.5, places=5)
 
 
-class TestFollowersJoining(RigMovesCase):
+class TestFollowersJoining(CopyThatCase):
     """A tip added to a finger that is already built."""
 
     def test_loose_follower_of_a_built_part_is_recorded_where_seen(self):
@@ -1368,7 +1368,7 @@ class TestFollowersJoining(RigMovesCase):
         self.assertEqual(two.parent, hand)
 
 
-class TestFollowersAdded(RigMovesCase):
+class TestFollowersAdded(CopyThatCase):
     """A finger put together around a part that is already built."""
 
     KNUCKLES = TestFollowers.KNUCKLES
@@ -1515,7 +1515,7 @@ class TestFollowersAdded(RigMovesCase):
         self.assertNotIn("After not recorded", rig().rigmoves.report)
 
 
-class TestCombined(RigMovesCase):
+class TestCombined(CopyThatCase):
 
     def test_combined_control_plays_members_in_order(self):
         first = cube("First", (0.0, 0.0, 1.0))

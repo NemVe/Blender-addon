@@ -2,7 +2,7 @@
 
     python tools/build_zip.py
 
-Writes dist/RigMoves-<version>.zip, the version read from bl_info, so the
+Writes dist/CopyThat-<version>.zip, the version read from bl_info, so the
 file name and the add-on it holds can never disagree. Needs no Blender.
 """
 
@@ -25,7 +25,7 @@ def version():
 
 
 def main():
-    out = ROOT / "dist" / "RigMoves-{:s}.zip".format(version())
+    out = ROOT / "dist" / "CopyThat-{:s}.zip".format(version())
     out.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(PACKAGE.rglob("*")):

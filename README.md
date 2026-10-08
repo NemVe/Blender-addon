@@ -1,4 +1,6 @@
-# RigMoves
+# CopyThat
+
+Formerly called RigMoves.
 
 A Blender add-on: move the parts of a machine by hand, record where they were
 and where they ended up, and get one control that plays it. The user guide is
@@ -12,9 +14,9 @@ By **NemVe3D** - <https://creators.sa/nemve>
 
     python tools/build_zip.py
 
-writes `dist/RigMoves-<version>.zip`. In Blender: Edit > Preferences > Add-ons >
+writes `dist/CopyThat-<version>.zip`. In Blender: Edit > Preferences > Add-ons >
 Install from Disk, pick the zip, tick it on. The panel is in the 3D view
-sidebar (**N**), tab **Moves**.
+sidebar (**N**), tab **CopyThat**.
 
 ## What is where
 
