@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.14.0
+# RigMoves (experiment) - v0.14.1
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.1.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -174,11 +174,12 @@ joint turns about its own knuckle while the joint before carries it, so the
 finger curls instead of its pieces sliding apart. **Timing** still gives each
 segment a delay of its own - the tip can wait for the base.
 
-Before the first Build a follower hangs from the object it follows, so
-dragging the first segment brings the others along on screen, and that is
-what is recorded. Leave a follower where it was carried and it rides along
-unbent; drag it from there to bend its own joint. After a Build it is the
-bones that carry it: a part is read where it is seen, carried or not.
+A follower's object hangs from the object it follows, before the first
+Build and after it, so dragging the first segment always brings the others
+along on screen - and that is what is recorded. Leave a follower where it
+was carried and it rides along unbent; drag it from there to bend its own
+joint. The bones play the move; the objects hanging from one another only
+keep the dragging honest.
 Changing **Follows** on a built move waits for **Build**, which says so in
 red. A pick that cannot be - the part itself, a rider, a loop - is turned
 down with the reason, and the choice it had stays. Objects already parented
@@ -624,6 +625,10 @@ and one lifted 1 m:
   with objects, and goes back off when there is nothing to draw.
 - **Curve the Path on a part that had a curve** said to select the part. It
   says the part has one already, and where to edit it.
+- **After a Build, dragging the leader left its followers behind.** Only
+  the bones hung from one another once built; the objects all hung from the
+  rig, so the first segment moved alone and there was no closed finger to
+  record. A follower's object hangs from its leader's after a Build too.
 - **A pose hidden under live sliders was counted into the next drag.** The
   eye, or a Record, leaves the bones posed, and Build only hides that under
   the sliders. A part dragged to z 2 played at z 3. Record reads what is on

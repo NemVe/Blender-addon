@@ -32,7 +32,7 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
     "author": "AutoRigger experiments",
-    "version": (0, 14, 0),
+    "version": (0, 14, 1),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -438,7 +438,7 @@ def handle_place(rig, names):
         points.append(rig.matrix_world @ bone.tail_local)
         # The bone of a bound object stands at its origin and says nothing
         # about how big it is, so the object's own corners are what decide.
-        for child in rig.children:
+        for child in rig.children_recursive:
             if child.type == "MESH" and child.vertex_groups.get(name) is not None:
                 points.extend(child.matrix_world @ c for c in corners_of(child))
     if not points:
@@ -771,7 +771,7 @@ def _follows_changed(self, context):
     """
     if not self.follows:
         self.follows_kept = ""
-        hang_loose(self)
+        hang(self)
         return
     rig = self.id_data
     move = holder_of(rig, self)
@@ -803,7 +803,7 @@ def _follows_changed(self, context):
         self.follows = self.follows_kept
         return
     self.follows_kept = self.follows
-    hang_loose(self)
+    hang(self)
 
 
 FOLLOW_MARK = "RigMoves follows"
@@ -819,20 +819,28 @@ def keep_world(obj, parent):
     obj.matrix_world = world
 
 
-def hang_loose(part):
-    """While a part is still a loose object, let it hang from the object it
-    follows - so dragging that one carries it along, and what is recorded is
-    what was seen. The first Build takes this over with bones."""
-    if part.kind != "OBJECT" or part.bone_name:
+def hang(part):
+    """Let a part's object hang from the object of the part it follows, so
+    that dragging that one carries it along on screen - and what is recorded
+    is what was seen.
+
+    Before the first Build that is all that carries it. After it the bones
+    play the move, but the object still hangs there: dragged off its Before
+    the leader would otherwise leave its followers standing, and a pose that
+    cannot be seen cannot be recorded. A part that stops following goes back
+    to what held it - the rig, once bound; its own old parent before.
+    """
+    if part.kind != "OBJECT":
         return
     obj = bpy.data.objects.get(part.name)
     if obj is None:
         return
     target = bpy.data.objects.get(part.follows) if part.follows else None
-    if target is not None:
+    if target is not None and target is not obj:
         if obj.parent is not target:
             # The parent it had of its own is remembered, to be given back.
-            if obj.parent is not None and not obj.get(FOLLOW_MARK):
+            if (not part.bone_name and obj.parent is not None
+                    and not obj.get(FOLLOW_MARK)):
                 part.home_parent = obj.parent.name
             keep_world(obj, target)
             obj[FOLLOW_MARK] = True
@@ -840,15 +848,40 @@ def hang_loose(part):
         unhang(part)
 
 
+def rig_holding(obj):
+    """The rig a bound object's Armature modifier points at."""
+    for modifier in obj.modifiers:
+        if modifier.type == "ARMATURE" and modifier.object is not None:
+            return modifier.object
+    return None
+
+
 def unhang(part):
-    """Take a loose object off the parent hang_loose gave it, and give it back
-    the one it had of its own, if any."""
+    """Take an object off the part it was hung from to follow, and give it to
+    what held it before: the rig if it is bound, else the parent it had of
+    its own, if any."""
     obj = bpy.data.objects.get(part.name)
     if obj is None or not obj.get(FOLLOW_MARK):
         return
-    home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
-    keep_world(obj, home if home is not obj else None)
+    if part.bone_name and rig_holding(obj) is not None:
+        keep_world(obj, rig_holding(obj))
+    else:
+        home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+        keep_world(obj, home if home is not obj else None)
     del obj[FOLLOW_MARK]
+
+
+def hang_objects(context, data):
+    """Hang every bound follower's object from its leader's, parents first.
+
+    Binding hangs a new part's object from the rig; this hangs it on from the
+    part it follows, standing where it stands.
+    """
+    for move in data.moves:
+        for part in follow_order(move, bound_parts(move)):
+            if not part.leader:
+                hang(part)
+    context.view_layer.update()
 
 
 AXES = ("X", "Y", "Z")
@@ -1260,8 +1293,10 @@ def unbind_object(rig, part):
     group = obj.vertex_groups.get(part.bone_name)
     if group is not None:
         obj.vertex_groups.remove(group)
-    if obj.parent is rig:
+    if obj.parent is rig or obj.get(FOLLOW_MARK):
         obj.parent = None
+    if obj.get(FOLLOW_MARK):
+        del obj[FOLLOW_MARK]
     obj.matrix_world = world
     # Hung back from whatever it hung from before the rig took it.
     home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
@@ -1545,10 +1580,13 @@ def reseat_bound(data, move=None):
     moves = [move] if move is not None else list(data.moves)
     count = 0
     for one in moves:
-        for part in bound_parts(one):
+        # Parents first: a follower's object hangs from its leader's, so
+        # putting the leader back moves it, and it is only then put right.
+        for part in follow_order(one, bound_parts(one)):
             obj, world = hand_moved(part)
             if obj is not None and world is not None:
                 obj.matrix_world = as_matrix(part.before)
+                bpy.context.view_layer.update()
                 count += 1
     return count
 
@@ -1796,7 +1834,7 @@ def bind_loose(context, rig, data):
     if not activate(context, rig):
         return 0
     # Out of any object hierarchy first - the user's own, remembered to give
-    # back, or the one hang_loose made - or standing a parent on its Before
+    # back, or the one hang made - or standing a parent on its Before
     # would carry its children off theirs. Bones carry them from here.
     for _move, pending in jobs:
         for part in pending:
@@ -3283,7 +3321,7 @@ def working_rigs(context):
         data = getattr(obj, "rigmoves", None)
         if data is None or not len(data.moves):
             continue
-        if len(obj.children) or any(p.kind != "OBJECT"
+        if len(obj.children_recursive) or any(p.kind != "OBJECT"
                                     for m in data.moves for p in m.parts):
             out.append(obj)
     return out
@@ -3814,6 +3852,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
         dragged = 0
         for part, obj, seen in sorted(drops, key=lambda d: bone_depth(rig, part_bone(d[0]))):
             obj.matrix_world = as_matrix(part.before)
+            context.view_layer.update()
             if self.which == "AFTER":
                 part.after = flat(seen)
                 part.has_after = True
@@ -3995,6 +4034,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         bound = bind_loose(context, rig, data)
         # Followers hung from the parts they follow, their poses kept.
         hung, let_go, refused = apply_parents(context, rig, data)
+        hang_objects(context, data)
         # Every bone onto its pivot, then every curve onto its path - its ends
         # pinned to wherever the pivot now starts and stops.
         pivoted = apply_pivots(context, rig, data)

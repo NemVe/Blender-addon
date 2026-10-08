@@ -1115,6 +1115,54 @@ class TestFollowers(RigMovesCase):
             here = centre(self.segments[2])
             self.assertLess(min((here - p).length for p in line), 0.02)
 
+    def test_built_leader_dragged_carries_its_followers(self):
+        # The way it was used: Follows set, Build first, then pose the
+        # leader. Dragging it has to bring the rest along, on screen.
+        self.chain()
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.segments[1].parent, self.segments[0])
+        self.assertEqual(self.segments[2].parent, self.segments[1])
+        bent = self.bent(30.0)[0]
+        self.segments[0].matrix_world = bent
+        bpy.context.view_layer.update()
+        carry = bent @ self.homes[0].inverted()
+        for segment, home in zip(self.segments[1:], self.homes[1:]):
+            expected = [carry @ home @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        for segment, home in zip(self.segments, self.homes):
+            expected = [carry @ home @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+        drive(self.move, 0.5)
+        half = (Matrix.Translation(self.KNUCKLES[0]) @ Matrix.Rotation(math.radians(15.0), 4, "Y")
+                @ Matrix.Translation(-self.KNUCKLES[0]))
+        for segment, home in zip(self.segments, self.homes):
+            expected = [half @ home @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def test_following_set_and_cleared_on_a_built_move(self):
+        bpy.ops.rigmoves.build()
+        holder = self.segments[1].parent
+        self.move.parts["Seg2"].follows = "Seg1"
+        self.assertEqual(self.segments[1].parent, self.segments[0])
+        self.move.parts["Seg2"].follows = ""
+        self.assertEqual(self.segments[1].parent, holder)
+        self.assertIsNone(self.segments[1].get(rigmoves.FOLLOW_MARK))
+
+    def test_remove_lets_go_of_built_followers(self):
+        self.chain()
+        self.close()
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        bpy.ops.rigmoves.remove(index=0)
+        for segment, home in zip(self.segments, self.homes):
+            self.assertIsNone(segment.parent)
+            self.assertIsNone(segment.get(rigmoves.FOLLOW_MARK))
+            self.assertLess(drift(segment, [home @ v.co for v in segment.data.vertices]),
+                            TOLERANCE)
+
     def test_impossible_choices_are_turned_down(self):
         self.chain()
         parts = self.move.parts
