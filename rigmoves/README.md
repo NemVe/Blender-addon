@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.12.0
+# RigMoves (experiment) - v0.13.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.12.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.13.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -62,6 +62,35 @@ included - and it is the same control as the handle: drag either and the
 other follows. The key button beside it keyframes the control at the current
 frame, the same key as **I** on the handle.
 
+### Playing it on the timeline
+
+Under Play, set **Frames** and press **Animate**: the control is keyed to play
+the whole thing from the current frame, over that many frames, and the scene
+is made long enough to hold it. Pressing it again replaces those keys rather
+than adding to them. The keys are even in time, so the shape of the move is
+still its own Ease and speeds. Keyed handles are left alone by Build - that
+is how the finished machine is meant to be animated.
+
+### Where a part turns: the pivot
+
+A part turns about its **pivot**. Between two recorded poses the pivot goes
+in a straight line and everything else swings round it, so it decides the way
+from one pose to the next - the poses themselves never change. A lid turning
+about its middle cuts through the box on the way; turning about its hinge, it
+swings open.
+
+Select the parts and press one of the **Pivot** buttons:
+
+- **Origin** - the object's own origin, as before.
+- **Cursor** - wherever the 3D cursor is. Put it on the hinge first: select
+  the hinge edge in edit mode and **Shift+S > Cursor to Selected**.
+- **Base** - the middle of the bottom of the object's bounding box.
+
+No origins need moving. A pivot can be picked before the first Build or any
+time after; on a built move the path is re-keyed so every recorded pose -
+Before, After and every step - stays exactly where it was. Riders turn about
+their leader's pivot, carried over to where each one stands.
+
 ### Starting the next thing
 
 Select an object the rig has never been told about and the panel says so. What
@@ -107,8 +136,17 @@ a rider sent ahead has somewhere to go: the leader simply starts later along
 the control. A lead takes effect as soon as it is changed.
 
 Riders follow everything the leader's path does - steps in between, speeds,
-Ease - and a rider half the size of its leader still travels as far. The
-**x** on a rider's row takes it out again and leaves it where it stands.
+Ease, a curved path - and a rider half the size of its leader still travels
+as far. The **x** on a rider's row takes it out again and leaves it where it
+stands.
+
+**Mirroring.** A rider that is a mirrored copy of its leader - negative
+scale, the way **Ctrl+M** leaves one - mirrors its leader's move by itself:
+the left wing does the mirror image of what the right one does. A rider that
+only *faces* the other way, such as the second of a pair of doors turned round
+to fit, has a **Mirror** menu on its row: X, Y or Z mirrors the leader's move
+across that axis of its own, so what is the leader's left becomes the
+rider's right. It takes effect at once.
 
 Riding along can be set up before the leader's After is recorded as well;
 it takes effect at the next Build.
@@ -197,6 +235,29 @@ Smooth on it eases into and out of your own curve.
 For exact control of each stretch use the speeds instead, with Ease left on
 Even speed. The two stack, the ease first.
 
+### Going round things: curved paths
+
+From A to B a part goes in a straight line, which is no use when something
+is in the way. Select it and press **Curve the Path**: a curve appears along
+the path it has - through its steps, if it has any - with a point in the
+middle to take hold of. Press **Edit** beside it (or Tab into it), drag the
+curve round the obstacle, add points if it needs them, and Build. The part's
+pivot now travels along the curve, evenly by distance, and turns from pose to
+pose as it did before.
+
+The two ends of the curve always belong to Before and After. Every Build puts
+them back there - drag an end away, or record After again, and the curve's
+ends follow the part, not the other way round. The **x** beside the curve
+deletes it and the path goes straight again. Riders follow a curved leader
+along the same curve, carried over to their own place.
+
+### Seeing the path
+
+**Paths** draws a line through where every part of the move goes, Before to
+After, through the middle of each part: steps, pivots, curves, mirrors and
+all. It is drawn again at every Build, can't be clicked or rendered, and goes
+when Paths is pressed again.
+
 ## Everything else on the card
 
 - **Record** either row saves where the parts are standing at that moment. The
@@ -271,6 +332,31 @@ weight, and writes the two placements as the ends of the path. Before is
 therefore the rig's rest pose, and the bone carries only the difference to
 After. Removing the move takes the group, the modifier and the parent off
 again and leaves the object exactly where it stands.
+
+The bone stands on the part's pivot. A pivot is kept in the object's own
+space at Before, so it goes with the object when Before is taken again. When
+a built part's pivot moves, every key is worked out again before the bone is
+moved: a bone moved by d along its own axes, posed with turn R, has to be
+carried R*d - d less far for the part to land where it did. So every key
+holds its pose, and only the way between keys changes.
+
+A curve is laid onto the path at every Build as 40 location keys between
+Before and After, evenly by distance along it, after its ends are pinned to
+where the pivot starts and stops. Those in-between keys belong to the curve:
+a step's location on a curved part is the curve's, and its turn stays the
+step's.
+
+A mirrored rider plays its leader's channels turned by a mirror, worked out
+in the leader bone's own axes. Mirroring a location or a quaternion is
+linear in the numbers on the curves, so keying the mirrored values on every
+frame the leader has a key on mirrors every frame in between too. A mirror
+image's frame is left-handed, which no bone can be, so its X is turned round
+to stand the bone in, and a mirror across X puts it back - which is why a
+Ctrl+M copy needs no setting, and why mirroring one of those across X again
+undoes it.
+
+The path preview is read off the action, not played: no frame changes, nothing
+moves while it is drawn.
 
 ## Tested on
 
@@ -437,6 +523,17 @@ and one lifted 1 m:
   a bone that no longer existed - and Blender warned about it on every update
   from then on. Removing a combined control did the same. Both drivers now go
   with their sliders.
+- **One warning hid the others in the Build report.** A part keyed by hand
+  ended the report early, so a driver cut short on the same Build was never
+  mentioned. Every finding is reported now, and the warning stands if any of
+  them is one.
+- **A keyed handle was called a fault.** Build warned that a handle with a
+  real curve on it was "animated by hand" - which is exactly how the
+  finished machine is meant to be animated. Only a part's own bone keyed on
+  top of its path is worth a word now.
+- **Setting a curve's point from code bent its handles.** Blender recomputes
+  an aligned handle whenever its point is set on its own, and swings it off
+  to one side. Curve points are written all at once now.
 - **Reloading the add-on failed with "already registered".** Registering
   looked for an old copy in `bpy.types`, which does not list property groups,
   so nothing was taken down and the first class refused to register again. The
@@ -456,6 +553,15 @@ and one lifted 1 m:
 - A rider copies its leader from where it stood when it joined. To move one,
   take it out and add it again. A rider cannot lead others, and only objects
   can lead - a bone of a hand-built rig is not offered.
+- A mirrored rider is exact for moves and turns. A part that also changes
+  size unevenly on the way is copied unmirrored in its size.
+- Pivots, curves and the path preview are for objects; bones of a hand-built
+  rig turn about their own heads, as they always did.
+- A curve takes over the in-between location of its part, steps included,
+  and going back to straight drops the steps' locations with it.
+- Only a curve's first spline is followed, Bezier or Poly.
+- Animate replaces whatever keys the control had. For anything more, key it
+  by hand with the key button.
 - Combining always takes every move that is not already in one, laid end to
   end. There is no way to pick which ones from the panel yet, only to take
   them out again afterwards.

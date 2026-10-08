@@ -26,12 +26,13 @@ hand-built rig can be given a slider without being taken apart first.
 """
 
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Euler, Matrix, Quaternion, Vector
+from mathutils.geometry import interpolate_bezier
 
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
     "author": "AutoRigger experiments",
-    "version": (0, 12, 0),
+    "version": (0, 13, 0),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -706,6 +707,41 @@ def _play_set(self, value):
 PLAY_HELP = ("Play the whole of it, from the first part that moves to the last "
              "one to arrive. The handle in the viewport follows")
 
+FRAMES_HELP = "How many frames Animate spreads the whole of it over"
+
+
+def _mirror_changed(self, context):
+    """Copy the leader's path again, turned the new way, at once.
+
+    Only the copy changes - the rider's bone stands where it stood - so there
+    is nothing that needs a Build.
+    """
+    rig = self.id_data
+    data = rig.rigmoves
+    mine = self.as_pointer()
+    for move in data.moves:
+        if any(p.as_pointer() == mine for p in move.parts):
+            leader = leader_of(move, self)
+            if leader is not None and self.bone_name:
+                copy_path(rig, move, leader, self)
+                if move.show_paths:
+                    draw_paths(rig, move)
+            break
+    rig.update_tag()
+
+
+AXES = ("X", "Y", "Z")
+MIRRORS = [("NONE", "-", "Copies the leader's move as it is, from where it stands"),
+           ("X", "X", "Mirrors the leader's move across its own X: its left "
+                      "becomes the rider's right"),
+           ("Y", "Y", "Mirrors the leader's move across its own Y"),
+           ("Z", "Z", "Mirrors the leader's move across its own Z")]
+PIVOTS = [("ORIGIN", "Origin", "Turn about the object's own origin"),
+          ("CURSOR", "3D Cursor", "Turn about the point the 3D cursor is on - "
+                                  "put it on the hinge first"),
+          ("BASE", "Base", "Turn about the middle of the bottom of its "
+                           "bounding box")]
+
 
 class RIGMOVES_Part(bpy.types.PropertyGroup):
     """One thing in a move, and when it takes its turn.
@@ -742,6 +778,20 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
                     "it. Below 0 it follows behind: -25 sets off when the "
                     "leader is half way, -50 when it has finished. Above 0 it "
                     "goes first: 50 has finished before the leader starts")
+    # A rider that faces the other way to its leader - the second of a pair
+    # of doors - can play its move mirrored. A rider that is a mirrored copy
+    # already (negative scale) mirrors by itself, with this left at "-".
+    mirror: bpy.props.EnumProperty(
+        name="Mirror", items=MIRRORS, default="NONE", update=_mirror_changed)
+    # The point this part turns about, in its own space where it stands at
+    # Before, so it goes with the object if Before is taken again. The kind
+    # is only which button set it, for the panel to show.
+    pivot: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 0.0))
+    pivot_kind: bpy.props.EnumProperty(items=PIVOTS, default="ORIGIN")
+    # A curve the pivot travels along from Before to After, and whether the
+    # path was last laid from one - so taking the curve away straightens it.
+    path_curve: bpy.props.PointerProperty(type=bpy.types.Object)
+    curved: bpy.props.BoolProperty(default=False)
 
 
 def safe_prop_name(text):
@@ -864,10 +914,15 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
     play: bpy.props.FloatProperty(
         name="Play", min=0.0, max=100.0, subtype="PERCENTAGE", precision=0,
         get=_play_get, set=_play_set, description=PLAY_HELP)
+    play_frames: bpy.props.IntProperty(
+        name="Frames", default=48, min=1, max=100000, description=FRAMES_HELP)
     built: bpy.props.BoolProperty(default=False)
     expanded: bpy.props.BoolProperty(default=True)
     show_timing: bpy.props.BoolProperty(default=False)
     show_riders: bpy.props.BoolProperty(default=True)
+    # The line drawn through where every part goes, while it is shown.
+    show_paths: bpy.props.BoolProperty(default=False)
+    paths_name: bpy.props.StringProperty()
 
 
 def _group_renamed(self, context):
@@ -912,6 +967,8 @@ class RIGMOVES_Group(bpy.types.PropertyGroup):
     play: bpy.props.FloatProperty(
         name="Play", min=0.0, max=100.0, subtype="PERCENTAGE", precision=0,
         get=_play_get, set=_play_set, description=PLAY_HELP)
+    play_frames: bpy.props.IntProperty(
+        name="Frames", default=48, min=1, max=100000, description=FRAMES_HELP)
     built: bpy.props.BoolProperty(default=False)
     expanded: bpy.props.BoolProperty(default=True)
 
@@ -1237,9 +1294,15 @@ def clear_autokey(rig, data):
         drop_empty_action(rig)
     for _holder, curve in real:
         try:
-            kept.append(curve.data_path.split('"')[1])
+            name = curve.data_path.split('"')[1]
         except IndexError:
-            pass
+            continue
+        # A handle with a real curve on it is the finished machine being
+        # animated - by hand, or by Animate - which is what it is for. Only a
+        # part's own bone keyed on top of its path is worth a word.
+        bone = rig.data.bones.get(name)
+        if bone is None or bone.get(RAIL) is None:
+            kept.append(name)
     return objects, bones, sorted(set(kept))
 
 
@@ -1541,7 +1604,9 @@ def bind_loose(context, rig, data):
             if obj is None:
                 continue
             bone = edit.new(obj.name)
-            head = into @ obj.matrix_world.translation
+            # On its pivot - its origin unless one was picked - which the
+            # object is standing on, at Before, right now.
+            head = into @ pivot_world(part)
             bone.head = head
             bone.tail = head + Vector((0.0, 0.0, reach))
             bone.use_deform = True
@@ -1603,22 +1668,37 @@ def bind_loose(context, rig, data):
 # so steps, delays and speeds all carry over for nothing.
 
 
-def frame_of(matrix):
-    """Where something stands and which way it faces, without its size.
+def standing(matrix):
+    """Where something stands and which way it faces, without its size - and
+    whether it is a mirror image.
 
     A half-size petal is still meant to travel as far as the leader does, so
-    scale is kept out of the frames a move is carried between.
+    scale is kept out of the frames a move is carried between. A mirrored copy
+    - negative scale, as Ctrl+M leaves one - faces a left-handed way no bone
+    can stand in. Its X is turned round to give a frame a bone can have, and
+    the caller is told, so the move can be mirrored back to match.
     """
-    location, rotation, _scale = matrix.decompose()
-    return Matrix.Translation(location) @ rotation.to_matrix().to_4x4()
+    turn = matrix.to_3x3()
+    mirrored = turn.determinant() < 0.0
+    if mirrored:
+        for row in range(3):
+            turn[row][0] = -turn[row][0]
+    frame = turn.normalized().to_4x4()
+    frame.translation = matrix.to_translation()
+    return frame, mirrored
+
+
+def frame_of(matrix):
+    return standing(matrix)[0]
 
 
 def leader_frame(rig, leader):
-    """The frame a leader's move is measured in, in world space."""
+    """The frame a leader's move is measured in, in world space, and whether
+    the leader is a mirror image."""
     if leader.kind == "OBJECT":
-        return frame_of(as_matrix(leader.before))
+        return standing(as_matrix(leader.before))
     bone = rig.data.bones.get(part_bone(leader))
-    return frame_of(rig.matrix_world @ bone.matrix_local)
+    return standing(rig.matrix_world @ bone.matrix_local)
 
 
 def leader_of(move, rider):
@@ -1629,45 +1709,92 @@ def leader_of(move, rider):
     return leader
 
 
-def bind_riders(context, rig, data):
-    """Give every new rider its bone, turned like its leader's, and bind it.
+def reflection(axis):
+    """A mirror across the plane square to one of the three axes."""
+    return Matrix.Diagonal([-1.0 if name == axis else 1.0 for name in AXES])
 
-    After bind_loose, so a leader that was itself a loose object a moment ago
-    already has the bone this one is turned from.
+
+def rider_turn(rig, leader, rider):
+    """What a rider's copy of the path is turned by, in the leader bone's own
+    axes - None for a plain copy.
+
+    A rider moves as its leader would, standing where the rider stands. If one
+    of the two is a mirror image of the other, that includes the mirroring:
+    each frame here was kept right-handed by turning a mirror image's X round,
+    so it is put back as a mirror across X - and two of them, a mirrored rider
+    of a mirrored leader, cancel. The Mirror setting adds one more, across
+    the axis it names, for a rider that faces the other way without being a
+    mirror image: the second of a pair of doors.
     """
-    jobs = []
+    lead_frame, lead_mirrored = leader_frame(rig, leader)
+    _frame, mirrored = standing(as_matrix(rider.before))
+    local = Matrix.Identity(3)
+    if mirrored != lead_mirrored:
+        local = local @ reflection("X")
+    if rider.mirror in AXES:
+        local = local @ reflection(rider.mirror)
+    if local == Matrix.Identity(3):
+        return None
+    bone = rig.data.bones[part_bone(leader)]
+    rest = (rig.matrix_world @ bone.matrix_local).to_3x3().normalized()
+    into_bone = rest.transposed() @ lead_frame.to_3x3()
+    return into_bone @ local @ into_bone.transposed()
+
+
+def same_matrix(a, b, tolerance=1e-5):
+    return max(abs(x - y) for row_a, row_b in zip(a, b)
+               for x, y in zip(row_a, row_b)) <= tolerance
+
+
+def bind_riders(context, rig, data):
+    """Give every new rider its bone, turned like its leader's, and bind it -
+    and turn an existing rider's bone again when its leader's has moved.
+
+    After bind_loose and the pivots, so a leader that was a loose object a
+    moment ago, or whose pivot has just been picked, already has the bone its
+    riders are turned from. A rider's own pivot is its leader's, carried over.
+    """
+    world = rig.matrix_world
+    into = world.inverted_safe()
+    fresh, moved = [], []
     for move in data.moves:
         for _index, rider in riders_of(move):
             leader = leader_of(move, rider)
-            if (rider.bone_name or not rider.has_before or leader is None
+            if (not rider.has_before or leader is None
                     or rig.data.bones.get(part_bone(leader)) is None
                     or bpy.data.objects.get(rider.name) is None):
                 continue
-            jobs.append((rider, leader))
-    if not jobs:
+            bone = rig.data.bones[part_bone(leader)]
+            # The leader's bone as the leader sees it, then stood on the rider.
+            carried = (frame_of(as_matrix(rider.before))
+                       @ leader_frame(rig, leader)[0].inverted_safe()
+                       @ world @ bone.matrix_local)
+            seat = frame_of(into @ carried)
+            own = rig.data.bones.get(rider.bone_name) if rider.bone_name else None
+            if own is None:
+                fresh.append((rider, leader, seat, bone.length))
+            elif not same_matrix(own.matrix_local, seat):
+                moved.append((rider, seat))
+    if not (fresh or moved):
         return 0
 
-    for rider, _leader in jobs:
+    for rider, _leader, _seat, _length in fresh:
         bpy.data.objects[rider.name].matrix_world = as_matrix(rider.before)
     context.view_layer.update()
-
-    world = rig.matrix_world
-    into = world.inverted_safe()
-    seats = []
-    for rider, leader in jobs:
-        bone = rig.data.bones[part_bone(leader)]
-        # The leader's bone as the leader sees it, then stood on the rider.
-        carried = (frame_of(as_matrix(rider.before))
-                   @ leader_frame(rig, leader).inverted_safe()
-                   @ world @ bone.matrix_local)
-        seats.append((rider, frame_of(into @ carried), bone.length))
 
     if not activate(context, rig):
         return 0
     bpy.ops.object.mode_set(mode="EDIT")
     edit = rig.data.edit_bones
+    # A bone's rest can change under a bound object without moving it: at rest
+    # the modifier moves nothing, and the path is copied onto the new rest
+    # after this.
+    for rider, seat in moved:
+        bone = edit.get(rider.bone_name)
+        if bone is not None:
+            bone.matrix = seat
     root = edit.get("Root") or (edit[0] if len(edit) else None)
-    for rider, seat, length in seats:
+    for rider, _leader, seat, length in fresh:
         bone = edit.new(rider.name)
         bone.head = Vector((0.0, 0.0, 0.0))
         bone.tail = Vector((0.0, max(length, 1e-3), 0.0))
@@ -1677,18 +1804,77 @@ def bind_riders(context, rig, data):
         rider.bone_name = bone.name
     bpy.ops.object.mode_set(mode="OBJECT")
 
-    for rider, leader in jobs:
+    for rider, leader, _seat, _length in fresh:
         bind_object(rig, bpy.data.objects[rider.name], rider.bone_name)
         rig.data.bones[rider.bone_name][PART_MARK] = True
         pose_bone = rig.pose.bones[rider.bone_name]
         pose_bone.rotation_mode = rig.pose.bones[part_bone(leader)].rotation_mode
         pose_bone.matrix_basis = Matrix()
     context.view_layer.update()
-    return len(jobs)
+    return len(fresh)
+
+
+def copy_curve(bag, curve, data_path):
+    """One channel, key for key, under another path."""
+    copy = bag.fcurves.new(data_path, index=curve.array_index)
+    copy.keyframe_points.add(len(curve.keyframe_points))
+    for was, now in zip(curve.keyframe_points, copy.keyframe_points):
+        now.co = was.co
+        now.interpolation = was.interpolation
+        now.handle_left_type = was.handle_left_type
+        now.handle_right_type = was.handle_right_type
+        now.handle_left = was.handle_left
+        now.handle_right = was.handle_right
+    copy.update()
+
+
+def write_turned(bag, source, target, turn, rotation):
+    """A leader's location - and its quaternion, if `rotation` - turned by an
+    orthogonal map, written onto a rider's channels.
+
+    Both are linear in the numbers on the curves - a mirror is - so keying the
+    turned values at every frame either has a key on reproduces the turned
+    move at every frame in between as well, not only at the keys.
+    """
+    channels = ["location"] + (["rotation_quaternion"] if rotation else [])
+    curves = {(c.data_path[len(source):], c.array_index): c
+              for c in bag.fcurves if c.data_path.startswith(source)}
+    frames = sorted({p.co[0] for (channel, _index), c in curves.items()
+                     if channel in channels for p in c.keyframe_points})
+    if not frames:
+        return
+    # A mirror turns a rotation the same way as the half turn that is minus
+    # it, and the half turn is one a quaternion can hold.
+    proper = turn * (1.0 if turn.determinant() > 0.0 else -1.0)
+    spin = proper.to_quaternion()
+    layout = [("location", i) for i in range(3)]
+    if rotation:
+        layout += [("rotation_quaternion", i) for i in range(4)]
+    rows = []
+    for frame in frames:
+        def value(channel, index, rest):
+            curve = curves.get((channel, index))
+            if curve is None or not len(curve.keyframe_points):
+                return rest
+            return curve.evaluate(frame)
+        row = list(turn @ Vector([value("location", i, 0.0) for i in range(3)]))
+        if rotation:
+            held = Quaternion([value("rotation_quaternion", i, (1.0, 0.0, 0.0, 0.0)[i])
+                               for i in range(4)])
+            row += list(spin @ held @ spin.conjugated())
+        rows.append(row)
+    for column, (channel, index) in enumerate(layout):
+        curve = bag.fcurves.new(target + channel, index=index)
+        curve.keyframe_points.add(len(frames))
+        for point, frame, row in zip(curve.keyframe_points, frames, rows):
+            point.co = (frame, row[column])
+            point.interpolation = "LINEAR"
+        curve.update()
 
 
 def copy_path(rig, move, leader, rider):
-    """Give a rider its leader's channels, key for key."""
+    """Give a rider its leader's channels, key for key - turned, when the rider
+    mirrors its leader."""
     _action, _slot, bag = action_bits(move, make=True)
     if bag is None:
         return
@@ -1697,20 +1883,21 @@ def copy_path(rig, move, leader, rider):
     for curve in list(bag.fcurves):
         if curve.data_path.startswith(target):
             bag.fcurves.remove(curve)
-    for curve in [c for c in bag.fcurves if c.data_path.startswith(source)]:
-        copy = bag.fcurves.new(target + curve.data_path[len(source):],
-                               index=curve.array_index)
-        copy.keyframe_points.add(len(curve.keyframe_points))
-        for was, now in zip(curve.keyframe_points, copy.keyframe_points):
-            now.co = was.co
-            now.interpolation = was.interpolation
-            now.handle_left_type = was.handle_left_type
-            now.handle_right_type = was.handle_right_type
-            now.handle_left = was.handle_left
-            now.handle_right = was.handle_right
-        copy.update()
-    pose_bone = rig.pose.bones.get(part_bone(rider))
     leading = rig.pose.bones.get(part_bone(leader))
+    originals = [c for c in bag.fcurves if c.data_path.startswith(source)]
+    turn = rider_turn(rig, leader, rider) if leading is not None else None
+    turned = set()
+    if turn is not None:
+        # Rotation is turned only as a quaternion, the mode this add-on's own
+        # bones use; any other mode is copied as it is.
+        rotation = leading.rotation_mode == "QUATERNION"
+        write_turned(bag, source, target, turn, rotation)
+        turned = {"location", "rotation_quaternion"} if rotation else {"location"}
+    for curve in originals:
+        channel = curve.data_path[len(source):]
+        if channel not in turned:
+            copy_curve(bag, curve, target + channel)
+    pose_bone = rig.pose.bones.get(part_bone(rider))
     if pose_bone is not None and leading is not None:
         pose_bone.rotation_mode = leading.rotation_mode
 
@@ -1732,6 +1919,422 @@ def follow_leaders(rig, data):
             elif rider.bone_name:
                 copy_path(rig, move, leader, rider)
     return lost
+
+
+# ---------------------------------------------------------------------------
+# reading a path without playing it
+
+
+def basis_at(bag, bone_name, rotation_mode, frame):
+    """A bone's pose on a path at one frame, read straight off the curves."""
+    prefix = bone_path(bone_name, "")
+
+    def value(channel, index, rest):
+        curve = curve_for(bag, prefix + channel, index)
+        if curve is None or not len(curve.keyframe_points):
+            return rest
+        return curve.evaluate(frame)
+
+    location = Vector([value("location", i, 0.0) for i in range(3)])
+    if rotation_mode == "QUATERNION":
+        turn = Quaternion([value("rotation_quaternion", i, (1.0, 0.0, 0.0, 0.0)[i])
+                           for i in range(4)]).normalized().to_matrix()
+    elif rotation_mode == "AXIS_ANGLE":
+        held = [value("rotation_axis_angle", i, (0.0, 0.0, 1.0, 0.0)[i]) for i in range(4)]
+        axis = Vector(held[1:])
+        turn = (Matrix.Rotation(held[0], 3, axis.normalized()) if axis.length > 1e-9
+                else Matrix.Identity(3))
+    else:
+        turn = Euler([value("rotation_euler", i, 0.0) for i in range(3)],
+                     rotation_mode).to_matrix()
+    size = Matrix.Diagonal([value("scale", i, 1.0) for i in range(3)])
+    return Matrix.Translation(location) @ (turn @ size).to_4x4()
+
+
+def put_key(curve, frame, value):
+    """Set a curve's key on this frame, adding a straight one if it has none."""
+    for point in curve.keyframe_points:
+        if abs(point.co[0] - frame) < 1e-4:
+            shift = value - point.co[1]
+            point.co[1] = value
+            point.handle_left[1] += shift
+            point.handle_right[1] += shift
+            return
+    point = curve.keyframe_points.insert(frame, value, options={"FAST"})
+    point.interpolation = "LINEAR"
+
+
+def key_frames(bag, bone_name):
+    """Every frame a bone has a key on, in order."""
+    prefix = bone_path(bone_name, "")
+    return sorted({p.co[0] for c in bag.fcurves if c.data_path.startswith(prefix)
+                   for p in c.keyframe_points})
+
+
+# ---------------------------------------------------------------------------
+# pivots: the point a part turns about
+#
+# A part's bone stands on its pivot, and the path is played in the bone's own
+# space: between two recorded poses the pivot travels in a straight line and
+# everything else turns about it. With the pivot on a lid's hinge the hinge
+# stays put and the lid swings; with it in the middle of the lid, the middle
+# slides straight across and the lid cuts through the box. The recorded poses
+# are the same either way - only the way between them changes.
+
+
+def pivot_world(part):
+    """A part's pivot in the world, standing where it stands at Before."""
+    return as_matrix(part.before) @ Vector(part.pivot)
+
+
+def shift_pivot(rig, move, part, shift):
+    """Re-key a part's path for its bone standing `shift` further along.
+
+    Every key keeps the pose it holds: a bone moved by d along its own axes,
+    posed with turn R, has to be carried R*d - d less far for the part to end
+    up where it was. Only the way between keys changes, which is the point.
+    """
+    name = part_bone(part)
+    bone = rig.data.bones[name]
+    pose_bone = rig.pose.bones[name]
+    _action, _slot, bag = action_bits(move)
+    if bag is None:
+        return
+    offset = bone.matrix_local.to_3x3().inverted_safe() @ shift
+    frames = key_frames(bag, name)
+    # Every new value worked out first: each one reads the path, which the
+    # writing would change under the ones still to come.
+    wanted = {}
+    for frame in frames:
+        basis = basis_at(bag, name, pose_bone.rotation_mode, frame)
+        wanted[frame] = basis.translation - offset + basis.to_3x3() @ offset
+    for index in range(3):
+        curve = curve_for(bag, bone_path(name, "location"), index, make=True)
+        for frame in frames:
+            put_key(curve, frame, wanted[frame][index])
+        curve.update()
+
+
+def apply_pivots(context, rig, data):
+    """Stand every bound object's bone on its pivot, keeping its path.
+
+    Riders are not done here: their bones are turned from their leaders' in
+    bind_riders, so a rider's pivot is its leader's, carried over.
+    """
+    into = rig.matrix_world.inverted_safe()
+    jobs = []
+    for move in data.moves:
+        for part in bound_parts(move):
+            bone = rig.data.bones.get(part.bone_name)
+            if part.leader or bone is None:
+                continue
+            shift = into @ pivot_world(part) - bone.head_local
+            if shift.length > 1e-6:
+                jobs.append((move, part, shift))
+    if not jobs:
+        return 0
+    # The path first, while the old rest is still there to read it against.
+    for move, part, shift in jobs:
+        shift_pivot(rig, move, part, shift)
+    if not activate(context, rig):
+        return 0
+    bpy.ops.object.mode_set(mode="EDIT")
+    for _move, part, shift in jobs:
+        bone = rig.data.edit_bones.get(part.bone_name)
+        if bone is not None:
+            bone.head = bone.head + shift
+            bone.tail = bone.tail + shift
+    bpy.ops.object.mode_set(mode="OBJECT")
+    context.view_layer.update()
+    return len(jobs)
+
+
+def chosen_parts(context, move):
+    """The parts a pivot or a curve button acts on: the move's own objects
+    that are selected - or its only one, when it has just one."""
+    own = [p for p in move.parts if p.kind == "OBJECT" and not p.leader]
+    chosen = {o.name for o in context.selected_objects}
+    picked = [p for p in own if p.name in chosen]
+    if picked:
+        return picked
+    return own if len(own) == 1 else []
+
+
+# ---------------------------------------------------------------------------
+# curved paths: a pivot that goes from A to B by way of a curve
+#
+# Left alone, a pivot travels from Before to After in a straight line, or
+# through its steps. A curve can bend that round whatever is in the way: made
+# for the part from the path it has, edited by hand in edit mode, and laid
+# onto the path at every Build - its two ends pinned back onto the pivot's
+# Before and After first, so however it is edited it starts at A and ends at
+# B. Turning still goes from pose to pose as before; only where the pivot
+# travels is the curve's.
+
+CURVE_SAMPLES = 40
+
+
+def pivot_at(rig, bag, part, frame):
+    """Where a part's pivot is on its path at this frame, in the world."""
+    name = part_bone(part)
+    bone = rig.data.bones[name]
+    basis = basis_at(bag, name, rig.pose.bones[name].rotation_mode, frame)
+    return rig.matrix_world @ (bone.matrix_local @ basis).to_translation()
+
+
+def make_path_curve(rig, move, part):
+    """A curve along a part's path as it is now, for the hand to bend."""
+    _action, _slot, bag = action_bits(move)
+    frames = ([FIRST_FRAME] + [s.frame for s in move.steps if s.done]
+              + [last_frame(move)])
+    points = [pivot_at(rig, bag, part, frame) for frame in frames]
+    if len(points) == 2:
+        # A point in the middle to take hold of, or there is nothing to drag.
+        points.insert(1, (points[0] + points[1]) * 0.5)
+    data = bpy.data.curves.new(part.name + " path", "CURVE")
+    data.dimensions = "3D"
+    spline = data.splines.new("BEZIER")
+    spline.bezier_points.add(len(points) - 1)
+    for point in spline.bezier_points:
+        point.handle_left_type = point.handle_right_type = "ALIGNED"
+    # Handles a third of the way to each neighbour, along the line through
+    # both: smooth through the points, and dead straight while they are.
+    left, right = [], []
+    for number, where in enumerate(points):
+        before = points[max(number - 1, 0)]
+        after = points[min(number + 1, len(points) - 1)]
+        reach = (after - before) / (6.0 if 0 < number < len(points) - 1 else 3.0)
+        left.append(where - reach)
+        right.append(where + reach)
+    set_points(spline, points, left, right)
+    obj = bpy.data.objects.new(data.name, data)
+    for collection in rig.users_collection:
+        collection.objects.link(obj)
+        break
+    obj.show_in_front = True
+    obj.hide_render = True
+    part.path_curve = obj
+    return obj
+
+
+def curve_alive(obj):
+    """Whether a part's curve is still something in the scene to follow."""
+    return (obj is not None and obj.type == "CURVE" and len(obj.users_collection)
+            and len(obj.data.splines))
+
+
+def points_of(spline):
+    """(points, left handles, right handles) of a Bezier spline."""
+    out = []
+    for name in ("co", "handle_left", "handle_right"):
+        values = [0.0] * (3 * len(spline.bezier_points))
+        spline.bezier_points.foreach_get(name, values)
+        out.append([Vector(values[i:i + 3]) for i in range(0, len(values), 3)])
+    return out
+
+
+def set_points(spline, points, left, right):
+    """Write a Bezier spline's points and handles all at once.
+
+    Not point by point: Blender recomputes an aligned handle whenever its
+    point is set on its own, and swings it off to one side.
+    """
+    for name, values in (("co", points), ("handle_left", left),
+                         ("handle_right", right)):
+        spline.bezier_points.foreach_set(
+            name, [x for value in values for x in value[:3]])
+    spline.id_data.update_tag()
+
+
+def pin_ends(obj, start, end):
+    """Put a curve's two ends back on A and B, handles and all."""
+    spline = obj.data.splines[0]
+    into = obj.matrix_world.inverted_safe()
+    if spline.type == "BEZIER":
+        points, left, right = points_of(spline)
+        for number, where in ((0, start), (len(points) - 1, end)):
+            shift = into @ where - points[number]
+            points[number] = points[number] + shift
+            left[number] = left[number] + shift
+            right[number] = right[number] + shift
+        set_points(spline, points, left, right)
+    else:
+        for point, where in ((spline.points[0], start), (spline.points[-1], end)):
+            here_ = into @ where
+            point.co = (here_.x, here_.y, here_.z, point.co[3])
+
+
+def curve_line(obj):
+    """A curve's first spline as a close-set line of world points, A to B."""
+    spline = obj.data.splines[0]
+    if spline.type == "BEZIER":
+        points = spline.bezier_points
+        line = [points[0].co.copy()]
+        for a, b in zip(points[:-1], points[1:]):
+            line.extend(interpolate_bezier(a.co, a.handle_right, b.handle_left,
+                                           b.co, 24)[1:])
+    else:
+        line = [Vector(p.co[:3]) for p in spline.points]
+    return [obj.matrix_world @ p for p in line]
+
+
+def along(line, share):
+    """The point this share of the way along a line, by distance travelled."""
+    lengths = [0.0]
+    for a, b in zip(line[:-1], line[1:]):
+        lengths.append(lengths[-1] + (b - a).length)
+    if lengths[-1] <= 1e-12:
+        return line[0].copy()
+    goal = share * lengths[-1]
+    for number in range(1, len(line)):
+        if lengths[number] >= goal:
+            span = lengths[number] - lengths[number - 1]
+            part = (goal - lengths[number - 1]) / span if span > 1e-12 else 0.0
+            return line[number - 1].lerp(line[number], part)
+    return line[-1].copy()
+
+
+def straighten(bag, part, move):
+    """Take a part's location keys off the way between Before and After."""
+    first, last = FIRST_FRAME + 1e-3, last_frame(move) - 1e-3
+    for index in range(3):
+        curve = curve_for(bag, bone_path(part_bone(part), "location"), index)
+        if curve is None:
+            continue
+        for point in reversed([p for p in curve.keyframe_points
+                               if first < p.co[0] < last]):
+            curve.keyframe_points.remove(point, fast=True)
+        curve.update()
+
+
+def lay_curve(rig, bag, move, part, line):
+    """Key a part's pivot along a line, evenly by distance, A to B."""
+    name = part_bone(part)
+    rest = rig.data.bones[name].matrix_local
+    into = rig.matrix_world.inverted_safe()
+    unturn = rest.to_3x3().inverted_safe()
+    straighten(bag, part, move)
+    curves = [curve_for(bag, bone_path(name, "location"), i, make=True)
+              for i in range(3)]
+    first, last = FIRST_FRAME, last_frame(move)
+    for number in range(1, CURVE_SAMPLES):
+        share = number / float(CURVE_SAMPLES)
+        location = unturn @ (into @ along(line, share) - rest.to_translation())
+        for index, curve in enumerate(curves):
+            point = curve.keyframe_points.insert(first + share * (last - first),
+                                                 location[index], options={"FAST"})
+            point.interpolation = "LINEAR"
+    for curve in curves:
+        curve.update()
+
+
+def bake_curves(rig, data):
+    """Lay every part's curve onto its path, its ends pinned to A and B first.
+
+    Before the riders copy their leaders, so a rider of a curved part follows
+    the curve too, from its own place. A part whose curve has gone - deleted,
+    or never there - and that was laid from one is put back on the straight
+    way. Returns how many were laid.
+    """
+    laid = 0
+    for move in data.moves:
+        _action, _slot, bag = action_bits(move)
+        if bag is None:
+            continue
+        for part in move.parts:
+            if part.leader or not part.bone_name or part.bone_name not in rig.data.bones:
+                continue
+            obj = part.path_curve
+            if not curve_alive(obj):
+                if part.curved:
+                    straighten(bag, part, move)
+                    part.curved = False
+                if obj is not None:
+                    part.path_curve = None
+                continue
+            start = pivot_at(rig, bag, part, FIRST_FRAME)
+            end = pivot_at(rig, bag, part, last_frame(move))
+            pin_ends(obj, start, end)
+            lay_curve(rig, bag, move, part, curve_line(obj))
+            part.curved = True
+            laid += 1
+    return laid
+
+
+# ---------------------------------------------------------------------------
+# the path preview: a line through where each part goes
+
+PATH_SAMPLES = 48
+
+
+def trace(rig, bag, move, part):
+    """The world points the middle of a part passes through, Before to After.
+
+    Read off the path rather than played, so drawing it moves nothing on
+    screen and needs no frame changes; every key is among the points, so a
+    corner at a step is a corner on the line.
+    """
+    obj = bpy.data.objects.get(part.name)
+    name = part_bone(part)
+    bone = rig.data.bones.get(name)
+    pose_bone = rig.pose.bones.get(name)
+    if (part.kind != "OBJECT" or not part.has_before or obj is None
+            or obj.type != "MESH" or bone is None or pose_bone is None):
+        return []
+    middle = as_matrix(part.before) @ (sum((Vector(c) for c in obj.bound_box),
+                                           Vector()) / 8.0)
+    world = rig.matrix_world
+    into = world.inverted_safe()
+    rest = bone.matrix_local
+    unrest = rest.inverted_safe()
+    first, last = FIRST_FRAME, last_frame(move)
+    frames = {first + (last - first) * n / float(PATH_SAMPLES)
+              for n in range(PATH_SAMPLES + 1)}
+    frames |= {f for f in key_frames(bag, name) if first <= f <= last}
+    out = []
+    for frame in sorted(frames):
+        basis = basis_at(bag, name, pose_bone.rotation_mode, frame)
+        out.append(world @ rest @ basis @ unrest @ into @ middle)
+    return out
+
+
+def drop_paths(move):
+    obj = bpy.data.objects.get(move.paths_name) if move.paths_name else None
+    if obj is not None:
+        data = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if data is not None and data.users == 0:
+            bpy.data.curves.remove(data)
+    move.paths_name = ""
+
+
+def draw_paths(rig, move):
+    """Draw - or draw again - the line through where every part of a move goes."""
+    drop_paths(move)
+    _action, _slot, bag = action_bits(move)
+    if bag is None:
+        return 0
+    lines = [trace(rig, bag, move, part) for part in move.parts]
+    lines = [line for line in lines if len(line) > 1]
+    if not lines:
+        return 0
+    data = bpy.data.curves.new("RigMoves paths: " + move.name, "CURVE")
+    data.dimensions = "3D"
+    for line in lines:
+        spline = data.splines.new("POLY")
+        spline.points.add(len(line) - 1)
+        for point, where in zip(spline.points, line):
+            point.co = (where.x, where.y, where.z, 1.0)
+    obj = bpy.data.objects.new(data.name, data)
+    for collection in rig.users_collection:
+        collection.objects.link(obj)
+        break
+    # Something to look at, never to click or render.
+    obj.show_in_front = True
+    obj.hide_render = True
+    obj.hide_select = True
+    move.paths_name = obj.name
+    return len(lines)
 
 
 def armatures_in(context):
@@ -2746,9 +3349,13 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         if reseated:
             context.view_layer.update()
         bound = bind_loose(context, rig, data)
+        # Every bone onto its pivot, then every curve onto its path - its ends
+        # pinned to wherever the pivot now starts and stops.
+        pivoted = apply_pivots(context, rig, data)
+        laid = bake_curves(rig, data)
         # Riders after, because each is turned from its leader's bone, which
-        # bind_loose may only just have made; then every rider takes its
-        # leader's path as it stands now.
+        # may only just have been made or moved; then every rider takes its
+        # leader's path - curve and all - as it stands now.
         riding = bind_riders(context, rig, data)
         lost = follow_leaders(rig, data)
 
@@ -2871,6 +3478,10 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         seat_rig(rig, data)
         rig.update_tag()
         context.view_layer.update()
+        # Last, so the lines go through where everything now really goes.
+        for move in data.moves:
+            if move.show_paths:
+                draw_paths(rig, move)
 
         if not made:
             data.report = "Nothing recorded yet. Record Before and After, then Build."
@@ -2894,11 +3505,15 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                             "the parts and {:d} on the rig; both were lifted, "
                             "or the rig could not move them."
                             .format(keyed_objects, keyed_bones))
+        if pivoted:
+            data.report += " {:d} turned about a new pivot.".format(pivoted)
+        if laid:
+            data.report += " {:d} path(s) laid along a curve.".format(laid)
+        warn = False
         if still_keyed:
             data.report += (" {:s} is animated by hand and was left as it is."
                             .format(", ".join(still_keyed[:3])))
-            self.report({"WARNING"}, data.report)
-            return {"FINISHED"}
+            warn = True
         if empty:
             data.report += " Nothing recorded for: " + ", ".join(empty[:3])
         if cramped:
@@ -2906,8 +3521,264 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                             "hold and got cut short. Use fewer delays, or Even "
                             "speed, on this move."
                             .format(", ".join(sorted(set(cramped))[:3])))
+            warn = True
+        self.report({"WARNING"} if warn else {"INFO"}, data.report)
+        return {"FINISHED"}
+
+
+def move_at(context, index):
+    """(rig, data, move) for a move index on the rig in front of the user."""
+    rig = rig_of(context)
+    if not here(context, rig):
+        return None, None, None
+    data = rig.rigmoves
+    if not 0 <= index < len(data.moves):
+        return rig, data, None
+    return rig, data, data.moves[index]
+
+
+class RIGMOVES_OT_set_pivot(bpy.types.Operator):
+    bl_idname = "rigmoves.set_pivot"
+    bl_label = "Set Pivot"
+    bl_description = ("Turn the selected parts of this move about this point. "
+                      "The poses stay as recorded; the way between them swings "
+                      "about the pivot")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    kind: bpy.props.EnumProperty(items=PIVOTS, default="ORIGIN")
+
+    def execute(self, context):
+        rig, data, move = move_at(context, self.index)
+        if move is None:
+            return {"CANCELLED"}
+        parts = [p for p in chosen_parts(context, move) if p.has_before]
+        if not parts:
+            data.report = "Select the parts to set a pivot for."
             self.report({"WARNING"}, data.report)
+            return {"CANCELLED"}
+        cursor = context.scene.cursor.location.copy()
+        for part in parts:
+            obj = bpy.data.objects.get(part.name)
+            if obj is None:
+                continue
+            if self.kind == "CURSOR":
+                part.pivot = as_matrix(part.before).inverted_safe() @ cursor
+            elif self.kind == "BASE":
+                corners = [Vector(c) for c in obj.bound_box]
+                part.pivot = ((min(c.x for c in corners) + max(c.x for c in corners)) * 0.5,
+                              (min(c.y for c in corners) + max(c.y for c in corners)) * 0.5,
+                              min(c.z for c in corners))
+            else:
+                part.pivot = (0.0, 0.0, 0.0)
+            part.pivot_kind = self.kind
+        said = ("'{:s}'".format(short(parts[0].name, 18)) if len(parts) == 1
+                else "{:d} parts".format(len(parts)))
+        label = dict((k, n) for k, n, _d in PIVOTS)[self.kind]
+        if move.built:
+            bpy.ops.rigmoves.build()
+            data.report = "{:s} now turn about: {:s}.".format(said, label)
+        else:
+            data.report = "{:s} will turn about: {:s}, from the first Build.".format(
+                said, label)
+        self.report({"INFO"}, data.report)
+        return {"FINISHED"}
+
+
+class RIGMOVES_OT_curve_path(bpy.types.Operator):
+    bl_idname = "rigmoves.curve_path"
+    bl_label = "Curve the Path"
+    bl_description = ("Make a curve along the path of each selected part. Bend "
+                      "it in edit mode, then Build: the part follows it, and "
+                      "its two ends always stay on Before and After")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        rig, data, move = move_at(context, self.index)
+        if move is None:
+            return {"CANCELLED"}
+        parts = [p for p in chosen_parts(context, move) if not curve_alive(p.path_curve)]
+        if not parts:
+            data.report = "Select the parts to give a curved path."
+            self.report({"WARNING"}, data.report)
+            return {"CANCELLED"}
+        # The curve is drawn along the path the part has, so it has to have
+        # one: a part still waiting for its first Build gets it now.
+        if any(not p.bone_name for p in parts):
+            if not all(p.has_after for p in parts):
+                data.report = "Record After first: a curve runs from Before to After."
+                self.report({"WARNING"}, data.report)
+                return {"CANCELLED"}
+            bpy.ops.rigmoves.build()
+        names = [p.name for p in parts]
+        made = 0
+        for name in names:
+            part = move.parts.get(name)
+            if part is not None and part.bone_name in rig.data.bones:
+                make_path_curve(rig, move, part)
+                made += 1
+        bpy.ops.rigmoves.build()
+        data.report = ("{:d} curve(s) made along the path. Bend one in edit mode "
+                       "(Tab), then Build; its ends stay on Before and After."
+                       .format(made))
+        self.report({"INFO"}, data.report)
+        return {"FINISHED"}
+
+
+class RIGMOVES_OT_edit_curve(bpy.types.Operator):
+    bl_idname = "rigmoves.edit_curve"
+    bl_label = "Edit the Curve"
+    bl_description = "Select this part's curve and go into edit mode on it"
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    part: bpy.props.IntProperty()
+
+    def execute(self, context):
+        _rig, _data, move = move_at(context, self.index)
+        if move is None or not 0 <= self.part < len(move.parts):
+            return {"CANCELLED"}
+        obj = move.parts[self.part].path_curve
+        if not curve_alive(obj) or obj.name not in context.view_layer.objects:
+            return {"CANCELLED"}
+        if context.object is not None and context.object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        for other in context.selected_objects:
+            other.select_set(False)
+        obj.hide_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        bpy.ops.object.mode_set(mode="EDIT")
+        return {"FINISHED"}
+
+
+class RIGMOVES_OT_drop_curve(bpy.types.Operator):
+    bl_idname = "rigmoves.drop_curve"
+    bl_label = "Straighten"
+    bl_description = ("Delete this part's curve. Its path goes straight from "
+                      "Before to After again")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    part: bpy.props.IntProperty()
+
+    def execute(self, context):
+        _rig, data, move = move_at(context, self.index)
+        if move is None or not 0 <= self.part < len(move.parts):
+            return {"CANCELLED"}
+        part = move.parts[self.part]
+        obj = part.path_curve
+        part.path_curve = None
+        if obj is not None:
+            if obj.mode == "EDIT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            curve = obj.data
+            bpy.data.objects.remove(obj, do_unlink=True)
+            if curve is not None and curve.users == 0:
+                bpy.data.curves.remove(curve)
+        # The Build sees the curve gone and straightens the path.
+        bpy.ops.rigmoves.build()
+        data.report = "'{:s}' goes straight from Before to After again.".format(
+            short(part.name, 20))
+        return {"FINISHED"}
+
+
+class RIGMOVES_OT_show_paths(bpy.types.Operator):
+    bl_idname = "rigmoves.show_paths"
+    bl_label = "Show Paths"
+    bl_description = ("Draw a line in the viewport through where each part of "
+                      "this move goes, from Before to After")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    show: bpy.props.BoolProperty(default=True)
+
+    def execute(self, context):
+        rig, data, move = move_at(context, self.index)
+        if move is None:
+            return {"CANCELLED"}
+        move.show_paths = self.show
+        if not self.show:
+            drop_paths(move)
             return {"FINISHED"}
+        if not draw_paths(rig, move):
+            data.report = "Nothing to draw yet: record Before and After, then Build."
+            self.report({"WARNING"}, data.report)
+        return {"FINISHED"}
+
+
+def control_channel(carrier):
+    """(owner, data path, index) of what a control's keys go on: the handle's
+    place along its rail, or the slider itself when there is no handle."""
+    handle, bone = control_of(carrier)
+    if handle is not None:
+        return handle, "location", 1
+    if bone is not None and carrier.prop in bone.keys():
+        return bone, '["{:s}"]'.format(bpy.utils.escape_identifier(carrier.prop)), -1
+    return None, None, None
+
+
+def action_curve(rig, data_path, index):
+    """(holder, F-curve) for one channel of the rig's own animation, or Nones."""
+    action = rig.animation_data.action if rig.animation_data else None
+    if action is None:
+        return None, None
+    holders = [bag for layer in action.layers for strip in layer.strips
+               for bag in strip.channelbags]
+    if hasattr(action, "fcurves"):
+        holders.append(action)
+    for holder in holders:
+        for curve in holder.fcurves:
+            if curve.data_path == data_path and (index < 0 or curve.array_index == index):
+                return holder, curve
+    return None, None
+
+
+class RIGMOVES_OT_animate(bpy.types.Operator):
+    bl_idname = "rigmoves.animate"
+    bl_label = "Animate"
+    bl_description = ("Key the control to play the whole of it from the "
+                      "current frame, over this many frames. Replaces any keys "
+                      "the control had")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    combined: bpy.props.BoolProperty(default=False)
+
+    def execute(self, context):
+        rig = rig_of(context)
+        if not here(context, rig):
+            return {"CANCELLED"}
+        data = rig.rigmoves
+        carriers_ = data.groups if self.combined else data.moves
+        if not 0 <= self.index < len(carriers_):
+            return {"CANCELLED"}
+        carrier = carriers_[self.index]
+        owner, path, index = control_channel(carrier)
+        if owner is None:
+            data.report = "Build first: there is no control to animate yet."
+            self.report({"WARNING"}, data.report)
+            return {"CANCELLED"}
+        # Whatever the control was keyed to do before goes: two keys, start
+        # and end, are the whole of the instruction.
+        full = owner.path_from_id(path)
+        holder, curve = action_curve(rig, full, index)
+        if curve is not None:
+            holder.fcurves.remove(curve)
+        scene = context.scene
+        start = scene.frame_current
+        end = start + max(1, carrier.play_frames)
+        for frame, share in ((start, 0.0), (end, 100.0)):
+            carrier.play = share
+            owner.keyframe_insert(path, index=index, frame=frame)
+        _holder, curve = action_curve(rig, full, index)
+        if curve is not None:
+            # Even in time: the shape of the move is the move's own Ease and
+            # speeds, not a second ease laid on top by the keys.
+            for point in curve.keyframe_points:
+                point.interpolation = "LINEAR"
+            curve.update()
+        carrier.play = 0.0
+        if end > scene.frame_end:
+            scene.frame_end = end
+        data.report = "'{:s}' plays over frames {:d} to {:d}.".format(
+            carrier.name, start, end)
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -3015,6 +3886,16 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
         bone = rig.pose.bones.get(move.control)
         if bone is not None and move.prop in bone.keys():
             del bone[move.prop]
+        # Its drawn paths and its curves were made for it and go with it.
+        drop_paths(move)
+        for part in move.parts:
+            obj = part.path_curve
+            part.path_curve = None
+            if obj is not None:
+                curve = obj.data
+                bpy.data.objects.remove(obj, do_unlink=True)
+                if curve is not None and curve.users == 0:
+                    bpy.data.curves.remove(curve)
         action = bpy.data.actions.get(move.action_name) if move.action_name else None
         # Out of any combined control that was playing it, first: a member
         # pointing at a move that is gone would draw as a blank row.
@@ -3405,6 +4286,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         row.operator(RIGMOVES_OT_use_selected.bl_idname,
                      text="{:d} selected".format(len(move.parts)),
                      icon="CHECKMARK" if len(move.parts) else "ADD").index = index
+        self._draw_pivot(body, context, move, index)
 
         row = body.split(factor=0.4, align=True)
         row.scale_y = 1.15
@@ -3461,6 +4343,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             said.enabled = False
             said.label(text="+ adds a pose in between, for a path that bends")
         body.prop(move, "ease", text="")
+        self._draw_path(body, context, move, index)
 
         # Riders have no delay of their own: each is placed against its
         # leader instead, ahead or behind, and travels at the leader's speed.
@@ -3483,6 +4366,9 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                     line.label(text=short(part.name, 13), icon="OBJECT_DATA")
                     right = line.row(align=True)
                     right.prop(part, "lead", text="Lead", slider=True)
+                    mirror = right.row(align=True)
+                    mirror.ui_units_x = 2.2
+                    mirror.prop(part, "mirror", text="", icon="MOD_MIRROR")
                     drop = right.operator(RIGMOVES_OT_drop_rider.bl_idname, text="",
                                           icon="X", emboss=False)
                     drop.index, drop.part = index, position
@@ -3536,6 +4422,62 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         key = row.operator(RIGMOVES_OT_key_control.bl_idname, text="",
                            icon="DECORATE_KEYFRAME")
         key.index, key.combined = index, combined
+        # Keys the whole of it from the current frame, so nobody has to key
+        # the start and the end by hand to get it playing.
+        row = body.row(align=True)
+        row.prop(carrier, "play_frames", text="Frames")
+        run = row.operator(RIGMOVES_OT_animate.bl_idname, text="Animate",
+                           icon="PLAY")
+        run.index, run.combined = index, combined
+
+    def _draw_pivot(self, body, context, move, index):
+        """Where the selected parts turn about: three buttons, the one in
+        use pressed in."""
+        if not any(p.kind == "OBJECT" and not p.leader for p in move.parts):
+            return
+        chosen = chosen_parts(context, move)
+        row = body.split(factor=0.4, align=True)
+        row.label(text="Pivot", icon="PIVOT_CURSOR")
+        buttons = row.row(align=True)
+        buttons.enabled = bool(chosen)
+        current = chosen[0].pivot_kind if chosen else ""
+        for kind, label, _description in PIVOTS:
+            press = buttons.operator(RIGMOVES_OT_set_pivot.bl_idname,
+                                     text="Cursor" if kind == "CURSOR" else label,
+                                     depress=kind == current)
+            press.index, press.kind = index, kind
+        if not chosen:
+            said = body.row()
+            said.enabled = False
+            said.label(text="select a part to set where it turns")
+
+    def _draw_path(self, body, context, move, index):
+        """Curving the path, and the line that shows where it goes."""
+        row = body.row(align=True)
+        if any(p.kind == "OBJECT" and not p.leader for p in move.parts):
+            run = row.operator(RIGMOVES_OT_curve_path.bl_idname,
+                               text="Curve the Path", icon="CURVE_BEZCURVE")
+            run.index = index
+        if move.built:
+            shown = row.operator(RIGMOVES_OT_show_paths.bl_idname,
+                                 text="Paths", icon="IPO_LINEAR",
+                                 depress=move.show_paths)
+            shown.index, shown.show = index, not move.show_paths
+        curved = [(i, p) for i, p in enumerate(move.parts) if curve_alive(p.path_curve)]
+        for position, part in curved:
+            line = body.split(factor=0.55, align=True)
+            line.label(text=short(part.name, 16), icon="CURVE_BEZCURVE")
+            right = line.row(align=True)
+            edit = right.operator(RIGMOVES_OT_edit_curve.bl_idname, text="Edit",
+                                  icon="EDITMODE_HLT")
+            edit.index, edit.part = index, position
+            drop = right.operator(RIGMOVES_OT_drop_curve.bl_idname, text="",
+                                  icon="X", emboss=False)
+            drop.index, drop.part = index, position
+        if curved:
+            said = body.row()
+            said.enabled = False
+            said.label(text="bend it in edit mode, then Build")
 
     def _draw_speed(self, body, holder, prop):
         """The speed of one stretch, drawn between the two poses it joins.
@@ -3605,6 +4547,12 @@ CLASSES = (
     RIGMOVES_OT_add_step,
     RIGMOVES_OT_drop_step,
     RIGMOVES_OT_build,
+    RIGMOVES_OT_set_pivot,
+    RIGMOVES_OT_curve_path,
+    RIGMOVES_OT_edit_curve,
+    RIGMOVES_OT_drop_curve,
+    RIGMOVES_OT_show_paths,
+    RIGMOVES_OT_animate,
     RIGMOVES_OT_key_control,
     RIGMOVES_OT_pause,
     RIGMOVES_OT_reset,

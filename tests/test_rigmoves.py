@@ -23,7 +23,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import bpy  # noqa: E402
-from mathutils import Matrix  # noqa: E402
+from mathutils import Matrix, Vector  # noqa: E402
 
 import rigmoves  # noqa: E402
 
@@ -75,6 +75,14 @@ def centre(obj):
 
 def drift(obj, expected):
     return max((a - b).length for a, b in zip(world_points(obj), expected))
+
+
+def drawn_name(move, obj):
+    """The name a drawn object had, safe to ask after it is deleted."""
+    try:
+        return obj.name
+    except ReferenceError:
+        return move.paths_name or "-"
 
 
 def rig():
@@ -218,6 +226,42 @@ class TestObjects(RigMovesCase):
         key = curves[0].keyframe_points[0]
         self.assertAlmostEqual(key.co[0], 12.0)
         self.assertAlmostEqual(key.co[1], self.move.rail * 0.4, places=6)
+
+    def test_animate_keys_the_whole_move(self):
+        scene = bpy.context.scene
+        scene.frame_set(10)
+        scene.frame_end = 20
+        self.move.play_frames = 40
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        self.assertEqual(scene.frame_end, 50)
+        scene.frame_set(30)
+        self.assertAlmostEqual(centre(self.arm).z, 1.5, places=4)
+        scene.frame_set(50)
+        self.assertLess(drift(self.arm, self.after["Arm"]), TOLERANCE)
+        # Pressed again it replaces the keys rather than piling more on.
+        scene.frame_set(1)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        curves = [c for _h, c in rigmoves.rig_own_curves(rig(), rig().rigmoves)]
+        self.assertEqual([len(c.keyframe_points) for c in curves], [2])
+        # A Build keeps the keys, and does not call them a fault.
+        bpy.ops.rigmoves.build()
+        self.assertNotIn("animated by hand", rig().rigmoves.report)
+        scene.frame_set(21)
+        self.assertAlmostEqual(centre(self.arm).z, 1.5, places=4)
+
+    def test_paths_show_where_the_parts_go(self):
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=True), {"FINISHED"})
+        drawn = bpy.data.objects.get(self.move.paths_name)
+        self.assertIsNotNone(drawn)
+        self.assertEqual(len(drawn.data.splines), 2)
+        arm = drawn.data.splines[1].points
+        self.assertLess((Vector(arm[0].co[:3]) - Vector((3.0, 0.0, 1.0))).length, TOLERANCE)
+        self.assertLess((Vector(arm[-1].co[:3]) - Vector((3.0, 0.0, 2.0))).length, TOLERANCE)
+        # Drawn again by a Build, and gone when hidden.
+        bpy.ops.rigmoves.build()
+        self.assertIsNotNone(bpy.data.objects.get(self.move.paths_name))
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=False), {"FINISHED"})
+        self.assertIsNone(bpy.data.objects.get(drawn_name(self.move, drawn)))
 
     def add_mid_step(self, z):
         """One step, with the arm dragged to this height for it, then Build."""
@@ -418,6 +462,228 @@ class TestRiders(RigMovesCase):
         drive(move, 1.0)
         self.assertLess(drift(self.petal, self.after["Petal"]), TOLERANCE)
         self.assertLess(drift(self.rider, self.expected(Matrix())), TOLERANCE)
+
+
+class TestPivot(RigMovesCase):
+    """A lid hinged on its top back edge, opened a quarter turn about it.
+
+    Recorded by its two poses only, which are the same whatever the pivot -
+    so it is the way between them that tells a hinge from an origin.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lid = cube("Lid", (0.0, 0.0, 1.0))
+        self.hinge = Vector((0.0, 0.5, 1.5))
+        self.home = self.lid.matrix_world.copy()
+
+        def pose():
+            self.lid.matrix_world = self.swing(90.0) @ self.home
+
+        self.before, self.after = record_move([self.lid], pose)
+        self.move = rig().rigmoves.moves[0]
+
+    def swing(self, degrees):
+        return (Matrix.Translation(self.hinge) @ Matrix.Rotation(math.radians(degrees), 4, "X")
+                @ Matrix.Translation(-self.hinge))
+
+    def swung(self, degrees):
+        return [self.swing(degrees) @ self.home @ v.co for v in self.lid.data.vertices]
+
+    def hinge_on_cursor(self):
+        bpy.context.scene.cursor.location = self.hinge
+        select(self.lid)
+        return bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+
+    def test_pivot_picked_before_the_first_build(self):
+        self.assertEqual(self.hinge_on_cursor(), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        self.assertLess(drift(self.lid, self.swung(45.0)), TOLERANCE)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.lid, self.after["Lid"]), TOLERANCE)
+
+    def test_pivot_picked_after_a_build_keeps_the_poses(self):
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        # About its origin the lid's middle slides straight: not a hinge.
+        self.assertGreater(drift(self.lid, self.swung(45.0)), 0.05)
+        # A step at 60 degrees, recorded before the pivot moves.
+        self.assertEqual(bpy.ops.rigmoves.add_step(index=0), {"FINISHED"})
+        self.lid.matrix_world = self.swing(60.0) @ self.home
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="STEP", step=0)
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.hinge_on_cursor(), {"FINISHED"})
+        # Every recorded pose is where it was...
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.lid, self.before["Lid"]), TOLERANCE)
+        drive(self.move, 0.5)
+        self.assertLess(drift(self.lid, self.swung(60.0)), TOLERANCE)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.lid, self.after["Lid"]), TOLERANCE)
+        # ...and in between it swings about the hinge.
+        drive(self.move, 0.25)
+        self.assertLess(drift(self.lid, self.swung(30.0)), TOLERANCE)
+        drive(self.move, 0.75)
+        self.assertLess(drift(self.lid, self.swung(75.0)), TOLERANCE)
+
+    def test_base_pivot(self):
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="BASE"), {"FINISHED"})
+        self.assertLess((Vector(self.move.parts[0].pivot) - Vector((0.0, 0.0, -0.5))).length,
+                        1e-6)
+
+    def test_rider_turns_about_its_leaders_pivot_carried_over(self):
+        self.hinge_on_cursor()
+        bpy.ops.rigmoves.build()
+        other = cube("Other", (5.0, 0.0, 1.0))
+        other.rotation_euler.z = math.radians(90.0)
+        bpy.context.view_layer.update()
+        seat = other.matrix_world.copy()
+        select(other, self.lid)
+        bpy.context.view_layer.objects.active = self.lid
+        bpy.ops.rigmoves.ride_along(index=0, leader="Lid", rig_name=rig().name)
+        drive(self.move, 0.5)
+        carry = seat @ self.home.inverted()
+        expected = [carry @ self.swing(45.0) @ self.home @ v.co for v in other.data.vertices]
+        self.assertLess(drift(other, expected), TOLERANCE)
+
+
+class TestMirror(RigMovesCase):
+    """A wing that moves out and tips, and a second one that mirrors it."""
+
+    def setUp(self):
+        super().setUp()
+        self.wing = cube("Wing", (1.5, 0.0, 0.0))
+        self.wing.rotation_euler.z = math.radians(20.0)
+        bpy.context.view_layer.update()
+        self.home = self.wing.matrix_world.copy()
+
+        def pose():
+            self.wing.matrix_world = (self.home @ Matrix.Translation((1.0, 0.0, 0.0))
+                                      @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
+
+        record_move([self.wing], pose)
+        bpy.ops.rigmoves.build()
+        self.move = rig().rigmoves.moves[0]
+
+    def ride(self, other):
+        select(other, self.wing)
+        bpy.context.view_layer.objects.active = self.wing
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Wing",
+                                                     rig_name=rig().name), {"FINISHED"})
+        return next(p for p in self.move.parts if p.leader)
+
+    def test_mirrored_copy_mirrors_by_itself(self):
+        # The other wing as Ctrl+M leaves it: the same wing, mirrored across X.
+        other = cube("Other", (0.0, 0.0, 0.0))
+        across = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        other.matrix_world = across @ self.home
+        bpy.context.view_layer.update()
+        self.assertLess(other.matrix_world.determinant(), 0.0)
+        self.ride(other)
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            expected = [across @ p for p in world_points(self.wing)]
+            self.assertLess(drift(other, expected), TOLERANCE)
+
+    def test_mirror_setting_for_a_rider_facing_the_other_way(self):
+        # The second of a pair of doors: turned round, not mirrored.
+        other = cube("Other", (-1.5, 0.0, 0.0))
+        other.rotation_euler.z = math.radians(160.0)
+        bpy.context.view_layer.update()
+        seat = other.matrix_world.copy()
+        rider = self.ride(other)
+        across = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        travel = (Matrix.Translation((0.5, 0.0, 0.0))
+                  @ Matrix.Rotation(math.radians(15.0), 4, "Y"))
+        drive(self.move, 0.5)
+        plain = [seat @ travel @ v.co for v in other.data.vertices]
+        self.assertLess(drift(other, plain), TOLERANCE)
+        # Takes effect without a Build.
+        rider.mirror = "X"
+        bpy.context.view_layer.update()
+        mirrored = [seat @ across @ travel @ across @ v.co for v in other.data.vertices]
+        self.assertLess(drift(other, mirrored), TOLERANCE)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        self.assertLess(drift(other, mirrored), TOLERANCE)
+
+
+class TestCurve(RigMovesCase):
+    """A box slid from A to B, then sent round an obstacle by a curve."""
+
+    def setUp(self):
+        super().setUp()
+        self.box = cube("Box", (0.0, 0.0, 0.5))
+
+        def pose():
+            self.box.location.x = 4.0
+
+        self.before, self.after = record_move([self.box], pose)
+        bpy.ops.rigmoves.build()
+        self.move = rig().rigmoves.moves[0]
+        select(self.box)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.curve = self.move.parts[0].path_curve
+
+    def bend(self, offset):
+        """Drag the middle point, handles and all, as grabbing it would."""
+        spline = self.curve.data.splines[0]
+        points, left, right = rigmoves.points_of(spline)
+        for row in (points, left, right):
+            row[1] = row[1] + offset
+        rigmoves.set_points(spline, points, left, right)
+
+    def test_curve_starts_on_the_path(self):
+        points = self.curve.data.splines[0].bezier_points
+        self.assertEqual(len(points), 3)
+        self.assertLess((points[0].co - Vector((0.0, 0.0, 0.5))).length, TOLERANCE)
+        self.assertLess((points[-1].co - Vector((4.0, 0.0, 0.5))).length, TOLERANCE)
+        drive(self.move, 0.5)
+        self.assertLess((centre(self.box) - Vector((2.0, 0.0, 0.5))).length, TOLERANCE)
+
+    def test_part_follows_the_bent_curve(self):
+        self.bend(Vector((0.0, 3.0, 0.0)))
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        self.assertLess((centre(self.box) - Vector((2.0, 3.0, 0.5))).length, 1e-3)
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.box, self.before["Box"]), TOLERANCE)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.box, self.after["Box"]), TOLERANCE)
+
+    def test_ends_are_pinned_to_before_and_after(self):
+        points = self.curve.data.splines[0].bezier_points
+        points[0].co = Vector((-5.0, -5.0, -5.0))
+        points[-1].co = Vector((9.0, 9.0, 9.0))
+        bpy.ops.rigmoves.build()
+        self.assertLess((points[0].co - Vector((0.0, 0.0, 0.5))).length, TOLERANCE)
+        self.assertLess((points[-1].co - Vector((4.0, 0.0, 0.5))).length, TOLERANCE)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.box, self.after["Box"]), TOLERANCE)
+
+    def test_rider_follows_the_curve_from_its_place(self):
+        self.bend(Vector((0.0, 3.0, 0.0)))
+        other = cube("Other", (0.0, 10.0, 0.5))
+        other.rotation_euler.z = math.radians(90.0)
+        bpy.context.view_layer.update()
+        select(other, self.box)
+        bpy.context.view_layer.objects.active = self.box
+        bpy.ops.rigmoves.ride_along(index=0, leader="Box", rig_name=rig().name)
+        drive(self.move, 0.5)
+        # (2, 3) on the leader's way, turned a quarter round onto the rider.
+        self.assertLess((centre(other) - Vector((-3.0, 12.0, 0.5))).length, 1e-3)
+
+    def test_straighten_takes_the_curve_away(self):
+        self.bend(Vector((0.0, 3.0, 0.0)))
+        bpy.ops.rigmoves.build()
+        name = self.curve.name
+        self.assertEqual(bpy.ops.rigmoves.drop_curve(index=0, part=0), {"FINISHED"})
+        self.assertIsNone(bpy.data.objects.get(name))
+        drive(self.move, 0.5)
+        self.assertLess((centre(self.box) - Vector((2.0, 0.0, 0.5))).length, TOLERANCE)
 
 
 class TestCombined(RigMovesCase):
