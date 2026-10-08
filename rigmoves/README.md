@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.14.3
+# RigMoves (experiment) - v0.14.4
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -14,7 +14,7 @@ By **NemVe3D** - <https://creators.sa/nemve>
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.3.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.4.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -698,8 +698,8 @@ and one lifted 1 m:
   screen. What is recorded is the finger carried whole, joints shut; pose
   at Play 0 to see it as it will be.
 - Changing **Follows** waits for **Build**. Posed before that Build, a
-  follower is recorded as it is seen, not with its own joint kept - and a
-  follower bent by hand then is not recorded right. Build first.
+  follower is recorded as it is seen, not with its own joint kept. Build
+  first to keep it.
 
 - Before should be the rest pose. Nothing warns when it is not, and a machine
   recorded from a half-posed start will be wrong at the ends.

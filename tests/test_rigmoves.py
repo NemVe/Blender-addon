@@ -1446,11 +1446,6 @@ class TestFollowersAdded(RigMovesCase):
         drive(self.move, 1.0)
         self.check([self.turn(0, 30.0) @ home for home in self.homes])
 
-    # Open (see HANDOFF.md): here the newcomers are bound by the Build that
-    # Set Pivot runs before Follows is set, so their bones still wait on a
-    # Build while the tip is bent - and that bend is not recorded right.
-    # Without the pivots, or with the Build the panel asks for, it works.
-    @unittest.expectedFailure
     def test_new_followers_are_shown_carried_on_after(self):
         self.base_built()
         self.join_the_rest()
@@ -1459,7 +1454,15 @@ class TestFollowersAdded(RigMovesCase):
         self.check(carried)
         # The tip bent on its own from there, the middle left where carried.
         wanted = carried[:2] + [self.turn(0, 30.0) @ self.turn(2, 40.0) @ self.homes[2]]
-        self.segments[2].matrix_world = wanted[2]
+        # Bound already, by the Build that Set Pivot runs, so its bone carries
+        # it: it is dragged from where it is seen, as a user would.
+        shown = Matrix.Identity(4)
+        pose_bone = rig().pose.bones.get(self.move.parts["Seg3"].bone_name or "-")
+        if pose_bone is not None:
+            world = rig().matrix_world
+            shown = (world @ pose_bone.matrix @ pose_bone.bone.matrix_local.inverted()
+                     @ world.inverted())
+        self.segments[2].matrix_world = shown.inverted() @ wanted[2]
         bpy.context.view_layer.update()
         self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
         bpy.ops.rigmoves.build()

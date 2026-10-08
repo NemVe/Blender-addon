@@ -1,4 +1,4 @@
-# Handoff: where RigMoves stands (v0.14.3)
+# Handoff: where RigMoves stands (v0.14.4)
 
 Read `CLAUDE.md` first. It covers the test and lint commands, the driver
 rules, and the routine after every change: bump `bl_info["version"]` and
@@ -26,7 +26,7 @@ The user tests every version in their own Blender and reported followers
 not following (`Doesnwork.blend`). 0.14.1 fixed that. A review then found
 nine more problems, and 0.14.2 fixes them.
 
-## What 0.14.2 changed (0.14.3 only adds the author credit) (all in `rigmoves/__init__.py`)
+## What 0.14.2 changed (0.14.3 adds the author credit, 0.14.4 closes open issue 1) (all in `rigmoves/__init__.py`)
 
 - **`seen_poses()`** is used by Record. It reads each object part where it
   is *meant* to be.
@@ -63,21 +63,12 @@ nine more problems, and 0.14.2 fixes them.
 
 ## Open issues (start here)
 
-1. **`TestFollowersAdded.test_new_followers_are_shown_carried_on_after`**
-   is marked `expectedFailure`. Steps to reproduce:
-   1. Build a base.
-   2. Add Seg2 and Seg3 to the move.
-   3. Set a pivot on them. Set Pivot runs a Build, so they get bound
-      before Follows is set.
-   4. Set Follows. The bones now wait on a Build.
-   5. Press the eye on After. The followers are shown carried, which is
-      correct.
-   6. Bend the tip on its own, then Record After and Build.
-
-   Result: the tip ends 1.5 m off. Probable cause: `seen_poses` for a bound
-   follower whose bone is pending, and the tip posed by `ride_shown`. It
-   works without step 3, or with a Build after step 4. Fix it, then remove
-   `@unittest.expectedFailure`.
+1. **Resolved in 0.14.4:** `test_new_followers_are_shown_carried_on_after`
+   was wrong, not the add-on. There the tip is already bound (Set Pivot
+   runs a Build) and its bone carries it, so the test set its object to
+   the wanted pose instead of dragging it from where it is seen. The add-on
+   recorded what was on screen, as it should. The test now drags it from
+   where it is shown, and it passes.
 2. **Not done yet:** check that each new regression test fails on
    `90ec17b`, which is 0.14.1. Copy that commit's `rigmoves/__init__.py`
    into a temporary package and run the new tests against it. The new
@@ -96,6 +87,6 @@ nine more problems, and 0.14.2 fixes them.
 
 ## How to test
 
-    .venv/bin/python tests/test_rigmoves.py      # 83 tests, 1 expected failure
+    .venv/bin/python tests/test_rigmoves.py      # 83 tests, all pass
     ruff check rigmoves tests tools
-    python tools/build_zip.py                    # dist/RigMoves-0.14.3.zip
+    python tools/build_zip.py                    # dist/RigMoves-0.14.4.zip

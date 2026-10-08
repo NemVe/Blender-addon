@@ -32,7 +32,7 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 14, 3),
+    "version": (0, 14, 4),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
