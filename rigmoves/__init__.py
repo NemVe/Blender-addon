@@ -398,6 +398,25 @@ def rig_reach(rig):
     return max((high - low).length, 1e-3)
 
 
+def corners_of(obj):
+    """An object's bounding corners in its own space, as it was modelled.
+
+    Not obj.bound_box: in Blender 5 that is the evaluated box, which on a
+    bound part already holds wherever the rig has moved it. Read with the
+    machine half open it put a Base pivot on the top of a lid, drew the path
+    preview a whole move off, and sized and placed the handles differently
+    depending on where the control happened to be.
+    """
+    if obj.type == "MESH" and len(obj.data.vertices):
+        values = [0.0] * (3 * len(obj.data.vertices))
+        obj.data.vertices.foreach_get("co", values)
+        low = [min(values[axis::3]) for axis in range(3)]
+        high = [max(values[axis::3]) for axis in range(3)]
+        return [Vector((x, y, z)) for x in (low[0], high[0])
+                for y in (low[1], high[1]) for z in (low[2], high[2])]
+    return [Vector(c) for c in obj.bound_box]
+
+
 def handle_place(rig, names):
     """Where a handle over these bones should stand, and how long its rail is.
 
@@ -421,7 +440,7 @@ def handle_place(rig, names):
         # about how big it is, so the object's own corners are what decide.
         for child in rig.children:
             if child.type == "MESH" and child.vertex_groups.get(name) is not None:
-                points.extend(child.matrix_world @ Vector(c) for c in child.bound_box)
+                points.extend(child.matrix_world @ c for c in corners_of(child))
     if not points:
         return None, 0.1
     low = Vector((min(p.x for p in points), min(p.y for p in points),
@@ -493,6 +512,7 @@ def sync_handles(rig, data):
     # identical to look at. Grabbing one and getting another reads as the
     # control simply not working.
     placed = []
+    rails = [(carrier, carrier.rail) for carrier, _names in carriers(data)]
     for name, (move, names) in list(wanted.items()):
         where, rail = handle_place(rig, names)
         if where is None:
@@ -528,6 +548,13 @@ def sync_handles(rig, data):
         move.handle_name = bone.name
     bpy.ops.object.mode_set(mode="OBJECT")
 
+    # A rail that changed length - a pivot moved, a rider joined - takes the
+    # handle's keys with it, so a control keyed by Animate or by hand still
+    # runs from end to end, and an unkeyed handle stays as far along.
+    for carrier, was in rails:
+        if was > 1e-9 and abs(carrier.rail - was) > 1e-9:
+            stretch_handle(rig, carrier, carrier.rail / was)
+
     # The rail length is written on the bone as well, so a handle can be known
     # for ours later without consulting the panel.
     for carrier, _names in carriers(data):
@@ -542,6 +569,21 @@ def sync_handles(rig, data):
             pass
     if was_active is not None and was_active is not rig:
         view_layer.objects.active = was_active
+
+
+def stretch_handle(rig, carrier, factor):
+    """Scale a handle's place along its rail, and its keys, by `factor`."""
+    pose_bone = rig.pose.bones.get(carrier.handle_name) if carrier.handle else None
+    if pose_bone is None:
+        return
+    pose_bone.location.y *= factor
+    _holder, curve = action_curve(rig, pose_bone.path_from_id("location"), 1)
+    if curve is not None:
+        for point in curve.keyframe_points:
+            point.co[1] *= factor
+            point.handle_left[1] *= factor
+            point.handle_right[1] *= factor
+        curve.update()
 
 
 def dress_handle(rig, move):
@@ -710,26 +752,6 @@ PLAY_HELP = ("Play the whole of it, from the first part that moves to the last "
 FRAMES_HELP = "How many frames Animate spreads the whole of it over"
 
 
-def _mirror_changed(self, context):
-    """Copy the leader's path again, turned the new way, at once.
-
-    Only the copy changes - the rider's bone stands where it stood - so there
-    is nothing that needs a Build.
-    """
-    rig = self.id_data
-    data = rig.rigmoves
-    mine = self.as_pointer()
-    for move in data.moves:
-        if any(p.as_pointer() == mine for p in move.parts):
-            leader = leader_of(move, self)
-            if leader is not None and self.bone_name:
-                copy_path(rig, move, leader, self)
-                if move.show_paths:
-                    draw_paths(rig, move)
-            break
-    rig.update_tag()
-
-
 AXES = ("X", "Y", "Z")
 MIRRORS = [("NONE", "-", "Copies the leader's move as it is, from where it stands"),
            ("X", "X", "Mirrors the leader's move across its own X: its left "
@@ -781,8 +803,7 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # A rider that faces the other way to its leader - the second of a pair
     # of doors - can play its move mirrored. A rider that is a mirrored copy
     # already (negative scale) mirrors by itself, with this left at "-".
-    mirror: bpy.props.EnumProperty(
-        name="Mirror", items=MIRRORS, default="NONE", update=_mirror_changed)
+    mirror: bpy.props.EnumProperty(name="Mirror", items=MIRRORS, default="NONE")
     # The point this part turns about, in its own space where it stands at
     # Before, so it goes with the object if Before is taken again. The kind
     # is only which button set it, for the panel to show.
@@ -922,7 +943,9 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
     show_riders: bpy.props.BoolProperty(default=True)
     # The line drawn through where every part goes, while it is shown.
     show_paths: bpy.props.BoolProperty(default=False)
-    paths_name: bpy.props.StringProperty()
+    # Held by pointer, not by name: a name freed by one rig's deleted line
+    # can be taken by another rig's, and the wrong one would go.
+    paths_object: bpy.props.PointerProperty(type=bpy.types.Object)
 
 
 def _group_renamed(self, context):
@@ -1040,6 +1063,7 @@ def rig_of(context):
     # is what keeps the panel on the right rig while the objects, not the
     # armature, are the things being selected and moved.
     chosen = {o.name for o in getattr(context, "selected_objects", ())}
+    chosen.add(obj.name)
     if chosen:
         for candidate in bpy.data.objects:
             if candidate.type != "ARMATURE" or not here(context, candidate):
@@ -1047,6 +1071,11 @@ def rig_of(context):
             for move in candidate.rigmoves.moves:
                 for part in move.parts:
                     if part.kind == "OBJECT" and part.name in chosen:
+                        return candidate
+                    # A part's path curve, being bent in edit mode, still
+                    # belongs to that part's rig.
+                    curve = part.path_curve
+                    if curve is not None and curve.name in chosen:
                         return candidate
     kept = getattr(context.scene, "rigmoves_rig", None)
     # Only while it still has something on it. An empty rig - one whose moves
@@ -1230,6 +1259,65 @@ def rig_own_curves(rig, data):
     return out
 
 
+def is_handle(rig, name):
+    bone = rig.data.bones.get(name)
+    return bone is not None and bone.get(RAIL) is not None
+
+
+def curve_bone(curve):
+    try:
+        return curve.data_path.split('"')[1]
+    except IndexError:
+        return ""
+
+
+def lone_key(rig, curve, auto):
+    """Whether a curve on our bones is a lone key a drag left behind.
+
+    On a part's own bone a single key is never wanted: it pins the bone
+    against its path. On a handle it is what a drag leaves with Auto Keying
+    on - but also what one press of the key button makes, on purpose, as the
+    first key of an animation. So a handle's lone key counts as stray only
+    while Auto Keying is on.
+    """
+    if len(curve.keyframe_points) > 1:
+        return False
+    return auto or not is_handle(rig, curve_bone(curve))
+
+
+def stray_curves(rig, data, auto=True):
+    """The keys on our bones worth a word: a lone key a drag left behind, or a
+    part's own bone keyed on top of its path. A handle with a real curve on
+    it is the machine being animated, which is what it is for."""
+    out = []
+    for holder, curve in rig_own_curves(rig, data):
+        name = curve_bone(curve)
+        if not name:
+            continue
+        if lone_key(rig, curve, auto) or (len(curve.keyframe_points) > 1
+                                          and not is_handle(rig, name)):
+            out.append((holder, curve))
+    return out
+
+
+def drop_control_keys(rig, carrier):
+    """Take a control's keys off the rig along with the control, so a later
+    one that lands on the same name does not play an animation nobody gave
+    it."""
+    paths = []
+    if carrier.handle_name:
+        paths.append(bone_path(carrier.handle_name, "location"))
+    if carrier.control and carrier.prop:
+        paths.append(property_path(carrier.control, carrier.prop))
+    for path in paths:
+        while True:
+            holder, curve = action_curve(rig, path, -1)
+            if curve is None:
+                break
+            holder.fcurves.remove(curve)
+    drop_empty_action(rig)
+
+
 def lift_curves(pairs):
     """Take these F-curves out, and say how many went."""
     gone = 0
@@ -1258,7 +1346,7 @@ def drop_empty_action(holder):
         bpy.data.actions.remove(action)
 
 
-def clear_autokey(rig, data):
+def clear_autokey(rig, data, auto=True):
     """Take off the keyframes Auto Keying leaves on a rig as it is set up.
 
     Both kinds go, but not on the same terms. A key on a bound object's own
@@ -1287,7 +1375,7 @@ def clear_autokey(rig, data):
                 drop_empty_action(obj)
 
     ours = rig_own_curves(rig, data)
-    spare = [pair for pair in ours if len(pair[1].keyframe_points) <= 1]
+    spare = [pair for pair in ours if lone_key(rig, pair[1], auto)]
     real = [pair for pair in ours if len(pair[1].keyframe_points) > 1]
     bones = lift_curves(spare)
     if bones:
@@ -1714,6 +1802,19 @@ def reflection(axis):
     return Matrix.Diagonal([-1.0 if name == axis else 1.0 for name in AXES])
 
 
+def rider_reflection(rig, leader, rider):
+    """The mirror between a leader and a rider, in their own axes - None
+    when there is none."""
+    lead_mirrored = leader_frame(rig, leader)[1]
+    mirrored = standing(as_matrix(rider.before))[1]
+    local = Matrix.Identity(3)
+    if mirrored != lead_mirrored:
+        local = local @ reflection("X")
+    if rider.mirror in AXES:
+        local = local @ reflection(rider.mirror)
+    return None if local == Matrix.Identity(3) else local
+
+
 def rider_turn(rig, leader, rider):
     """What a rider's copy of the path is turned by, in the leader bone's own
     axes - None for a plain copy.
@@ -1726,15 +1827,10 @@ def rider_turn(rig, leader, rider):
     the axis it names, for a rider that faces the other way without being a
     mirror image: the second of a pair of doors.
     """
-    lead_frame, lead_mirrored = leader_frame(rig, leader)
-    _frame, mirrored = standing(as_matrix(rider.before))
-    local = Matrix.Identity(3)
-    if mirrored != lead_mirrored:
-        local = local @ reflection("X")
-    if rider.mirror in AXES:
-        local = local @ reflection(rider.mirror)
-    if local == Matrix.Identity(3):
+    local = rider_reflection(rig, leader, rider)
+    if local is None:
         return None
+    lead_frame = leader_frame(rig, leader)[0]
     bone = rig.data.bones[part_bone(leader)]
     rest = (rig.matrix_world @ bone.matrix_local).to_3x3().normalized()
     into_bone = rest.transposed() @ lead_frame.to_3x3()
@@ -1766,10 +1862,18 @@ def bind_riders(context, rig, data):
                 continue
             bone = rig.data.bones[part_bone(leader)]
             # The leader's bone as the leader sees it, then stood on the rider.
-            carried = (frame_of(as_matrix(rider.before))
-                       @ leader_frame(rig, leader)[0].inverted_safe()
-                       @ world @ bone.matrix_local)
+            own_frame = frame_of(as_matrix(rider.before))
+            lead_frame = leader_frame(rig, leader)[0].inverted_safe()
+            carried = own_frame @ lead_frame @ world @ bone.matrix_local
             seat = frame_of(into @ carried)
+            # A mirrored rider turns about the mirror image of its leader's
+            # pivot, not the pivot carried straight over: off the mirror's
+            # plane the two are apart, and the rider swung about the wrong
+            # point and ended up out of place.
+            local = rider_reflection(rig, leader, rider)
+            if local is not None:
+                seat.translation = into @ (own_frame @ local.to_4x4() @ lead_frame
+                                           @ world @ bone.head_local)
             own = rig.data.bones.get(rider.bone_name) if rider.bone_name else None
             if own is None:
                 fresh.append((rider, leader, seat, bone.length))
@@ -1839,10 +1943,19 @@ def write_turned(bag, source, target, turn, rotation):
     channels = ["location"] + (["rotation_quaternion"] if rotation else [])
     curves = {(c.data_path[len(source):], c.array_index): c
               for c in bag.fcurves if c.data_path.startswith(source)}
-    frames = sorted({p.co[0] for (channel, _index), c in curves.items()
-                     if channel in channels for p in c.keyframe_points})
+    used = [c for (channel, _index), c in curves.items() if channel in channels]
+    frames = sorted({p.co[0] for c in used for p in c.keyframe_points})
     if not frames:
         return
+    # Straight keys mirror exactly through the keys alone. A shaped one - a
+    # key eased by hand in the graph editor - bends between keys, and a
+    # mirrored copy keyed only on the keys would run straight there; so it is
+    # keyed every half frame instead, closer than anyone can see.
+    if any(p.interpolation != "LINEAR" for c in used for p in c.keyframe_points[:-1]):
+        first, last = frames[0], frames[-1]
+        count = max(1, int((last - first) / 0.5))
+        frames = sorted(set(frames) | {first + (last - first) * n / count
+                                       for n in range(count + 1)})
     # A mirror turns a rotation the same way as the half turn that is minus
     # it, and the half turn is one a quaternion can hold.
     proper = turn * (1.0 if turn.determinant() > 0.0 else -1.0)
@@ -2034,8 +2147,12 @@ def apply_pivots(context, rig, data):
     if not jobs:
         return 0
     # The path first, while the old rest is still there to read it against.
+    # A curve the pivot follows moves with it, all of it: only its ends would
+    # be pinned again, and a part that never turns would hump up between them.
     for move, part, shift in jobs:
         shift_pivot(rig, move, part, shift)
+        if curve_alive(part.path_curve):
+            move_curve(part.path_curve, rig.matrix_world.to_3x3() @ shift)
     if not activate(context, rig):
         return 0
     bpy.ops.object.mode_set(mode="EDIT")
@@ -2144,6 +2261,20 @@ def set_points(spline, points, left, right):
         spline.bezier_points.foreach_set(
             name, [x for value in values for x in value[:3]])
     spline.id_data.update_tag()
+
+
+def move_curve(obj, shift):
+    """Move every point of a curve's first spline by a world-space shift."""
+    spline = obj.data.splines[0]
+    local = obj.matrix_world.inverted_safe().to_3x3() @ shift
+    if spline.type == "BEZIER":
+        points, left, right = points_of(spline)
+        set_points(spline, [p + local for p in points], [p + local for p in left],
+                   [p + local for p in right])
+    else:
+        for point in spline.points:
+            point.co = (point.co[0] + local.x, point.co[1] + local.y,
+                        point.co[2] + local.z, point.co[3])
 
 
 def pin_ends(obj, start, end):
@@ -2281,8 +2412,7 @@ def trace(rig, bag, move, part):
     if (part.kind != "OBJECT" or not part.has_before or obj is None
             or obj.type != "MESH" or bone is None or pose_bone is None):
         return []
-    middle = as_matrix(part.before) @ (sum((Vector(c) for c in obj.bound_box),
-                                           Vector()) / 8.0)
+    middle = as_matrix(part.before) @ (sum(corners_of(obj), Vector()) / 8.0)
     world = rig.matrix_world
     into = world.inverted_safe()
     rest = bone.matrix_local
@@ -2299,13 +2429,13 @@ def trace(rig, bag, move, part):
 
 
 def drop_paths(move):
-    obj = bpy.data.objects.get(move.paths_name) if move.paths_name else None
+    obj = move.paths_object
+    move.paths_object = None
     if obj is not None:
         data = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)
         if data is not None and data.users == 0:
             bpy.data.curves.remove(data)
-    move.paths_name = ""
 
 
 def draw_paths(rig, move):
@@ -2333,7 +2463,7 @@ def draw_paths(rig, move):
     obj.show_in_front = True
     obj.hide_render = True
     obj.hide_select = True
-    move.paths_name = obj.name
+    move.paths_object = obj
     return len(lines)
 
 
@@ -2880,6 +3010,8 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             data.report = "Select the objects to ride along, then the part they follow."
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
+        if move.built and not keeps_drags(self, data):
+            return {"CANCELLED"}
         if getattr(context.scene, "rigmoves_rig", None) is not rig:
             context.scene.rigmoves_rig = rig
         # Where each stands now is the place it copies the move from. That is
@@ -2905,6 +3037,40 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class RIGMOVES_OT_set_mirror(bpy.types.Operator):
+    bl_idname = "rigmoves.set_mirror"
+    bl_label = "Mirror"
+    bl_description = ("Mirror this rider's copy of its leader's move across one "
+                      "of its own axes - press again for the next: none, X, Y, "
+                      "Z. A mirrored copy (negative scale) mirrors by itself "
+                      "with this at none")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty()
+    part: bpy.props.IntProperty()
+    axis: bpy.props.EnumProperty(items=MIRRORS, default="NONE")
+
+    def execute(self, context):
+        rig = rig_of(context)
+        if not here(context, rig):
+            return {"CANCELLED"}
+        data = rig.rigmoves
+        if not 0 <= self.index < len(data.moves):
+            return {"CANCELLED"}
+        move = data.moves[self.index]
+        if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
+            return {"CANCELLED"}
+        if not keeps_drags(self, data):
+            return {"CANCELLED"}
+        rider = move.parts[self.part]
+        rider.mirror = self.axis
+        bpy.ops.rigmoves.build()
+        data.report = ("'{:s}' mirrors its leader across {:s}.".format(
+            short(rider.name, 18), self.axis) if self.axis != "NONE" else
+            "'{:s}' copies its leader unmirrored.".format(short(rider.name, 18)))
+        self.report({"INFO"}, data.report)
+        return {"FINISHED"}
+
+
 class RIGMOVES_OT_drop_rider(bpy.types.Operator):
     bl_idname = "rigmoves.drop_rider"
     bl_label = "Stop Riding Along"
@@ -2923,6 +3089,8 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
             return {"CANCELLED"}
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
+            return {"CANCELLED"}
+        if not keeps_drags(self, data):
             return {"CANCELLED"}
         rider = move.parts[self.part]
         name = rider.name
@@ -3021,7 +3189,8 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
         if not here(context, rig):
             return {"CANCELLED"}
         data = rig.rigmoves
-        objects, bones, still_keyed = clear_autokey(rig, data)
+        objects, bones, still_keyed = clear_autokey(
+            rig, data, context.scene.tool_settings.use_keyframe_insert_auto)
         if not (objects or bones):
             data.report = "Nothing is carrying stray keyframes."
             self.report({"INFO"}, data.report)
@@ -3338,7 +3507,8 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         # First, because everything under it is undone by a keyframe: with
         # Auto Keying on, every drag this tool asks for leaves one behind, and
         # they hold the parts and the handles where the rig cannot move them.
-        keyed_objects, keyed_bones, still_keyed = clear_autokey(rig, data)
+        keyed_objects, keyed_bones, still_keyed = clear_autokey(
+            rig, data, context.scene.tool_settings.use_keyframe_insert_auto)
         if keyed_objects or keyed_bones:
             context.view_layer.update()
         # Bound objects belong on their Before: that is the rest every slider
@@ -3501,10 +3671,9 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                             if reseated == 1 else
                             " {:d} put back on their Before.".format(reseated))
         if keyed_objects or keyed_bones:
-            data.report += (" Auto Keying had left {:d} keyframe track(s) on "
-                            "the parts and {:d} on the rig; both were lifted, "
-                            "or the rig could not move them."
-                            .format(keyed_objects, keyed_bones))
+            data.report += (" {:d} stray keyframe track(s) on the parts and "
+                            "{:d} on the rig were lifted, or the rig could not "
+                            "move them.".format(keyed_objects, keyed_bones))
         if pivoted:
             data.report += " {:d} turned about a new pivot.".format(pivoted)
         if laid:
@@ -3524,6 +3693,30 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             warn = True
         self.report({"WARNING"} if warn else {"INFO"}, data.report)
         return {"FINISHED"}
+
+
+def unrecorded(data):
+    """Bound parts dragged off their Before and not recorded yet."""
+    return [part.name for move in data.moves for part in bound_parts(move)
+            if not part.leader and hand_moved(part)[1] is not None]
+
+
+def keeps_drags(operator, data):
+    """Refuse a button that would Build while a dragged pose is unrecorded.
+
+    Build puts every bound object back on its Before, which is right for a
+    Build somebody asked for and wrong for one a button runs on the side: the
+    drag - a new After, a step - was gone, with nothing said. Returns True
+    when it is safe to go on.
+    """
+    dragged = unrecorded(data)
+    if not dragged:
+        return True
+    data.report = ("'{:s}' has been moved and not recorded. Record it first - "
+                   "this would Build, and Build puts it back.".format(
+                       short(dragged[0], 18)))
+    operator.report({"WARNING"}, data.report)
+    return False
 
 
 def move_at(context, index):
@@ -3556,6 +3749,8 @@ class RIGMOVES_OT_set_pivot(bpy.types.Operator):
             data.report = "Select the parts to set a pivot for."
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
+        if move.built and not keeps_drags(self, data):
+            return {"CANCELLED"}
         cursor = context.scene.cursor.location.copy()
         for part in parts:
             obj = bpy.data.objects.get(part.name)
@@ -3564,7 +3759,7 @@ class RIGMOVES_OT_set_pivot(bpy.types.Operator):
             if self.kind == "CURSOR":
                 part.pivot = as_matrix(part.before).inverted_safe() @ cursor
             elif self.kind == "BASE":
-                corners = [Vector(c) for c in obj.bound_box]
+                corners = corners_of(obj)
                 part.pivot = ((min(c.x for c in corners) + max(c.x for c in corners)) * 0.5,
                               (min(c.y for c in corners) + max(c.y for c in corners)) * 0.5,
                               min(c.z for c in corners))
@@ -3597,10 +3792,15 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
         rig, data, move = move_at(context, self.index)
         if move is None:
             return {"CANCELLED"}
-        parts = [p for p in chosen_parts(context, move) if not curve_alive(p.path_curve)]
+        chosen = chosen_parts(context, move)
+        parts = [p for p in chosen if not curve_alive(p.path_curve)]
         if not parts:
-            data.report = "Select the parts to give a curved path."
+            data.report = ("'{:s}' has a curve already: press Edit beside it.".format(
+                short(chosen[0].name, 18)) if chosen else
+                "Select the parts to give a curved path.")
             self.report({"WARNING"}, data.report)
+            return {"CANCELLED"}
+        if not keeps_drags(self, data):
             return {"CANCELLED"}
         # The curve is drawn along the path the part has, so it has to have
         # one: a part still waiting for its first Build gets it now.
@@ -3617,6 +3817,8 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
             if part is not None and part.bone_name in rig.data.bones:
                 make_path_curve(rig, move, part)
                 made += 1
+        # Remembered, so the panel stays on this rig while a curve is edited.
+        context.scene.rigmoves_rig = rig
         bpy.ops.rigmoves.build()
         data.report = ("{:d} curve(s) made along the path. Bend one in edit mode "
                        "(Tab), then Build; its ends stay on Before and After."
@@ -3634,7 +3836,7 @@ class RIGMOVES_OT_edit_curve(bpy.types.Operator):
     part: bpy.props.IntProperty()
 
     def execute(self, context):
-        _rig, _data, move = move_at(context, self.index)
+        rig, _data, move = move_at(context, self.index)
         if move is None or not 0 <= self.part < len(move.parts):
             return {"CANCELLED"}
         obj = move.parts[self.part].path_curve
@@ -3648,6 +3850,8 @@ class RIGMOVES_OT_edit_curve(bpy.types.Operator):
         obj.select_set(True)
         context.view_layer.objects.active = obj
         bpy.ops.object.mode_set(mode="EDIT")
+        # Remembered too, for a rig the panel only knew from its selection.
+        context.scene.rigmoves_rig = rig
         return {"FINISHED"}
 
 
@@ -3663,6 +3867,8 @@ class RIGMOVES_OT_drop_curve(bpy.types.Operator):
     def execute(self, context):
         _rig, data, move = move_at(context, self.index)
         if move is None or not 0 <= self.part < len(move.parts):
+            return {"CANCELLED"}
+        if not keeps_drags(self, data):
             return {"CANCELLED"}
         part = move.parts[self.part]
         obj = part.path_curve
@@ -3699,7 +3905,11 @@ class RIGMOVES_OT_show_paths(bpy.types.Operator):
             drop_paths(move)
             return {"FINISHED"}
         if not draw_paths(rig, move):
-            data.report = "Nothing to draw yet: record Before and After, then Build."
+            # Left off, or the button stays pressed with nothing drawn.
+            move.show_paths = False
+            data.report = ("Nothing to draw yet: record Before and After, then Build."
+                           if any(p.kind == "OBJECT" for p in move.parts) else
+                           "Paths are drawn for objects, and this move has none.")
             self.report({"WARNING"}, data.report)
         return {"FINISHED"}
 
@@ -3711,6 +3921,12 @@ def control_channel(carrier):
     if handle is not None:
         return handle, "location", 1
     if bone is not None and carrier.prop in bone.keys():
+        # Still driven by a handle switched off since the last Build: a key on
+        # it would be overruled by the driver and nothing would play.
+        animation = carrier.id_data.animation_data
+        if animation is not None and animation.drivers.find(
+                property_path(carrier.control, carrier.prop)) is not None:
+            return None, None, None
         return bone, '["{:s}"]'.format(bpy.utils.escape_identifier(carrier.prop)), -1
     return None, None, None
 
@@ -3883,6 +4099,7 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
         # points at a property that is gone and a handle about to be, and
         # Blender complains about it on every update from then on.
         rig.driver_remove(property_path(move.control, move.prop))
+        drop_control_keys(rig, move)
         bone = rig.pose.bones.get(move.control)
         if bone is not None and move.prop in bone.keys():
             del bone[move.prop]
@@ -3996,6 +4213,7 @@ class RIGMOVES_OT_remove_group(bpy.types.Operator):
         group = data.groups[self.index]
         # Same as a move: the handle's driver goes with its slider.
         rig.driver_remove(property_path(group.control, group.prop))
+        drop_control_keys(rig, group)
         bone = rig.pose.bones.get(group.control)
         if bone is not None and group.prop in bone.keys():
             del bone[group.prop]
@@ -4161,7 +4379,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         """
         auto = context.scene.tool_settings.use_keyframe_insert_auto
         names = sorted({obj.name for _m, _p, obj in keyed_parts(data)})
-        ours = len(rig_own_curves(rig, data))
+        ours = len(stray_curves(rig, data, auto))
         if not (names or ours or auto):
             return
         box = layout.box().column(align=True)
@@ -4366,9 +4584,16 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                     line.label(text=short(part.name, 13), icon="OBJECT_DATA")
                     right = line.row(align=True)
                     right.prop(part, "lead", text="Lead", slider=True)
-                    mirror = right.row(align=True)
-                    mirror.ui_units_x = 2.2
-                    mirror.prop(part, "mirror", text="", icon="MOD_MIRROR")
+                    # One button that steps through the choices: a mirror
+                    # moves the rider's bone, so each one is a Build.
+                    labels = [label for _key, label, _description in MIRRORS]
+                    keys = [key for key, _label, _description in MIRRORS]
+                    step = right.operator(RIGMOVES_OT_set_mirror.bl_idname,
+                                          text=labels[keys.index(part.mirror)],
+                                          icon="MOD_MIRROR",
+                                          depress=part.mirror != "NONE")
+                    step.index, step.part = index, position
+                    step.axis = keys[(keys.index(part.mirror) + 1) % len(keys)]
                     drop = right.operator(RIGMOVES_OT_drop_rider.bl_idname, text="",
                                           icon="X", emboss=False)
                     drop.index, drop.part = index, position
@@ -4458,7 +4683,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             run = row.operator(RIGMOVES_OT_curve_path.bl_idname,
                                text="Curve the Path", icon="CURVE_BEZCURVE")
             run.index = index
-        if move.built:
+        if move.built and any(p.kind == "OBJECT" for p in move.parts):
             shown = row.operator(RIGMOVES_OT_show_paths.bl_idname,
                                  text="Paths", icon="IPO_LINEAR",
                                  depress=move.show_paths)
@@ -4538,6 +4763,7 @@ CLASSES = (
     RIGMOVES_OT_new_move,
     RIGMOVES_OT_add_to_move,
     RIGMOVES_OT_ride_along,
+    RIGMOVES_OT_set_mirror,
     RIGMOVES_OT_drop_rider,
     RIGMOVES_OT_pick_part,
     RIGMOVES_OT_free_keys,

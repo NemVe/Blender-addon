@@ -77,14 +77,6 @@ def drift(obj, expected):
     return max((a - b).length for a, b in zip(world_points(obj), expected))
 
 
-def drawn_name(move, obj):
-    """The name a drawn object had, safe to ask after it is deleted."""
-    try:
-        return obj.name
-    except ReferenceError:
-        return move.paths_name or "-"
-
-
 def rig():
     return bpy.context.scene.rigmoves_rig
 
@@ -249,19 +241,88 @@ class TestObjects(RigMovesCase):
         scene.frame_set(21)
         self.assertAlmostEqual(centre(self.arm).z, 1.5, places=4)
 
+    def test_animate_survives_a_longer_rail(self):
+        bpy.context.scene.frame_set(1)
+        self.move.play_frames = 40
+        bpy.ops.rigmoves.animate(index=0)
+        was = self.move.rail
+        # A pivot far off lengthens the handle's rail at the next Build.
+        bpy.context.scene.cursor.location = (3.0, 0.0, 5.0)
+        select(self.arm)
+        bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        self.assertNotAlmostEqual(self.move.rail, was, places=3)
+        bpy.context.scene.frame_set(41)
+        self.assertLess(drift(self.arm, self.after["Arm"]), TOLERANCE)
+
+    def test_buttons_that_build_keep_an_unrecorded_drag(self):
+        # Dragged to a new After but not recorded yet: a button that would
+        # Build on the side must not throw the drag away.
+        self.arm.location.z = 5.0
+        bpy.context.view_layer.update()
+        select(self.arm)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="BASE"), {"CANCELLED"})
+        self.assertAlmostEqual(self.arm.location.z, 5.0)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.assertAlmostEqual(centre(self.arm).z, 5.0, places=4)
+
+    def test_a_handle_keyed_once_by_hand_is_kept(self):
+        bpy.context.scene.tool_settings.use_keyframe_insert_auto = False
+        self.move.play = 40.0
+        bpy.ops.rigmoves.key_control(index=0)
+        bpy.ops.rigmoves.build()
+        curves = [c for _h, c in rigmoves.rig_own_curves(rig(), rig().rigmoves)]
+        self.assertEqual([len(c.keyframe_points) for c in curves], [1])
+        self.assertNotIn("lifted", rig().rigmoves.report)
+        # With Auto Keying on, a lone key is what a drag leaves behind.
+        bpy.context.scene.tool_settings.use_keyframe_insert_auto = True
+        bpy.ops.rigmoves.build()
+        self.assertEqual(rigmoves.rig_own_curves(rig(), rig().rigmoves), [])
+
+    def test_animate_raises_no_alarm(self):
+        bpy.ops.rigmoves.animate(index=0)
+        self.assertEqual(rigmoves.stray_curves(rig(), rig().rigmoves), [])
+
+    def test_removed_control_takes_its_keys(self):
+        bpy.ops.rigmoves.animate(index=0)
+        bpy.ops.rigmoves.remove(index=0)
+        animation = rig().animation_data
+        action = animation.action if animation else None
+        left = [c.data_path for _h, c in rigmoves.rig_own_curves(rig(), rig().rigmoves)]
+        self.assertEqual(left, [])
+        if action is not None:
+            for layer in action.layers:
+                for strip in layer.strips:
+                    for bag in strip.channelbags:
+                        self.assertFalse([c for c in bag.fcurves if "handle" in c.data_path])
+
+    def test_animate_refuses_a_slider_still_driven(self):
+        self.move.handle = False
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"CANCELLED"})
+        bpy.ops.rigmoves.build()
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+
     def test_paths_show_where_the_parts_go(self):
         self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=True), {"FINISHED"})
-        drawn = bpy.data.objects.get(self.move.paths_name)
+        drawn = self.move.paths_object
         self.assertIsNotNone(drawn)
         self.assertEqual(len(drawn.data.splines), 2)
         arm = drawn.data.splines[1].points
         self.assertLess((Vector(arm[0].co[:3]) - Vector((3.0, 0.0, 1.0))).length, TOLERANCE)
         self.assertLess((Vector(arm[-1].co[:3]) - Vector((3.0, 0.0, 2.0))).length, TOLERANCE)
-        # Drawn again by a Build, and gone when hidden.
+        # Drawn again by a Build - from the rest shape, wherever the control
+        # stands - and gone when hidden.
+        drive(self.move, 1.0)
         bpy.ops.rigmoves.build()
-        self.assertIsNotNone(bpy.data.objects.get(self.move.paths_name))
+        drawn = self.move.paths_object
+        self.assertIsNotNone(drawn)
+        arm = drawn.data.splines[1].points
+        self.assertLess((Vector(arm[0].co[:3]) - Vector((3.0, 0.0, 1.0))).length, TOLERANCE)
+        name = drawn.name
         self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=False), {"FINISHED"})
-        self.assertIsNone(bpy.data.objects.get(drawn_name(self.move, drawn)))
+        self.assertIsNone(bpy.data.objects.get(name))
+        self.assertIsNone(self.move.paths_object)
 
     def add_mid_step(self, z):
         """One step, with the arm dragged to this height for it, then Build."""
@@ -534,6 +595,21 @@ class TestPivot(RigMovesCase):
         self.assertLess((Vector(self.move.parts[0].pivot) - Vector((0.0, 0.0, -0.5))).length,
                         1e-6)
 
+    def test_paths_before_a_build_are_left_off(self):
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=True), {"FINISHED"})
+        self.assertFalse(self.move.show_paths)
+        self.assertIsNone(self.move.paths_object)
+
+    def test_base_pivot_picked_with_the_lid_open(self):
+        # Blender's own bounding box follows the rig; the base has to be the
+        # part's own, as modelled, wherever the control stands.
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="BASE"), {"FINISHED"})
+        self.assertLess((Vector(self.move.parts[0].pivot) - Vector((0.0, 0.0, -0.5))).length,
+                        1e-6)
+
     def test_rider_turns_about_its_leaders_pivot_carried_over(self):
         self.hinge_on_cursor()
         bpy.ops.rigmoves.build()
@@ -601,14 +677,76 @@ class TestMirror(RigMovesCase):
         drive(self.move, 0.5)
         plain = [seat @ travel @ v.co for v in other.data.vertices]
         self.assertLess(drift(other, plain), TOLERANCE)
-        # Takes effect without a Build.
-        rider.mirror = "X"
-        bpy.context.view_layer.update()
+        position = list(self.move.parts).index(rider)
+        self.assertEqual(bpy.ops.rigmoves.set_mirror(index=0, part=position, axis="X"),
+                         {"FINISHED"})
+        drive(self.move, 0.5)
         mirrored = [seat @ across @ travel @ across @ v.co for v in other.data.vertices]
         self.assertLess(drift(other, mirrored), TOLERANCE)
         bpy.ops.rigmoves.build()
         drive(self.move, 0.5)
         self.assertLess(drift(other, mirrored), TOLERANCE)
+
+    def test_mirrored_copy_turns_about_the_mirrored_pivot(self):
+        # The leader turns about its root edge, well off its own middle. A
+        # Ctrl+M copy has to turn about the mirror image of that edge.
+        bpy.context.scene.cursor.location = self.home @ Vector((-0.5, 0.0, 0.0))
+        select(self.wing)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        other = cube("Other", (0.0, 0.0, 0.0))
+        across = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        other.matrix_world = across @ self.home
+        bpy.context.view_layer.update()
+        self.ride(other)
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            expected = [across @ p for p in world_points(self.wing)]
+            self.assertLess(drift(other, expected), TOLERANCE)
+
+    def test_mirror_setting_turns_about_the_mirrored_pivot(self):
+        # The door case with the leader turning about an edge: the rider has
+        # to turn about the mirror image of that edge, on itself.
+        bpy.context.scene.cursor.location = self.home @ Vector((-0.5, 0.0, 0.0))
+        select(self.wing)
+        bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        other = cube("Other", (-1.5, 0.0, 0.0))
+        other.rotation_euler.z = math.radians(160.0)
+        bpy.context.view_layer.update()
+        seat = other.matrix_world.copy()
+        rider = self.ride(other)
+        position = list(self.move.parts).index(rider)
+        self.assertEqual(bpy.ops.rigmoves.set_mirror(index=0, part=position, axis="X"),
+                         {"FINISHED"})
+        across = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        # Each rider corner plays what the leader's mirrored corner does.
+        lead_corners = [v.co.copy() for v in self.wing.data.vertices]
+        partner = [min(range(len(lead_corners)),
+                       key=lambda j, v=v: (lead_corners[j] - across.to_3x3() @ v.co).length)
+                   for v in other.data.vertices]
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            lead = world_points(self.wing)
+            expected = [seat @ across @ self.home.inverted() @ lead[j] for j in partner]
+            self.assertLess(drift(other, expected), TOLERANCE)
+
+    def test_mirrored_copy_of_a_hand_eased_leader(self):
+        # Keys eased in the graph editor bend between keys; the mirrored copy
+        # has to bend with them, not run straight.
+        _action, _slot, bag = rigmoves.action_bits(self.move)
+        for curve in bag.fcurves:
+            for point in curve.keyframe_points:
+                point.interpolation = "BEZIER"
+                point.handle_left_type = point.handle_right_type = "AUTO_CLAMPED"
+            curve.update()
+        other = cube("Other", (0.0, 0.0, 0.0))
+        across = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        other.matrix_world = across @ self.home
+        bpy.context.view_layer.update()
+        self.ride(other)
+        for share in (0.25, 0.75):
+            drive(self.move, share)
+            expected = [across @ p for p in world_points(self.wing)]
+            self.assertLess(drift(other, expected), 2e-3)
 
 
 class TestCurve(RigMovesCase):
@@ -675,6 +813,29 @@ class TestCurve(RigMovesCase):
         drive(self.move, 0.5)
         # (2, 3) on the leader's way, turned a quarter round onto the rider.
         self.assertLess((centre(other) - Vector((-3.0, 12.0, 0.5))).length, 1e-3)
+
+    def test_pivot_change_takes_the_curve_along(self):
+        # The box never turns, so a new pivot must not change where it goes.
+        self.bend(Vector((0.0, 3.0, 0.0)))
+        bpy.ops.rigmoves.build()
+        select(self.box)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="BASE"), {"FINISHED"})
+        for share, where in ((0.5, (2.0, 3.0, 0.5)), (1.0, (4.0, 0.0, 0.5))):
+            drive(self.move, share)
+            self.assertLess((centre(self.box) - Vector(where)).length, 1e-3)
+
+    def test_second_curve_is_pointed_to_the_first(self):
+        select(self.box)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"CANCELLED"})
+        self.assertIn("already", rig().rigmoves.report)
+
+    def test_panel_keeps_the_rig_while_the_curve_is_edited(self):
+        bpy.context.scene.rigmoves_rig = None
+        self.assertEqual(bpy.ops.rigmoves.edit_curve(index=0, part=0), {"FINISHED"})
+        self.assertEqual(bpy.context.object, self.curve)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.scene.rigmoves_rig = None
+        self.assertEqual(rigmoves.rig_of(bpy.context), self.move.id_data)
 
     def test_straighten_takes_the_curve_away(self):
         self.bend(Vector((0.0, 3.0, 0.0)))

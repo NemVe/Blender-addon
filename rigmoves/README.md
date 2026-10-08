@@ -69,7 +69,10 @@ the whole thing from the current frame, over that many frames, and the scene
 is made long enough to hold it. Pressing it again replaces those keys rather
 than adding to them. The keys are even in time, so the shape of the move is
 still its own Ease and speeds. Keyed handles are left alone by Build - that
-is how the finished machine is meant to be animated.
+is how the finished machine is meant to be animated; only a single key left
+by a drag with Auto Keying on is lifted - and when a Build makes
+a handle's rail longer or shorter, its keys are stretched with it, so the
+animation still runs from end to end.
 
 ### Where a part turns: the pivot
 
@@ -120,8 +123,9 @@ leader does to its own left, a rider does to *its* own left. Eight petals
 round a centre all open outwards, each in its own direction, from one
 control.
 
-A rider pivots on its own origin, as the leader does on its, so put each
-petal's origin at its base, where it hinges.
+A rider turns about its leader's pivot, carried over to where it stands:
+set the pivot on the leader - its hinge, its base - and every rider swings
+about the same point on itself. No origins need moving.
 
 Riders are listed under **Riding along**, each with a **Lead** slider from -50
 to 50 that says when it moves against its leader. 0 moves with it. Below 0 it
@@ -144,9 +148,10 @@ stands.
 scale, the way **Ctrl+M** leaves one - mirrors its leader's move by itself:
 the left wing does the mirror image of what the right one does. A rider that
 only *faces* the other way, such as the second of a pair of doors turned round
-to fit, has a **Mirror** menu on its row: X, Y or Z mirrors the leader's move
-across that axis of its own, so what is the leader's left becomes the
-rider's right. It takes effect at once.
+to fit, has a **Mirror** button on its row. Each press steps it on - none, X,
+Y, Z - and rebuilds: X, Y or Z mirrors the leader's move across that axis of
+its own, so what is the leader's left becomes the rider's right. A mirrored
+rider turns about the mirror image of its leader's pivot.
 
 Riding along can be set up before the leader's After is recorded as well;
 it takes effect at the next Build.
@@ -531,6 +536,56 @@ and one lifted 1 m:
   real curve on it was "animated by hand" - which is exactly how the
   finished machine is meant to be animated. Only a part's own bone keyed on
   top of its path is worth a word now.
+- **A mirrored rider turned about the wrong point.** Its bone was stood on
+  its leader's pivot carried straight over, then the move was mirrored about
+  that - but the mirror image of a pivot off the mirror's plane is somewhere
+  else. With the pivot on a wing's root the copy drifted 0.68 off its true
+  After. The bone stands on the mirrored pivot now; and since a mirror moves
+  the bone, the Mirror button rebuilds.
+- **A Build could stop an animation half way.** Every Build sizes the handle's
+  rail again, and a new pivot or rider changes it, while the handle's keys
+  stayed in the old length: a move animated over 40 frames reached 69% of
+  the way. The keys are stretched with the rail now, and so is an unkeyed
+  handle's place on it.
+- **The Base pivot and the path preview read the part where it stood, not as
+  it was made.** Blender 5's bounding box follows the rig, so with the lid
+  open Base landed on its top and the drawn path was a whole move off, and
+  handles were sized from wherever the control happened to stand. All three
+  read the mesh as modelled now.
+- **A mirrored copy of a hand-eased leader ran straight between keys.** Keys
+  shaped in the graph editor bend between keys; the mirrored copy is keyed
+  every half frame when they do.
+- **A removed control left its animation behind.** Its keys stayed on the
+  rig, and the next control that landed on the same name played them. They
+  go with the control now.
+- **Editing a curve lost the rig.** With only the curve selected the panel
+  could show another rig, or none, and Build built the wrong one. A path
+  curve now belongs to its part's rig.
+- **Animate set off the stray-key alarm**, whose Lift button then did
+  nothing. Only keys worth a word raise it now.
+- **Animate keyed a slider still driven by a handle switched off since the
+  last Build**, said it had worked, and nothing played. It asks for a Build
+  first now.
+- **Hiding one rig's paths could delete another's.** They were found by name;
+  they are held by reference now.
+- **A new pivot on a curved part bent its path.** Only the curve's ends were
+  pinned to the moved pivot, its middle stayed where it was, and a box that
+  never turns rose half a metre mid-way. The whole curve moves with the
+  pivot now.
+- **Buttons that Build on the side threw away a drag.** Set Pivot, Curve the
+  Path, Straighten, Mirror, Ride Along and taking a rider out all run a
+  Build, which puts a dragged part back on its Before - so a new After
+  dragged into place and not yet recorded was lost without a word. They
+  refuse now, and say to record it first.
+- **A handle keyed once was deleted by the next Build**, and the report
+  blamed Auto Keying even with it off. A lone key on a handle is what a drag
+  with Auto Keying on leaves behind - but also the first press of the key
+  button. It is lifted only while Auto Keying is on now.
+- **Paths was offered where it could draw nothing**, said to record and
+  Build when both were done, and stayed pressed. It is offered only on moves
+  with objects, and goes back off when there is nothing to draw.
+- **Curve the Path on a part that had a curve** said to select the part. It
+  says the part has one already, and where to edit it.
 - **Setting a curve's point from code bent its handles.** Blender recomputes
   an aligned handle whenever its point is set on its own, and swings it off
   to one side. Curve points are written all at once now.
