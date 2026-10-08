@@ -1,4 +1,4 @@
-# Handoff: where RigMoves stands (v0.14.2)
+# Handoff: where RigMoves stands (v0.14.3)
 
 Read `CLAUDE.md` first. It covers the test and lint commands, the driver
 rules, and the routine after every change: bump `bl_info["version"]` and
@@ -26,7 +26,7 @@ The user tests every version in their own Blender and reported followers
 not following (`Doesnwork.blend`). 0.14.1 fixed that. A review then found
 nine more problems, and 0.14.2 fixes them.
 
-## What 0.14.2 changed (all in `rigmoves/__init__.py`)
+## What 0.14.2 changed (0.14.3 only adds the author credit) (all in `rigmoves/__init__.py`)
 
 - **`seen_poses()`** is used by Record. It reads each object part where it
   is *meant* to be.
@@ -98,4 +98,4 @@ nine more problems, and 0.14.2 fixes them.
 
     .venv/bin/python tests/test_rigmoves.py      # 83 tests, 1 expected failure
     ruff check rigmoves tests tools
-    python tools/build_zip.py                    # dist/RigMoves-0.14.2.zip
+    python tools/build_zip.py                    # dist/RigMoves-0.14.3.zip

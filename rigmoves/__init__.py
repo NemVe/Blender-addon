@@ -31,13 +31,14 @@ from mathutils.geometry import interpolate_bezier
 
 bl_info = {
     "name": "RigMoves - Record a Move, Get a Slider",
-    "author": "AutoRigger experiments",
-    "version": (0, 14, 2),
+    "author": "NemVe3D",
+    "version": (0, 14, 3),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > Moves",
     "description": "Record a path between two poses of any bones, with per-part "
                    "delays. Works on loose objects with no rig at all, and makes one. "
                    "Other objects can ride along, each from its own place",
+    "doc_url": "https://creators.sa/nemve",
     "category": "Rigging",
 }
 

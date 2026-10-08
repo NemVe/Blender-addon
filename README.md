@@ -6,6 +6,8 @@ and where they ended up, and get one control that plays it. The user guide is
 
 Needs Blender 4.4 or later.
 
+By **NemVe3D** - <https://creators.sa/nemve>
+
 ## Install
 
     python tools/build_zip.py
