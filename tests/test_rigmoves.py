@@ -886,13 +886,22 @@ class TestFollowers(RigMovesCase):
     def bent(self, degrees):
         """Each segment's place with every joint bent this far, carried down
         the finger."""
+        return self.bent_by((degrees,) * len(self.KNUCKLES))
+
+    def bent_by(self, angles):
+        """Each segment's place with each joint bent by its own angle."""
         out, carry = [], Matrix.Identity(4)
-        for knuckle, home in zip(self.KNUCKLES, self.homes):
+        for knuckle, home, degrees in zip(self.KNUCKLES, self.homes, angles):
             carry = (carry @ Matrix.Translation(knuckle)
                      @ Matrix.Rotation(math.radians(degrees), 4, "Y")
                      @ Matrix.Translation(-knuckle))
             out.append(carry @ home)
         return out
+
+    def check_places(self, places):
+        for segment, place in zip(self.segments, places):
+            expected = [place @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
 
     def chain(self):
         self.move.parts["Seg2"].follows = "Seg1"
@@ -1142,6 +1151,83 @@ class TestFollowers(RigMovesCase):
             expected = [half @ home @ v.co for v in segment.data.vertices]
             self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
 
+    def turn_the_base(self, degrees):
+        """Turn the first segment's object further about its knuckle, from
+        wherever its bone is showing it - as dragging it in the viewport would."""
+        knuckle = self.KNUCKLES[0]
+        turn = (Matrix.Translation(knuckle) @ Matrix.Rotation(math.radians(degrees), 4, "Y")
+                @ Matrix.Translation(-knuckle))
+        self.segments[0].matrix_world = turn @ self.homes[0]
+        bpy.context.view_layer.update()
+
+    def test_turning_the_base_of_a_shown_finger_keeps_its_joints(self):
+        # Shown closed by the eye, as the panel says to, then the base turned
+        # further: the rest of the finger is carried whole, joints shut.
+        self.built_curl()
+        bpy.ops.rigmoves.show(index=0, which="AFTER")
+        self.turn_the_base(20.0)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.check_places(self.bent_by((50.0, 30.0, 30.0)))
+        self.assertEqual(rigmoves.unrecorded(rig().rigmoves), [])
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_places(self.bent_by((50.0, 30.0, 30.0)))
+        drive(self.move, 0.0)
+        self.check_places(self.homes)
+
+    def test_turning_the_base_with_the_slider_up_keeps_its_joints(self):
+        self.built_curl()
+        drive(self.move, 1.0)
+        self.turn_the_base(20.0)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_places(self.bent_by((50.0, 30.0, 30.0)))
+
+    def test_followers_listed_first_go_back_after_their_leader(self):
+        # Modelled tip first, so the tip comes first in the list, and Follows
+        # set on a built move: the objects hang at once, the bones at Build.
+        for segment, home in zip(self.segments, self.homes):
+            segment.matrix_world = home
+        bpy.ops.rigmoves.remove(index=0)
+        select(*reversed(self.segments))
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        self.move.parts.move(2, 0)
+        names = [p.name for p in self.move.parts]
+        self.assertLess(names.index("Seg3"), names.index("Seg1"))
+        bpy.ops.rigmoves.build()
+        self.chain()
+        self.assertTrue(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        drive(self.move, 0.0)
+        self.turn_the_base(30.0)
+        carry = self.bent(30.0)[0] @ self.homes[0].inverted()
+        seen = [carry @ home for home in self.homes]
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(rigmoves.unrecorded(rig().rigmoves), [])
+        self.check_places(seen)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_places(seen)
+        drive(self.move, 0.0)
+        self.check_places(self.homes)
+
+    def test_a_follower_not_hung_asks_for_a_build(self):
+        # As a file built before followers' objects were hung is opened.
+        self.built_curl()
+        self.assertFalse(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        for segment in self.segments[1:]:
+            rigmoves.keep_world(segment, rig())
+            del segment[rigmoves.FOLLOW_MARK]
+        self.assertTrue(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        bpy.ops.rigmoves.build()
+        self.assertFalse(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        self.assertEqual(self.segments[1].parent, self.segments[0])
+        self.assertEqual(self.segments[2].parent, self.segments[1])
+
     def test_following_set_and_cleared_on_a_built_move(self):
         bpy.ops.rigmoves.build()
         holder = self.segments[1].parent
@@ -1280,6 +1366,150 @@ class TestFollowersJoining(RigMovesCase):
         drive(move, 0.0)
         bpy.ops.rigmoves.remove(index=0)
         self.assertEqual(two.parent, hand)
+
+
+class TestFollowersAdded(RigMovesCase):
+    """A finger put together around a part that is already built."""
+
+    KNUCKLES = TestFollowers.KNUCKLES
+
+    def setUp(self):
+        super().setUp()
+        self.segments = []
+        for number in range(3):
+            segment = cube("Seg{:d}".format(number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+        bpy.context.view_layer.update()
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+
+    def turn(self, number, degrees):
+        knuckle = self.KNUCKLES[number]
+        return (Matrix.Translation(knuckle) @ Matrix.Rotation(math.radians(degrees), 4, "Y")
+                @ Matrix.Translation(-knuckle))
+
+    def pivots(self, numbers):
+        for number in numbers:
+            bpy.context.scene.cursor.location = self.KNUCKLES[number]
+            select(self.segments[number])
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+
+    def check(self, places, numbers=(0, 1, 2)):
+        for number in numbers:
+            segment = self.segments[number]
+            expected = [places[number] @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def base_built(self, steps=False):
+        """The first segment alone, turned 30 at After - 10 at a step in
+        between, if asked - and built."""
+        select(self.segments[0])
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        self.pivots((0,))
+        self.segments[0].matrix_world = self.turn(0, 30.0) @ self.homes[0]
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        if steps:
+            bpy.ops.rigmoves.add_step(index=0)
+            bpy.ops.rigmoves.pause(off=True)
+            self.segments[0].matrix_world = self.turn(0, 10.0) @ self.homes[0]
+            bpy.context.view_layer.update()
+            self.assertEqual(bpy.ops.rigmoves.record(index=0, which="STEP", step=0),
+                             {"FINISHED"})
+            bpy.ops.rigmoves.build()
+
+    def join_the_rest(self):
+        select(self.segments[1], self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.pivots((1, 2))
+        self.move.parts["Seg2"].follows = "Seg1"
+        self.move.parts["Seg3"].follows = "Seg2"
+
+    def test_new_followers_ride_along_after_a_build(self):
+        self.base_built()
+        self.join_the_rest()
+        self.assertTrue(rigmoves.recorded(self.move, "AFTER"))
+        bpy.ops.rigmoves.build()
+        for share, degrees in ((0.0, 0.0), (0.5, 15.0), (1.0, 30.0)):
+            drive(self.move, share)
+            self.check([self.turn(0, degrees) @ home for home in self.homes])
+
+    def test_new_followers_ride_along_through_a_step(self):
+        self.base_built(steps=True)
+        self.join_the_rest()
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        self.check([self.turn(0, 10.0) @ home for home in self.homes])
+        drive(self.move, 1.0)
+        self.check([self.turn(0, 30.0) @ home for home in self.homes])
+
+    # Open (see HANDOFF.md): here the newcomers are bound by the Build that
+    # Set Pivot runs before Follows is set, so their bones still wait on a
+    # Build while the tip is bent - and that bend is not recorded right.
+    # Without the pivots, or with the Build the panel asks for, it works.
+    @unittest.expectedFailure
+    def test_new_followers_are_shown_carried_on_after(self):
+        self.base_built()
+        self.join_the_rest()
+        bpy.ops.rigmoves.show(index=0, which="AFTER")
+        carried = [self.turn(0, 30.0) @ home for home in self.homes]
+        self.check(carried)
+        # The tip bent on its own from there, the middle left where carried.
+        wanted = carried[:2] + [self.turn(0, 30.0) @ self.turn(2, 40.0) @ self.homes[2]]
+        self.segments[2].matrix_world = wanted[2]
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check(wanted)
+        drive(self.move, 0.0)
+        self.check(self.homes)
+
+    def test_a_base_added_under_a_built_finger(self):
+        # The second and third built first, then a first segment put under
+        # them: turned, it carries both, and the first Build keeps that.
+        select(self.segments[1], self.segments[2])
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        self.pivots((1, 2))
+        self.move.parts["Seg3"].follows = "Seg2"
+        bpy.ops.rigmoves.build()
+        select(self.segments[0])
+        bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name)
+        self.pivots((0,))
+        self.move.parts["Seg2"].follows = "Seg1"
+        self.assertEqual(self.segments[1].parent, self.segments[0])
+        drive(self.move, 0.0)
+        self.segments[0].matrix_world = self.turn(0, 30.0) @ self.homes[0]
+        bpy.context.view_layer.update()
+        seen = [self.turn(0, 30.0) @ home for home in self.homes]
+        self.check(seen)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        self.assertEqual(rigmoves.unrecorded(rig().rigmoves), [])
+        drive(self.move, 0.0)
+        self.check(self.homes)
+        drive(self.move, 1.0)
+        self.check(seen)
+        self.assertEqual(self.segments[1].parent, self.segments[0])
+
+    def test_build_before_after_is_recorded_says_so(self):
+        select(*self.segments)
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        self.move.parts["Seg2"].follows = "Seg1"
+        bpy.ops.rigmoves.build()
+        self.assertFalse(rigmoves.recorded(self.move, "AFTER"))
+        self.assertIn("After not recorded", rig().rigmoves.report)
+        self.segments[0].location.z += 1.0
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        self.assertTrue(rigmoves.recorded(self.move, "AFTER"))
+        bpy.ops.rigmoves.build()
+        self.assertNotIn("After not recorded", rig().rigmoves.report)
 
 
 class TestCombined(RigMovesCase):

@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.14.1
+# RigMoves (experiment) - v0.14.2
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.1.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.2.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -175,11 +175,14 @@ finger curls instead of its pieces sliding apart. **Timing** still gives each
 segment a delay of its own - the tip can wait for the base.
 
 A follower's object hangs from the object it follows, before the first
-Build and after it, so dragging the first segment always brings the others
-along on screen - and that is what is recorded. Leave a follower where it
-was carried and it rides along unbent; drag it from there to bend its own
-joint. The bones play the move; the objects hanging from one another only
-keep the dragging honest.
+Build and after it, so dragging the first segment brings the others along
+on screen. Leave a follower where it was carried and it keeps its own joint
+as it was and rides along; drag it from there to bend its own joint. A
+follower added to a built move with no After of its own rides along with
+what it follows - the eye on After shows it carried. The bones play the
+move; the objects hanging from one another only keep the dragging honest.
+A file built with 0.14.0 shows "Build to put it into effect" under
+**Follows**: press **Build** once, so the objects hang from one another.
 Changing **Follows** on a built move waits for **Build**, which says so in
 red. A pick that cannot be - the part itself, a rider, a loop - is turned
 down with the reason, and the choice it had stays. Objects already parented
@@ -625,6 +628,23 @@ and one lifted 1 m:
   with objects, and goes back off when there is nothing to draw.
 - **Curve the Path on a part that had a curve** said to select the part. It
   says the part has one already, and where to edit it.
+- **Turning the base of a finger shown bent tore its joints open** (0.14.1).
+  With the finger posed, a drag of the base reached each bent follower
+  before its own bend. A follower that was only carried is now read as
+  carried whole, keeping its own joint.
+- **A built finger was thrown off by the first Build after a base was added
+  under it** (0.14.1): standing the new base on its Before carried the
+  finger off its own. It is let go of first and hung again after.
+- **Record put objects back in the wrong order** while a Follows change
+  waited on Build, throwing the followers off. Parents go first now.
+- **A file from 0.14.0 gave no sign it needed a Build** for its followers'
+  objects to hang. The panel says so now.
+- **Parts added to a built move as followers never rode along.** Built
+  straight away they stayed at home, and the eye on After showed them
+  there. They ride along now, and are shown carried.
+- **Build without Record After ticked the After row** and said nothing, and
+  the control moved nothing. The row keeps its dot and Build says After is
+  not recorded yet.
 - **After a Build, dragging the leader left its followers behind.** Only
   the bones hung from one another once built; the objects all hung from the
   rig, so the first segment moved alone and there was no closed finger to
@@ -671,6 +691,13 @@ and one lifted 1 m:
   old copy is now asked for through its base type, which does find it.
 
 ## Known rough edges
+
+- While a finger is shown bent, dragging its base opens the bent joints on
+  screen. What is recorded is the finger carried whole, joints shut; pose
+  at Play 0 to see it as it will be.
+- Changing **Follows** waits for **Build**. Posed before that Build, a
+  follower is recorded as it is seen, not with its own joint kept - and a
+  follower bent by hand then is not recorded right. Build first.
 
 - Before should be the rest pose. Nothing warns when it is not, and a machine
   recorded from a half-posed start will be wrong at the ends.
