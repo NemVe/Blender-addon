@@ -1,4 +1,4 @@
-# RigMoves (experiment) - v0.13.0
+# RigMoves (experiment) - v0.14.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -12,7 +12,7 @@ Separate from RigKit / Rigthebot. Shares no code with it and never touches it.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.13.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `RigMoves-0.14.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **Moves**.
 
 ## Use
@@ -158,6 +158,31 @@ it takes effect at the next Build.
 
 Without this the panel simply went on showing the finished rig, with nothing
 on screen to say how to begin the next thing.
+
+### Followers: parts that hang from parts
+
+A finger is three segments, each turning at its own knuckle, each carried by
+the one before. Put them in one move and open **Follows**: beside every part
+is a list of the move's other parts. Pick the first segment for the second,
+and the second for the third. A follower goes wherever the part it follows
+takes it, and does its own move on top.
+
+Give each segment its knuckle as its **Pivot** (3D cursor on the joint,
+**Cursor**), so each one turns where a finger bends. Then pose and record as
+usual. Every recorded pose lands exactly where it was put; in between, each
+joint turns about its own knuckle while the joint before carries it, so the
+finger curls instead of its pieces sliding apart. **Timing** still gives each
+segment a delay of its own - the tip can wait for the base.
+
+Before the first Build a follower hangs from the object it follows, so
+dragging the first segment brings the others along on screen, and that is
+what is recorded. Leave a follower where it was carried and it rides along
+unbent; drag it from there to bend its own joint. After a Build it is the
+bones that carry it: a part is read where it is seen, carried or not.
+Changing **Follows** on a built move waits for **Build**, which says so in
+red. Objects already parented to one another in the file - a finger
+modelled joint by joint - follow the same way without being asked, and are
+hung from their old parents again if the move is removed.
 
 ### Several moves under one control
 
@@ -310,6 +335,13 @@ bone is turned from the leader, and every Build gives it a copy of the
 leader's channels. The same channels on a bone turned the same way are the
 same move, seen from the rider - at every point along the path, not only at
 the recorded poses.
+
+A follower's bone hangs from the bone of the part it follows, so it plays its
+own path in its parent's space. Choosing a part to follow on a built move
+keeps every recorded pose: each key is worked out again as what the parent
+does at that key, undone, then the pose that was there - and parents are
+redone before the parts that hang from them, so each is worked against its
+parent's new keys. A part that never follows hangs from the root.
 
 Top of the stack matters: whatever constraints the bone already had still run
 afterwards, so a hand-built rig can be given a control without being taken
@@ -586,6 +618,11 @@ and one lifted 1 m:
   with objects, and goes back off when there is nothing to draw.
 - **Curve the Path on a part that had a curve** said to select the part. It
   says the part has one already, and where to edit it.
+- **A part dragged while its bone was posed was recorded somewhere else.**
+  Record read a dragged object's own transform - but with its bone posed, by
+  the eye on After or by a Record just before, the part is seen carried by
+  the bone, and the drag was made from there. It is read where it is seen
+  now, bones and all.
 - **Setting a curve's point from code bent its handles.** Blender recomputes
   an aligned handle whenever its point is set on its own, and swings it off
   to one side. Curve points are written all at once now.
@@ -605,6 +642,12 @@ and one lifted 1 m:
 - Two moves sharing a part compose in the order they were made, which is not
   shown anywhere.
 - A move can be in only one combined control at a time.
+- A part follows another part of the same move. A follower cannot lead
+  riders - they would copy only its own move and be left behind - and a part
+  that leads riders cannot follow.
+- An object parented to something outside the rig - a finger to a hand that
+  is not in the move - is taken off that parent while it is bound, so moving
+  the hand leaves it behind. Parent the rig to the hand instead.
 - A rider copies its leader from where it stood when it joined. To move one,
   take it out and add it again. A rider cannot lead others, and only objects
   can lead - a bone of a hand-built rig is not offered.

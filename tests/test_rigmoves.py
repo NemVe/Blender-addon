@@ -847,6 +847,203 @@ class TestCurve(RigMovesCase):
         self.assertLess((centre(self.box) - Vector((2.0, 0.0, 0.5))).length, TOLERANCE)
 
 
+class TestFollowers(RigMovesCase):
+    """A finger: three segments end to end, each hinged on its knuckle and
+    hanging from the one before. Closed, every joint bends 30 degrees."""
+
+    KNUCKLES = (Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)))
+
+    def setUp(self):
+        super().setUp()
+        self.segments = []
+        for number in range(3):
+            segment = cube("Seg{:d}".format(number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+        bpy.context.view_layer.update()
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        for segment, knuckle in zip(self.segments, self.KNUCKLES):
+            bpy.context.scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+
+    def bent(self, degrees):
+        """Each segment's place with every joint bent this far, carried down
+        the finger."""
+        out, carry = [], Matrix.Identity(4)
+        for knuckle, home in zip(self.KNUCKLES, self.homes):
+            carry = (carry @ Matrix.Translation(knuckle)
+                     @ Matrix.Rotation(math.radians(degrees), 4, "Y")
+                     @ Matrix.Translation(-knuckle))
+            out.append(carry @ home)
+        return out
+
+    def chain(self):
+        self.move.parts["Seg2"].follows = "Seg1"
+        self.move.parts["Seg3"].follows = "Seg2"
+
+    def close(self, which=(0, 1, 2)):
+        for number in which:
+            self.segments[number].matrix_world = self.bent(30.0)[number]
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    def check_curl(self, share, degrees):
+        drive(self.move, share)
+        for segment, place in zip(self.segments, self.bent(degrees)):
+            expected = [place @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def test_finger_curls_joint_by_joint(self):
+        self.chain()
+        self.close()
+        bpy.ops.rigmoves.build()
+        self.check_curl(0.0, 0.0)
+        self.check_curl(0.5, 15.0)
+        self.check_curl(1.0, 30.0)
+        # Bone by bone, as asked: each hangs from the one before.
+        bones = rig().data.bones
+        self.assertEqual(bones[self.move.parts["Seg2"].bone_name].parent.name,
+                         self.move.parts["Seg1"].bone_name)
+        self.assertEqual(bones[self.move.parts["Seg3"].bone_name].parent.name,
+                         self.move.parts["Seg2"].bone_name)
+
+    def test_follows_set_after_a_build(self):
+        self.close()
+        bpy.ops.rigmoves.build()
+        # Each on its own, the middle of the way pulls the joints apart.
+        drive(self.move, 0.5)
+        tip = [self.bent(15.0)[2] @ v.co for v in self.segments[2].data.vertices]
+        self.assertGreater(drift(self.segments[2], tip), 0.01)
+        self.chain()
+        self.assertTrue(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        bpy.ops.rigmoves.build()
+        self.assertFalse(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        self.check_curl(0.0, 0.0)
+        self.check_curl(0.5, 15.0)
+        self.check_curl(1.0, 30.0)
+        # And let go again, it keeps its poses too.
+        self.move.parts["Seg3"].follows = ""
+        bpy.ops.rigmoves.build()
+        self.check_curl(1.0, 30.0)
+
+    def test_a_follower_left_alone_rides_along(self):
+        # Only the first segment is bent: the rest go with it, unbent.
+        self.chain()
+        self.close(which=(0,))
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        carry = self.bent(30.0)[0] @ self.homes[0].inverted()
+        for segment, home in zip(self.segments[1:], self.homes[1:]):
+            expected = [carry @ home @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def test_dragging_a_follower_from_where_it_is_seen(self):
+        self.chain()
+        self.close(which=(0,))
+        bpy.ops.rigmoves.build()
+        # On After, the second segment is seen carried by the first. It is
+        # dragged from there to bend its own joint, as a user would.
+        bpy.ops.rigmoves.show(index=0, which="AFTER")
+        bpy.context.view_layer.update()
+        posed = {pb.name: pb.matrix_basis.copy() for pb in rig().pose.bones}
+        world = rig().matrix_world
+        carried = (world @ rigmoves.deformation(
+            rig(), None, self.move.parts["Seg2"].bone_name, 0.0, posed) @ world.inverted())
+        wanted = self.bent(30.0)
+        self.segments[1].matrix_world = carried.inverted() @ wanted[1]
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        expected = [wanted[1] @ v.co for v in self.segments[1].data.vertices]
+        self.assertLess(drift(self.segments[1], expected), TOLERANCE)
+        # The third, never bent itself, rides on the second.
+        carry = wanted[1] @ self.homes[1].inverted()
+        expected = [carry @ self.homes[2] @ v.co for v in self.segments[2].data.vertices]
+        self.assertLess(drift(self.segments[2], expected), TOLERANCE)
+
+    def test_a_loose_follower_hangs_from_the_part_it_follows(self):
+        # Before the first Build: dragging the first segment carries the
+        # others along on screen, which is what gets recorded.
+        self.chain()
+        self.assertEqual(self.segments[1].parent, self.segments[0])
+        self.segments[0].matrix_world = self.bent(30.0)[0]
+        bpy.context.view_layer.update()
+        carry = self.bent(30.0)[0] @ self.homes[0].inverted()
+        self.assertLess(drift(self.segments[2], [carry @ self.homes[2] @ v.co
+                                                 for v in self.segments[2].data.vertices]),
+                        TOLERANCE)
+        # Let go of, it stays where it is.
+        self.move.parts["Seg3"].follows = ""
+        self.assertIsNone(self.segments[2].parent)
+        self.assertLess(drift(self.segments[2], [carry @ self.homes[2] @ v.co
+                                                 for v in self.segments[2].data.vertices]),
+                        TOLERANCE)
+
+    def test_impossible_choices_are_turned_down(self):
+        self.chain()
+        parts = self.move.parts
+        parts["Seg1"].follows = "Seg3"          # a loop
+        self.assertEqual(parts["Seg1"].follows, "")
+        parts["Seg1"].follows = "Seg1"          # itself
+        self.assertEqual(parts["Seg1"].follows, "")
+        parts["Seg1"].follows = "Nothing"
+        self.assertEqual(parts["Seg1"].follows, "")
+        self.assertEqual(parts["Seg3"].follows, "Seg2")
+
+    def test_a_follower_does_not_lead_riders(self):
+        self.chain()
+        self.close()
+        bpy.ops.rigmoves.build()
+        other = cube("Other", (0.0, 5.0, 0.0))
+        select(other, self.segments[1])
+        bpy.context.view_layer.objects.active = self.segments[1]
+        self.assertEqual([p.name for _i, _m, p in rigmoves.leaders(bpy.context, rig())], [])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg2",
+                                                     rig_name=rig().name), {"CANCELLED"})
+
+    def test_paths_go_down_the_finger(self):
+        self.chain()
+        self.close()
+        bpy.ops.rigmoves.build()
+        bpy.ops.rigmoves.show_paths(index=0, show=True)
+        tip = self.move.paths_object.data.splines[2].points
+        middle = self.bent(30.0)[2] @ Vector((0.0, 0.0, 0.0))
+        self.assertLess((Vector(tip[-1].co[:3]) - middle).length, TOLERANCE)
+
+
+class TestModelledHierarchy(RigMovesCase):
+    """A finger already parented joint by joint in the file."""
+
+    def test_parents_become_follows_and_come_back(self):
+        hand = cube("Hand", (0.0, 0.0, -3.0))
+        one = cube("One", (0.5, 0.0, 0.0))
+        two = cube("Two", (1.5, 0.0, 0.0))
+        rigmoves.keep_world(one, hand)
+        rigmoves.keep_world(two, one)
+        select(one, two)
+        bpy.ops.rigmoves.new_move()
+        move = rig().rigmoves.moves[0]
+        self.assertEqual(move.parts["Two"].follows, "One")
+        self.assertEqual(move.parts["One"].follows, "")
+        one.location.z += 1.0
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        drive(move, 1.0)
+        self.assertAlmostEqual(centre(two).z, 1.0, places=4)
+        # Taken out of the rig, each hangs from its own parent again.
+        drive(move, 0.0)
+        bpy.ops.rigmoves.remove(index=0)
+        self.assertEqual(one.parent, hand)
+        self.assertEqual(two.parent, one)
+        self.assertAlmostEqual(two.matrix_world.translation.x, 1.5, places=5)
+
+
 class TestCombined(RigMovesCase):
 
     def test_combined_control_plays_members_in_order(self):
