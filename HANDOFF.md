@@ -45,19 +45,25 @@ promises to the user.
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 5,500 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 6,000 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 83 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 101 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
 
 **Commands:**
 
-    .venv/bin/python tests/test_rigmoves.py      # all tests, about 6 s
+    .venv/bin/python tests/test_rigmoves.py      # all tests, about 8 s
     .venv/bin/python tests/test_rigmoves.py TestFollowers   # one class
     ruff check rigmoves tests tools
     python tools/build_zip.py
+
+On the user's Windows PC (since 0.16) the venv is `.venv/Scripts/python.exe`
+with ruff in `.venv/Scripts/ruff.exe`; make it with `py -3.13 -m venv .venv`
+and `pip install bpy==5.2.2 ruff`. Their checkout is a clone in
+`Desktop\AutoRigger\Moves\Blender-addon` with `core.autocrlf=false`, so files
+and zips keep LF line endings. Their Blender is 5.2.1.
 
 **Blender:** the add-on targets 4.4+ and is tested on 5.2.2 as a Python
 module. Chromium is available if you ever need to render a picture for the
@@ -89,6 +95,7 @@ Features, in the order the user asked for them:
 | 0.14.1–0.14.4 | Follower fixes after the user's bug report and two reviews | see the guide's bug list |
 | 0.14.3 | Author credit | `bl_info` |
 | 0.15.0 | Renamed RigMoves to CopyThat | see the top of this file |
+| 0.16.0 | **Copies of a whole finger** ride along joint for joint; a follower can lead riders; each part moved by its own bone only; a Ride Along crash fixed | `chain_of`, `match_copies`, `rides_on`, `riding_on`, `copy_root`, `rider_holder`, `holder_bone`; `own_binding`, `heal_bindings` |
 
 ## The model underneath (read before changing any maths)
 
@@ -159,6 +166,34 @@ Features, in the order the user asked for them:
 - **The "kept" rule in Record:** only parts that were touched are keyed.
   Untouched, already-recorded parts keep their keys. Keying everything would
   flatten finished work.
+- **Copies of a chain (0.16):**
+  - Ride Along on any part of a follower chain matches the selected
+    newcomers to the chain joint for joint (`match_copies`): seeded from one
+    (object, joint) pair, the chain is carried over joint by joint
+    (`carried_to`, using `body`: facing with the mirror sign kept, mesh
+    middle, size) and the nearest object to where each next joint lands is
+    taken. Fullest copies first, then least distance. Leftovers ride the
+    clicked part alone, as riders always did.
+  - Each copy joint is an ordinary rider with `leader` = its joint, plus
+    `rides_on` = the rider copying the joint before it. `riding_on` checks
+    that link is still valid (the up-rider's leader is this leader's
+    `follows`); a stale one falls back.
+  - A rider's bone hangs from `rider_holder`: the valid up-rider, else the
+    part its leader follows (a second claw hangs from the arm), else Root.
+    `bind_riders` re-hangs bones whose holder changed, so a leader may now
+    be given a Follows.
+  - A copy plays by its first joint's (`copy_root`) Lead and Mirror. Lead
+    shifts every joint by the same amount (`base_window`), so the joints
+    stay in step. The panel lists copy roots only, with `+N`; `drop_rider`
+    takes a rider and everything riding on it (`copy_of`).
+  - `ride_on_existing` and `adopt_riders` link joints added in a later press
+    to the copy they belong to, in either order.
+- **One bone per object (0.16):** vertex groups live on the *mesh* (Blender
+  3.0+), so linked duplicates share them. `own_binding` gives a bound object
+  its own mesh, removes groups named after other parts' bones (`PART_MARK`)
+  and dead "RigMoves" Armature modifiers. `bind_object` calls it, and
+  `heal_bindings` runs at the end of every Build, after every bone exists - a
+  stale group only starts to pull when a bone of its name is made.
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in
@@ -177,6 +212,10 @@ Features, in the order the user asked for them:
   one, so it must say what happened and what to do next.
 - Name helpers with plain words, as the existing ones do: `hang`,
   `stand_parts`, `seen_poses`, `recorded`.
+- Never hold a part (or any collection item) across `.add()` on its
+  collection: Blender may move the items, and the old reference reads freed
+  memory. 0.15's Ride Along read its leader that way and crashed Blender in
+  five runs out of eight with six riders. Work things out first, keep names.
 
 ## How to test a change
 
@@ -192,6 +231,9 @@ Features, in the order the user asked for them:
     pivots on the knuckles. Helpers `bent`, `bent_by`, `check_places`,
     `built_curl`, `turn_the_base`.
   - `TestFollowersAdded`: parts added to a built move.
+  - `TestChainRiders`: a tapering finger (lengths 1, 0.8, 0.6) curled 30
+    degrees, and copies placed by a matrix (`made`, `check_copy`).
+  - `TestCopiedParts`: Shift+D and Alt+D copies of bound parts.
   - `TestRiders`, `TestMirror`, `TestPivot`, `TestCurve`: one per feature.
 - Earlier sessions reviewed each version with a workflow: one reviewer per
   lens (regressions, user flows), then a skeptic per finding who reproduced
@@ -206,7 +248,9 @@ Features, in the order the user asked for them:
    - in `TestFollowers`: `test_turning_the_base_*`,
      `test_followers_listed_first_*` and `test_a_follower_not_hung_*`;
    - every test in `TestFollowersAdded`.
-2. **No independent review of 0.14.2–0.14.4 yet.**
+2. **No independent review of 0.14.2–0.16.0 yet.** 0.16.0 was checked on
+   the user's own Fingers.blend and Cubes.blend (copies, headless), but
+   not reviewed by a second pair of eyes.
 3. **Known rough edges** (listed in the guide):
    - Dragging the base of a finger shown bent shears it on screen until
      Record. Record gets it right.
@@ -220,7 +264,12 @@ Features, in the order the user asked for them:
 These follow the "super easy complicated animation" goal:
 
 - **Stagger:** give many riders or followers evenly spread Leads in one
-  click. A flower's petals would open one after another.
+  click. A flower's petals would open one after another; so would copied
+  fingers, closing into a fist one by one.
+- **Chain from the selection:** set Follows for a selected finger in one
+  click, each segment following the one it touches, out from the active one.
+  Today it is one Follows pick per joint, or automatic only when the
+  segments are parented to one another in Blender.
 - **Overshoot and settle:** an ease that goes past After and springs back.
   It has to fit within the driver limits, so it would be keys on the driver
   curve, like Speed.

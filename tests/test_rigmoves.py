@@ -521,6 +521,26 @@ class TestRiders(CopyThatCase):
         drive(move, 0.5)
         self.assertLess(drift(self.rider, self.expected(self.full)), TOLERANCE)
 
+    def test_many_ride_along_at_once(self):
+        # 0.15 read the leader back after adding the riders, and adding can
+        # move the list it was read from: six at once crashed Blender more
+        # often than not.
+        bpy.ops.rigmoves.build()
+        others = [cube("Other{:d}".format(n), (0.0, 3.0 + 2.0 * n, 0.0)) for n in range(6)]
+        rest = [rest_points(o) for o in others]
+        select(*others, self.petal)
+        bpy.context.view_layer.objects.active = self.petal
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Petal",
+                                                     rig_name=rig().name), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual(sorted(p.leader for p in move.parts if p.leader), ["Petal"] * 6)
+        # Each does the petal's move to its own left, from where it stands.
+        drive(move, 1.0)
+        for other, points in zip(others, rest):
+            seat = other.matrix_world
+            travel = seat @ self.full @ seat.inverted()
+            self.assertLess(drift(other, [travel @ p for p in points]), TOLERANCE)
+
     def test_rider_can_be_taken_out_again(self):
         bpy.ops.rigmoves.build()
         self.ride()
@@ -1260,16 +1280,51 @@ class TestFollowers(CopyThatCase):
         self.assertEqual(parts["Seg1"].follows, "")
         self.assertEqual(parts["Seg3"].follows, "Seg2")
 
-    def test_a_follower_does_not_lead_riders(self):
-        self.chain()
-        self.close()
-        bpy.ops.rigmoves.build()
-        other = cube("Other", (0.0, 5.0, 0.0))
+    def other_beside_the_middle(self):
+        """A copy of the middle segment, five along Y: Seg1 turns about the
+        Y axis through its knuckle, which carries anything along Y the same
+        way - so the copy should do exactly what the middle does, five over."""
+        other = cube("Other", (1.5, 5.0, 0.0))
+        other.scale = (1.0, 0.3, 0.3)
+        bpy.context.view_layer.update()
+        return other
+
+    def check_beside_the_middle(self, other):
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            expected = [p + Vector((0.0, 5.0, 0.0)) for p in world_points(self.segments[1])]
+            self.assertLess(drift(other, expected), TOLERANCE)
+
+    def test_a_follower_leads_riders_from_what_it_hangs_on(self):
+        # A second claw on the same arm: it rides along with the first, and
+        # the arm carries it, as the arm carries the first.
+        self.built_curl()
+        other = self.other_beside_the_middle()
         select(other, self.segments[1])
         bpy.context.view_layer.objects.active = self.segments[1]
-        self.assertEqual([p.name for _i, _m, p in rigmoves.leaders(bpy.context, rig())], [])
+        self.assertEqual([p.name for _i, _m, p in rigmoves.leaders(bpy.context, rig())],
+                         ["Seg2"])
         self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg2",
-                                                     rig_name=rig().name), {"CANCELLED"})
+                                                     rig_name=rig().name), {"FINISHED"})
+        bone = rig().data.bones[self.move.parts["Other"].bone_name]
+        self.assertEqual(bone.parent.name, self.move.parts["Seg1"].bone_name)
+        self.check_beside_the_middle(other)
+
+    def test_a_part_leading_riders_may_follow(self):
+        # Turned down before, as its riders would have been left behind. They
+        # hang from what it follows now, from the next Build.
+        self.close()
+        bpy.ops.rigmoves.build()
+        other = self.other_beside_the_middle()
+        select(other, self.segments[1])
+        bpy.context.view_layer.objects.active = self.segments[1]
+        bpy.ops.rigmoves.ride_along(index=0, leader="Seg2", rig_name=rig().name)
+        self.chain()
+        self.assertEqual(self.move.parts["Seg2"].follows, "Seg1")
+        bpy.ops.rigmoves.build()
+        bone = rig().data.bones[self.move.parts["Other"].bone_name]
+        self.assertEqual(bone.parent.name, self.move.parts["Seg1"].bone_name)
+        self.check_beside_the_middle(other)
 
     def test_paths_go_down_the_finger(self):
         self.chain()
@@ -1513,6 +1568,320 @@ class TestFollowersAdded(CopyThatCase):
         self.assertTrue(rigmoves.recorded(self.move, "AFTER"))
         bpy.ops.rigmoves.build()
         self.assertNotIn("After not recorded", rig().rigmoves.report)
+
+
+class TestChainRiders(CopyThatCase):
+    """Fingers copied from a recorded one, riding along with it joint for joint.
+
+    The recorded finger tapers like a real one, each segment shorter than
+    the one before, and curls 30 degrees at every knuckle. Each copy is placed
+    by a matrix of its own - moved, turned or mirrored - so a joint matched to
+    the wrong segment, or a copy played in the wrong frame, cannot pass.
+    """
+
+    LENGTHS = (1.0, 0.8, 0.6)
+    KNUCKLES = (Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), Vector((1.8, 0.0, 0.0)))
+    BESIDE = Matrix.Translation((0.0, 3.0, 0.0))
+
+    def setUp(self):
+        super().setUp()
+        self.finger = self.made("Seg", Matrix())
+        self.homes = [s.matrix_world.copy() for s in self.finger]
+        select(*self.finger)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        for segment, knuckle in zip(self.finger, self.KNUCKLES):
+            bpy.context.scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        self.move.parts["Seg2"].follows = "Seg1"
+        self.move.parts["Seg3"].follows = "Seg2"
+        for segment, place in zip(self.finger, self.bent(30.0)):
+            segment.matrix_world = place
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+
+    def made(self, names, where):
+        """A finger like the recorded one, placed by `where`. `names` is a
+        prefix to number, or one name for each segment."""
+        out = []
+        for number, (knuckle, length) in enumerate(zip(self.KNUCKLES, self.LENGTHS)):
+            name = (names[number] if isinstance(names, (list, tuple))
+                    else "{:s}{:d}".format(names, number + 1))
+            segment = cube(name, (0.0, 0.0, 0.0))
+            segment.matrix_world = (where @ Matrix.Translation(knuckle + Vector((length * 0.5, 0.0, 0.0)))
+                                    @ Matrix.Diagonal((length, 0.3, 0.3, 1.0)))
+            out.append(segment)
+        bpy.context.view_layer.update()
+        return out
+
+    def bent(self, degrees):
+        """Each segment of the recorded finger with every joint bent this far."""
+        out, carry = [], Matrix.Identity(4)
+        for knuckle, home in zip(self.KNUCKLES, self.homes):
+            carry = (carry @ Matrix.Translation(knuckle)
+                     @ Matrix.Rotation(math.radians(degrees), 4, "Y")
+                     @ Matrix.Translation(-knuckle))
+            out.append(carry @ home)
+        return out
+
+    def ride(self, objects, clicked="Seg1"):
+        select(*objects, bpy.data.objects[clicked])
+        bpy.context.view_layer.objects.active = bpy.data.objects[clicked]
+        return bpy.ops.rigmoves.ride_along(index=0, leader=clicked, rig_name=rig().name)
+
+    def check_copy(self, copy, where, share, degrees):
+        """Every segment of a copy where `where` puts the recorded finger's
+        segment, bent this far, with the control at `share`."""
+        drive(self.move, share)
+        for segment, place in zip(copy, self.bent(degrees)):
+            expected = [where @ place @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def test_a_copied_finger_curls_joint_by_joint(self):
+        copy = self.made("Copy", self.BESIDE)
+        self.assertEqual(self.ride(copy), {"FINISHED"})
+        parts = self.move.parts
+        self.assertEqual([parts[s.name].leader for s in copy], ["Seg1", "Seg2", "Seg3"])
+        self.assertEqual([parts[s.name].rides_on for s in copy], ["", "Copy1", "Copy2"])
+        bones = rig().data.bones
+        self.assertEqual(bones[parts["Copy2"].bone_name].parent.name, parts["Copy1"].bone_name)
+        self.assertEqual(bones[parts["Copy3"].bone_name].parent.name, parts["Copy2"].bone_name)
+        for share, degrees in ((0.0, 0.0), (0.5, 15.0), (1.0, 30.0)):
+            self.check_copy(copy, self.BESIDE, share, degrees)
+
+    def test_copies_are_found_by_where_they_stand(self):
+        # Turned a quarter round, named against their order, picked in a
+        # jumble, and the tip of the recorded finger the part clicked last.
+        where = Matrix.Translation((4.0, -2.0, 0.0)) @ Matrix.Rotation(math.radians(90.0), 4, "Z")
+        copy = self.made(["Zed", "Alpha", "Mid"], where)
+        self.assertEqual(self.ride([copy[2], copy[0], copy[1]], clicked="Seg3"), {"FINISHED"})
+        parts = self.move.parts
+        self.assertEqual([parts[s.name].leader for s in copy], ["Seg1", "Seg2", "Seg3"])
+        for share, degrees in ((0.5, 15.0), (1.0, 30.0)):
+            self.check_copy(copy, where, share, degrees)
+
+    def test_several_fingers_in_one_go(self):
+        turned = (Matrix.Translation((0.0, -3.0, 0.0))
+                  @ Matrix.Rotation(math.radians(-40.0), 4, "Z"))
+        one, two = self.made("One", self.BESIDE), self.made("Two", turned)
+        self.assertEqual(self.ride(one + two), {"FINISHED"})
+        self.assertIn("2 copies", rig().rigmoves.report)
+        for share, degrees in ((0.5, 15.0), (1.0, 30.0)):
+            self.check_copy(one, self.BESIDE, share, degrees)
+            self.check_copy(two, turned, share, degrees)
+
+    def test_a_mirrored_copy_curls_the_mirror_way(self):
+        # The way Ctrl+M leaves one: the whole finger mirrored across X, so it
+        # points the other way, then set to one side.
+        where = self.BESIDE @ Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        copy = self.made("Copy", where)
+        self.assertLess(copy[0].matrix_world.determinant(), 0.0)
+        self.assertEqual(self.ride(copy), {"FINISHED"})
+        for share, degrees in ((0.5, 15.0), (1.0, 30.0)):
+            self.check_copy(copy, where, share, degrees)
+
+    def test_a_copy_sent_behind_moves_as_one(self):
+        copy = self.made("Copy", self.BESIDE)
+        self.ride(copy)
+        # The Lead is its first joint's - the panel shows no other - and the
+        # whole finger waits for the recorded one.
+        self.move.parts["Copy1"].lead = -50
+        self.check_copy(copy, self.BESIDE, 0.5, 0.0)
+        self.check_copy(copy, self.BESIDE, 0.75, 15.0)
+        self.check_copy(copy, self.BESIDE, 1.0, 30.0)
+
+    def test_a_late_copy_keeps_its_joints_in_step(self):
+        # The recorded middle joint waits a quarter. A copy a whole finger
+        # behind plays the very same, half a control later, joints in step.
+        copy = self.made("Copy", self.BESIDE)
+        self.ride(copy)
+        self.move.parts["Seg2"].start = 0.25
+        self.move.parts["Copy1"].lead = -50
+        for early in (0.1, 0.3, 0.45):
+            drive(self.move, early)
+            seen = [[self.BESIDE @ p for p in world_points(s)] for s in self.finger]
+            drive(self.move, early + 0.5)
+            for segment, expected in zip(copy, seen):
+                self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def test_mirror_on_a_copy_mirrors_every_joint(self):
+        copy = self.made("Copy", self.BESIDE)
+        self.ride(copy)
+        self.assertEqual(bpy.ops.rigmoves.set_mirror(
+            index=0, part=self.move.parts.find("Copy1"), axis="Z"), {"FINISHED"})
+        # Across its own Z the curl goes the other way round, every joint.
+        across = Matrix.Diagonal((1.0, 1.0, -1.0, 1.0))
+        drive(self.move, 1.0)
+        for segment, place in zip(copy, self.bent(30.0)):
+            expected = [self.BESIDE @ across @ place @ across @ v.co
+                        for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def test_a_copy_taken_out_goes_whole(self):
+        copy = self.made("Copy", self.BESIDE)
+        rest = [rest_points(s) for s in copy]
+        self.ride(copy)
+        self.assertEqual(bpy.ops.rigmoves.drop_rider(
+            index=0, part=self.move.parts.find("Copy1")), {"FINISHED"})
+        for segment, points in zip(copy, rest):
+            self.assertIsNone(self.move.parts.get(segment.name))
+            self.assertIsNone(rig().data.bones.get(segment.name))
+            self.assertFalse([m for m in segment.modifiers if m.type == "ARMATURE"])
+            drive(self.move, 1.0)
+            self.assertLess(drift(segment, points), TOLERANCE, segment.name)
+        self.check_copy(self.finger, Matrix(), 1.0, 30.0)
+
+    def test_one_button_for_a_finger_selected_whole(self):
+        copy = self.made("Copy", self.BESIDE)
+        select(*copy, *self.finger)
+        bpy.context.view_layer.objects.active = self.finger[1]
+        found = rigmoves.leaders(bpy.context, rig())
+        self.assertEqual([p.name for _i, _m, p in found], ["Seg2"])
+
+    def test_joints_added_later_ride_on_their_copy(self):
+        copy = self.made("Copy", self.BESIDE)
+        self.assertEqual(self.ride(copy[:1]), {"FINISHED"})
+        self.assertEqual(self.ride(copy[1:]), {"FINISHED"})
+        parts = self.move.parts
+        self.assertEqual([parts[s.name].rides_on for s in copy], ["", "Copy1", "Copy2"])
+        self.check_copy(copy, self.BESIDE, 1.0, 30.0)
+
+    def test_a_first_joint_added_later_takes_up_the_rest(self):
+        copy = self.made("Copy", self.BESIDE)
+        self.assertEqual(self.ride(copy[1:]), {"FINISHED"})
+        self.assertEqual(self.ride(copy[:1]), {"FINISHED"})
+        parts = self.move.parts
+        self.assertEqual([parts[s.name].rides_on for s in copy], ["", "Copy1", "Copy2"])
+        self.check_copy(copy, self.BESIDE, 1.0, 30.0)
+
+    def test_copies_ridden_before_the_first_build(self):
+        # Set up before the recorded finger is built, they ride from the
+        # first Build.
+        bpy.ops.rigmoves.remove(index=0)
+        for segment, home in zip(self.finger, self.homes):
+            segment.matrix_world = home
+        select(*self.finger)
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        self.move.parts["Seg2"].follows = "Seg1"
+        self.move.parts["Seg3"].follows = "Seg2"
+        copy = self.made("Copy", self.BESIDE)
+        self.assertEqual(self.ride(copy), {"FINISHED"})
+        for segment, knuckle in zip(self.finger, self.KNUCKLES):
+            bpy.context.scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        for segment, place in zip(self.finger, self.bent(30.0)):
+            segment.matrix_world = place
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        for share, degrees in ((0.5, 15.0), (1.0, 30.0)):
+            self.check_copy(copy, self.BESIDE, share, degrees)
+
+
+class TestCopiedParts(CopyThatCase):
+    """Parts copied after they were bound: Shift+D copies the binding with the
+    part, and Alt+D shares the mesh the binding is kept on."""
+
+    def setUp(self):
+        super().setUp()
+        self.lead = cube("Lead", (0.0, 0.0, 0.0))
+
+        def pose():
+            self.lead.location = (2.0, 0.0, 1.0)
+
+        self.before, self.after = record_move([self.lead], pose)
+        bpy.ops.rigmoves.build()
+        self.move = rig().rigmoves.moves[0]
+
+    def copy(self, obj, offset, linked=False):
+        """Duplicate an object as the viewport does, and move the copy along."""
+        select(obj)
+        self.assertEqual(bpy.ops.object.duplicate(linked=linked), {"FINISHED"})
+        made = bpy.context.view_layer.objects.active
+        made.matrix_world = Matrix.Translation(offset) @ made.matrix_world
+        bpy.context.view_layer.update()
+        return made
+
+    def ride(self, *others):
+        select(*others, self.lead)
+        bpy.context.view_layer.objects.active = self.lead
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Lead",
+                                                     rig_name=rig().name), {"FINISHED"})
+
+    def check_travel(self, obj, rest, share):
+        """The object as far along the leader's straight move as `share`."""
+        travel = Vector((2.0, 0.0, 1.0)) * share
+        self.assertLess(drift(obj, [p + travel for p in rest]), TOLERANCE, obj.name)
+
+    def test_a_copy_of_a_rider_moves_by_its_own_bone_only(self):
+        # As it was found: one rider, copied with Shift+D for the next, and
+        # the first then mirrored. The copy ran straight, half and half
+        # between its own bone and the first rider's.
+        first = cube("First", (0.0, 3.0, 0.0))
+        self.ride(first)
+        second = self.copy(first, (0.0, 3.0, 0.0))
+        self.assertIn("First", [g.name for g in second.vertex_groups])
+        rest = rest_points(second)
+        self.ride(second)
+        self.assertEqual([g.name for g in second.vertex_groups], [second.name])
+        self.assertEqual(bpy.ops.rigmoves.set_mirror(
+            index=0, part=self.move.parts.find("First"), axis="Z"), {"FINISHED"})
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            self.check_travel(second, rest, share)
+
+    def test_linked_copies_move_by_their_own_bones(self):
+        # Alt+D shares the mesh, and vertex groups live on the mesh: binding
+        # the copy gave the leader the copy's group as well, and each was
+        # moved half by the other's bone.
+        other = self.copy(self.lead, (0.0, 3.0, 0.0), linked=True)
+        self.assertEqual(other.data.name, self.lead.data.name)
+        rest = rest_points(other)
+        self.ride(other)
+        self.assertNotEqual(other.data.name, self.lead.data.name)
+        self.assertEqual([g.name for g in self.lead.vertex_groups], ["Lead"])
+        self.move.parts[other.name].lead = -50
+        drive(self.move, 0.5)
+        self.assertLess(drift(self.lead, self.after["Lead"]), TOLERANCE)
+        self.check_travel(other, rest, 0.0)
+        drive(self.move, 1.0)
+        self.check_travel(other, rest, 1.0)
+
+    def test_a_group_for_a_part_that_joins_later(self):
+        # Copied from a part of a rig since deleted, the leader still carries
+        # that part's group, under a name no bone has - until an object of
+        # that name joins, and its bone is made in the same Build.
+        group = self.lead.vertex_groups.new(name="First")
+        group.add(range(len(self.lead.data.vertices)), 1.0, "REPLACE")
+        first = cube("First", (0.0, 3.0, 0.0))
+        self.ride(first)
+        self.assertEqual([g.name for g in self.lead.vertex_groups], ["Lead"])
+        self.move.parts["First"].lead = -50
+        drive(self.move, 0.5)
+        self.assertLess(drift(self.lead, self.after["Lead"]), TOLERANCE)
+
+    def test_build_heals_a_copy_bound_before(self):
+        # As a file saved by 0.15 opens: a rider still carrying the vertex
+        # group of the part it was copied from.
+        first = cube("First", (0.0, 3.0, 0.0))
+        self.ride(first)
+        rest = rest_points(first)
+        group = first.vertex_groups.new(name="Lead")
+        group.add(range(len(first.data.vertices)), 1.0, "REPLACE")
+        self.move.parts["First"].lead = -50
+        drive(self.move, 0.5)
+        self.assertGreater(drift(first, rest), 0.1)
+        bpy.ops.rigmoves.build()
+        self.assertIn("copied from another", rig().rigmoves.report)
+        self.assertEqual([g.name for g in first.vertex_groups], ["First"])
+        drive(self.move, 0.5)
+        self.check_travel(first, rest, 0.0)
+        drive(self.move, 1.0)
+        self.check_travel(first, rest, 1.0)
 
 
 class TestCombined(CopyThatCase):

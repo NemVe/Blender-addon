@@ -32,12 +32,13 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 15, 0),
+    "version": (0, 16, 0),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
                    "delays. Works on loose objects with no rig at all, and makes one. "
-                   "Other objects can ride along, each from its own place",
+                   "Other objects can ride along, each from its own place - "
+                   "copies of a whole finger joint for joint",
     "doc_url": "https://creators.sa/nemve",
     "category": "Rigging",
 }
@@ -765,10 +766,10 @@ def holder_of(rig, part):
 def _follows_changed(self, context):
     """Turn down a choice that cannot be, and say why.
 
-    Itself, a rider, a part of a rig's own, a loop - a part that ends up
-    following itself - or a part that leads riders: a rider copies only its
-    leader's own move, so a leader carried by another part would leave its
-    riders behind.
+    Itself, a rider, a part of a rig's own, a curved part, or a loop - a part
+    that ends up following itself. A part that leads riders may follow: its
+    riders hang from what it follows too, at the next Build, so they are
+    carried along with it.
     """
     if not self.follows:
         self.follows_kept = ""
@@ -784,8 +785,6 @@ def _follows_changed(self, context):
         why = "riders copy their leader instead"
     elif self.kind != "OBJECT" or target.kind != "OBJECT":
         why = "only objects can follow and be followed"
-    elif any(p.leader == self.name for p in move.parts):
-        why = "it leads riders, which would be left behind"
     elif curve_alive(self.path_curve):
         why = "its path is curved - Straighten it first, as a follower goes where it is carried"
     else:
@@ -937,6 +936,12 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # of doors - can play its move mirrored. A rider that is a mirrored copy
     # already (negative scale) mirrors by itself, with this left at "-".
     mirror: bpy.props.EnumProperty(name="Mirror", items=MIRRORS, default="NONE")
+    # A rider copying one joint of a chain - the middle of a finger - rides
+    # on the rider copying the joint before it, so a copied finger bends
+    # joint by joint as the recorded one does. Empty for the first joint of
+    # a copy, which hangs where its leader hangs, and for every other part.
+    # A copy's Lead and Mirror are its first joint's.
+    rides_on: bpy.props.StringProperty()
     # The point this part turns about, in its own space where it stands at
     # Before, so it goes with the object if Before is taken again. The kind
     # is only which button set it, for the panel to show.
@@ -1847,6 +1852,64 @@ def seat_rig(rig, data=None):
     return True
 
 
+def copied_groups(rig, obj, keep):
+    """The vertex groups on an object for bones of other parts of this rig.
+
+    A part copied after it was bound - Shift+D - brings its binding with it:
+    its vertex group at full weight, named after its own bone. Bound to a
+    bone of its own as well, the copy is then moved by both bones and lands
+    half way between them. That looks right for exactly as long as the two
+    bones do the same thing: mirror one, or send it ahead, and the copy runs
+    straight or stands still. Only bones this add-on made count - a group for
+    any other bone is somebody's own weights, and is left alone.
+    """
+    out = []
+    for group in obj.vertex_groups:
+        bone = rig.data.bones.get(group.name)
+        if group.name != keep and bone is not None and bone.get(PART_MARK):
+            out.append(group.name)
+    return out
+
+
+def own_binding(rig, obj, keep):
+    """Leave a bound object moved by its own bone and nothing else, and say
+    how many other bones were moving it as well.
+
+    Its mesh is made its own first, if another object shares it. Vertex
+    groups live on the mesh, so two linked copies - Alt+D - share them too:
+    binding the second gave the first its group as well, and each was moved
+    by both bones. Armature modifiers this add-on left pointing at a rig that
+    has since been deleted go too; they do nothing but clutter the stack.
+    """
+    if obj.type == "MESH" and obj.data is not None and obj.data.users > 1:
+        obj.data = obj.data.copy()
+    stale = copied_groups(rig, obj, keep)
+    for name in stale:
+        obj.vertex_groups.remove(obj.vertex_groups[name])
+    for modifier in list(obj.modifiers):
+        if (modifier.type == "ARMATURE" and modifier.object is None
+                and modifier.name.startswith("RigMoves")):
+            obj.modifiers.remove(modifier)
+    return len(stale)
+
+
+def heal_bindings(rig, data):
+    """Every bound object moved by its own bone only - for files bound before
+    copies were looked out for. Returns how many were being moved by another
+    part's bone as well."""
+    healed = 0
+    for move in data.moves:
+        for part in bound_parts(move):
+            obj = bpy.data.objects.get(part.name)
+            # Two parts sharing a mesh show up here as well: each carries the
+            # other's group, and the first one healed takes a mesh of its own.
+            if (obj is not None and obj.type == "MESH"
+                    and copied_groups(rig, obj, part.bone_name)):
+                own_binding(rig, obj, part.bone_name)
+                healed += 1
+    return healed
+
+
 def bind_object(rig, obj, bone_name):
     """Tie a whole object to one bone, and let it travel with the rig.
 
@@ -1854,7 +1917,9 @@ def bind_object(rig, obj, bone_name):
     hangs a child off the bone's *tail* and through its pose, which is a
     second frame of reference to keep straight for no gain on a rigid part.
     One group, one modifier, and the object's own transform is left alone.
+    One group only: a copy of a bound part arrives with that part's as well.
     """
+    own_binding(rig, obj, bone_name)
     group = obj.vertex_groups.get(bone_name) or obj.vertex_groups.new(name=bone_name)
     group.add(range(len(obj.data.vertices)), 1.0, "REPLACE")
     modifier = next((m for m in obj.modifiers
@@ -2096,25 +2161,80 @@ def leader_of(move, rider):
     return leader
 
 
+def riding_on(move, rider):
+    """The rider this one rides on, while that one still copies the very part
+    this one's leader follows - else None, and it hangs where its leader
+    hangs. A Follows changed since the copy was made undoes the pairing."""
+    up = move.parts.get(rider.rides_on) if rider.rides_on else None
+    leader = leader_of(move, rider)
+    if (up is None or not up.leader or up.name == rider.name or leader is None
+            or not leader.follows or up.leader != leader.follows):
+        return None
+    return up
+
+
+def copy_root(move, rider):
+    """The first joint of the copy a rider belongs to: the one whose Lead and
+    Mirror the whole copy plays by. A rider on its own is its own."""
+    seen = {rider.name}
+    while True:
+        up = riding_on(move, rider)
+        if up is None or up.name in seen:
+            return rider
+        seen.add(up.name)
+        rider = up
+
+
+def copy_of(move, root):
+    """A copy's riders, its first joint first, each before the ones riding on
+    it."""
+    out, names = [root], {root.name}
+    for here_ in out:
+        for part in move.parts:
+            if part.leader and part.name not in names:
+                up = riding_on(move, part)
+                if up is not None and up.name == here_.name:
+                    out.append(part)
+                    names.add(part.name)
+    return out
+
+
+def rider_holder(move, rider):
+    """The part whose bone a rider's bone hangs from - None for the rig's root.
+
+    The copy of the part its leader follows, riding in the same copy: the
+    joint before it, in a copied finger. Failing that, the very part its
+    leader follows, so a second claw on the same arm swings with that arm.
+    A rider of a part that follows nothing hangs from the root, as ever.
+    """
+    leader = leader_of(move, rider)
+    target = move.parts.get(leader.follows) if leader is not None and leader.follows else None
+    if target is None or target.leader:
+        return None
+    return riding_on(move, rider) or target
+
+
 def reflection(axis):
     """A mirror across the plane square to one of the three axes."""
     return Matrix.Diagonal([-1.0 if name == axis else 1.0 for name in AXES])
 
 
-def rider_reflection(rig, leader, rider):
+def rider_reflection(rig, move, leader, rider):
     """The mirror between a leader and a rider, in their own axes - None
-    when there is none."""
+    when there is none. Whether each is a mirror image is its own; the Mirror
+    setting is the copy's, so every joint of a copied finger mirrors alike."""
     lead_mirrored = leader_frame(rig, leader)[1]
     mirrored = standing(as_matrix(rider.before))[1]
     local = Matrix.Identity(3)
     if mirrored != lead_mirrored:
         local = local @ reflection("X")
-    if rider.mirror in AXES:
-        local = local @ reflection(rider.mirror)
+    axis = (copy_root(move, rider) if rider.rides_on else rider).mirror
+    if axis in AXES:
+        local = local @ reflection(axis)
     return None if local == Matrix.Identity(3) else local
 
 
-def rider_turn(rig, leader, rider):
+def rider_turn(rig, move, leader, rider):
     """What a rider's copy of the path is turned by, in the leader bone's own
     axes - None for a plain copy.
 
@@ -2126,7 +2246,7 @@ def rider_turn(rig, leader, rider):
     the axis it names, for a rider that faces the other way without being a
     mirror image: the second of a pair of doors.
     """
-    local = rider_reflection(rig, leader, rider)
+    local = rider_reflection(rig, move, leader, rider)
     if local is None:
         return None
     lead_frame = leader_frame(rig, leader)[0]
@@ -2141,17 +2261,39 @@ def same_matrix(a, b, tolerance=1e-5):
                for x, y in zip(row_a, row_b)) <= tolerance
 
 
+def holder_bone(move, rider, bones):
+    """The name of the bone a rider's bone should hang from, among `bones` -
+    the rig's bones, or its edit bones while those are being changed."""
+    holder = rider_holder(move, rider)
+    names = []
+    if holder is not None:
+        names.append(holder.bone_name)
+        if holder.leader:
+            # The joint before it in its copy has no bone yet, or none any
+            # more: hung where its leader hangs, rather than from nothing.
+            names.append(move.parts[leader_of(move, rider).follows].bone_name)
+    names.append("Root")
+    for name in names:
+        if name and name != rider.bone_name and bones.get(name) is not None:
+            return name
+    first = bones[0].name if len(bones) else ""
+    return first if first != rider.bone_name else ""
+
+
 def bind_riders(context, rig, data):
     """Give every new rider its bone, turned like its leader's, and bind it -
-    and turn an existing rider's bone again when its leader's has moved.
+    and turn an existing rider's bone again when its leader's has moved, and
+    hang it again when what it should hang from has changed.
 
     After bind_loose and the pivots, so a leader that was a loose object a
     moment ago, or whose pivot has just been picked, already has the bone its
     riders are turned from. A rider's own pivot is its leader's, carried over.
+    Its bone hangs where rider_holder says: from the root, or for a copied
+    finger from the copy of the joint before it.
     """
     world = rig.matrix_world
     into = world.inverted_safe()
-    fresh, moved = [], []
+    fresh, moved, riders = [], [], []
     for move in data.moves:
         for _index, rider in riders_of(move):
             leader = leader_of(move, rider)
@@ -2169,16 +2311,26 @@ def bind_riders(context, rig, data):
             # pivot, not the pivot carried straight over: off the mirror's
             # plane the two are apart, and the rider swung about the wrong
             # point and ended up out of place.
-            local = rider_reflection(rig, leader, rider)
+            local = rider_reflection(rig, move, leader, rider)
             if local is not None:
                 seat.translation = into @ (own_frame @ local.to_4x4() @ lead_frame
                                            @ world @ bone.head_local)
+            riders.append((move, rider))
             own = rig.data.bones.get(rider.bone_name) if rider.bone_name else None
             if own is None:
                 fresh.append((rider, leader, seat, bone.length))
             elif not same_matrix(own.matrix_local, seat):
                 moved.append((rider, seat))
-    if not (fresh or moved):
+    # Hanging changes too: a Follows set on a leader since the last Build, or
+    # a rig from before copies rode on one another.
+    rehung = []
+    for move, rider in riders:
+        own = rig.data.bones.get(rider.bone_name) if rider.bone_name else None
+        if own is not None:
+            have = own.parent.name if own.parent is not None else ""
+            if have != holder_bone(move, rider, rig.data.bones):
+                rehung.append(rider)
+    if not (fresh or moved or rehung):
         return 0
 
     for rider, _leader, _seat, _length in fresh:
@@ -2196,19 +2348,31 @@ def bind_riders(context, rig, data):
         bone = edit.get(rider.bone_name)
         if bone is not None:
             bone.matrix = seat
-    root = edit.get("Root") or (edit[0] if len(edit) else None)
     for rider, _leader, seat, length in fresh:
         bone = edit.new(rider.name)
         bone.head = Vector((0.0, 0.0, 0.0))
         bone.tail = Vector((0.0, max(length, 1e-3), 0.0))
         bone.matrix = seat
         bone.use_deform = True
-        bone.parent = root if (root is not None and root.name != bone.name) else None
         rider.bone_name = bone.name
+    # Hung once every bone is there, as the joint a rider hangs from may
+    # have been made a moment ago. Hanging moves no bone: only the pose to
+    # come is carried, and that is a copy of the leader's, which already
+    # plays against the part its leader hangs from.
+    for move, rider in riders:
+        bone = edit.get(rider.bone_name)
+        if bone is not None:
+            want = holder_bone(move, rider, edit)
+            bone.use_connect = False
+            bone.parent = edit.get(want) if want else None
     bpy.ops.object.mode_set(mode="OBJECT")
 
     for rider, leader, _seat, _length in fresh:
-        bind_object(rig, bpy.data.objects[rider.name], rider.bone_name)
+        obj = bpy.data.objects[rider.name]
+        bind_object(rig, obj, rider.bone_name)
+        # A copy of a follower comes marked as hung; a rider never hangs.
+        if obj.get(FOLLOW_MARK) is not None:
+            del obj[FOLLOW_MARK]
         rig.data.bones[rider.bone_name][PART_MARK] = True
         pose_bone = rig.pose.bones[rider.bone_name]
         pose_bone.rotation_mode = rig.pose.bones[part_bone(leader)].rotation_mode
@@ -2297,7 +2461,7 @@ def copy_path(rig, move, leader, rider):
             bag.fcurves.remove(curve)
     leading = rig.pose.bones.get(part_bone(leader))
     originals = [c for c in bag.fcurves if c.data_path.startswith(source)]
-    turn = rider_turn(rig, leader, rider) if leading is not None else None
+    turn = rider_turn(rig, move, leader, rider) if leading is not None else None
     turned = set()
     if turn is not None:
         # Rotation is turned only as a quaternion, the mode this add-on's own
@@ -2331,6 +2495,169 @@ def follow_leaders(rig, data):
             elif rider.bone_name:
                 copy_path(rig, move, leader, rider)
     return lost
+
+
+# ---------------------------------------------------------------------------
+# copies of a chain: a finger riding along with a finger
+#
+# Four fingers, one of them recorded. The other three are copies of it, joint
+# for joint, so each joint of a copy rides along with the matching joint of
+# the recorded finger - and hangs from the copy of the joint before it, as
+# the recorded one hangs. Every joint then turns as its own does, about its
+# own knuckle, carried by the joints before it: the whole copy curls, from
+# where it stands. Which object copies which joint is read off where they
+# stand and which way they face, so the copies need no names and no order.
+
+
+def chain_of(move, part):
+    """Every part of the chain a part belongs to, parents first: the part at
+    its root and every part that hangs below that one. Riders aside."""
+    own = {p.name: p for p in chain_parts(move)}
+    if part.name not in own:
+        return [part]
+    root, seen = part, {part.name}
+    while root.follows in own and root.follows not in seen:
+        seen.add(root.follows)
+        root = own[root.follows]
+    out, names = [root], {root.name}
+    for here_ in out:
+        for other in own.values():
+            if other.follows == here_.name and other.name not in names:
+                out.append(other)
+                names.add(other.name)
+    return out
+
+
+def body(obj, matrix):
+    """(turn, middle, size) of an object standing at `matrix`: which way it
+    faces, without its size and with a mirror image kept as one; where the
+    middle of its mesh is; and how big that is - all in the world."""
+    corners = corners_of(obj)
+    low = Vector([min(c[axis] for c in corners) for axis in range(3)])
+    high = Vector([max(c[axis] for c in corners) for axis in range(3)])
+    turn = matrix.to_3x3().normalized()
+    return (turn, matrix @ ((low + high) * 0.5),
+            max((matrix.to_3x3() @ (high - low)).length, 1e-6))
+
+
+def part_body(part):
+    """A part's body where it stands at Before, or None without its object."""
+    obj = bpy.data.objects.get(part.name)
+    return body(obj, as_matrix(part.before)) if obj is not None else None
+
+
+def carried_to(source, target, point):
+    """Where `point`, near the body `source`, lands near the body `target` -
+    turned and sized as `target` is against `source`."""
+    turn = target[0] @ source[0].inverted_safe()
+    return target[1] + (target[2] / source[2]) * (turn @ (point - source[1]))
+
+
+def alike(size, wanted):
+    """Whether two sizes are near enough for one to be a copy of the other."""
+    return 0.5 <= size / max(wanted, 1e-9) <= 2.0
+
+
+def match_copies(chain, objects):
+    """Sort objects into copies of a chain, joint for joint.
+
+    A copy is grown from one pair - an object and the joint it copies - by
+    carrying the chain over from that joint to that object, one joint at a
+    time, and taking whatever object stands where each next joint lands: near
+    enough, against how far apart the two joints are, and about its size. The
+    fullest copies are taken first, and of those the closest. Returns the
+    copies, each a dict from a joint's name to its object, and the objects
+    left over, which copy no more than one joint each.
+    """
+    shapes = {part.name: part_body(part) for part in chain}
+    if any(shape is None for shape in shapes.values()):
+        return [], list(objects)
+    seen = {obj.name: (obj, body(obj, obj.matrix_world)) for obj in objects}
+    above_ = {part.name: part.follows for part in chain if part.follows in shapes}
+    near = {name: [other for other, up in above_.items() if up == name]
+            + ([above_[name]] if name in above_ else []) for name in shapes}
+
+    def grow(seed, first, free):
+        match, cost, todo = {seed: first}, 0.0, [seed]
+        while todo:
+            joint = todo.pop(0)
+            source, target = shapes[joint], seen[match[joint]][1]
+            ratio = target[2] / source[2]
+            for other in near[joint]:
+                if other in match:
+                    continue
+                spot = carried_to(source, target, shapes[other][1])
+                reach = max(0.5 * ratio * (shapes[other][1] - source[1]).length, 1e-6)
+                best, gap, taken = None, reach, set(match.values())
+                for name in free:
+                    there = seen[name][1]
+                    if (name not in taken and alike(there[2], shapes[other][2] * ratio)
+                            and (there[1] - spot).length <= gap):
+                        best, gap = name, (there[1] - spot).length
+                if best is not None:
+                    match[other] = best
+                    cost += gap / reach
+                    todo.append(other)
+        return match, cost
+
+    copies, free = [], [obj.name for obj in objects]
+    while len(free) > 1:
+        best = None
+        for first in free:
+            for seed in shapes:
+                if not alike(seen[first][1][2], shapes[seed][2]):
+                    continue
+                match, cost = grow(seed, first, free)
+                if len(match) > 1 and (best is None or (-len(match), cost) < best[0]):
+                    best = ((-len(match), cost), match)
+            # A whole copy standing exactly where it should is as good as it
+            # gets; no need to try every other pair against it.
+            if best is not None and -best[0][0] == len(shapes) and best[0][1] < 1e-3:
+                break
+        if best is None:
+            break
+        copies.append({joint: seen[name][0] for joint, name in best[1].items()})
+        free = [name for name in free if name not in best[1].values()]
+    return copies, [seen[name][0] for name in free]
+
+
+def ride_on_existing(move, leader, seat, among=None):
+    """The rider copying the part `leader` follows that stands where that
+    part's copy would stand, seen from `seat` - the body of a rider of
+    `leader`. For a joint added to a copy whose other joints ride already.
+    `among` narrows the riders looked at to those names. Empty for none."""
+    up = move.parts.get(leader.follows) if leader.follows else None
+    lead = part_body(leader)
+    top = part_body(up) if up is not None and not up.leader else None
+    if lead is None or top is None:
+        return ""
+    spot = carried_to(lead, seat, top[1])
+    best, gap = "", max(0.5 * (seat[2] / lead[2]) * (top[1] - lead[1]).length, 1e-6)
+    for other in move.parts:
+        if other.leader != up.name or (among is not None and other.name not in among):
+            continue
+        there = part_body(other)
+        if there is not None and (there[1] - spot).length <= gap:
+            best, gap = other.name, (there[1] - spot).length
+    return best
+
+
+def adopt_riders(move, names):
+    """Let riders already there ride on new ones that copy the joint before
+    them - a finger's first joint added to a copy whose other joints ride
+    already. `names` are the new riders. Returns how many were taken up."""
+    taken = 0
+    for part in move.parts:
+        if not part.leader or part.name in names or riding_on(move, part) is not None:
+            continue
+        leader, seat = leader_of(move, part), part_body(part)
+        if leader is None or seat is None:
+            continue
+        up = ride_on_existing(move, leader, seat, among=set(names))
+        if up:
+            part.rides_on = up
+            taken += 1
+    return taken
 
 
 # ---------------------------------------------------------------------------
@@ -3204,12 +3531,22 @@ def base_window(move, part):
     rider travels for exactly as long as its leader - the same move at the
     same speed - shifted by its lead, a whole leader's travel at 50 either
     way. So a rider can start before 0 or finish after 1.
+
+    Every joint of a copied finger is shifted by its first joint's lead, and
+    by the same amount: shifted each by its own leader's travel, the joints
+    of a late finger would drift apart in time, and it would not curl the
+    way the recorded one does.
     """
     if part.leader:
         leader = leader_of(move, part)
         if leader is not None:
+            # Asked of every part for every part, so a rider on its own -
+            # sixty petals round a flower - skips looking for a copy.
+            root = copy_root(move, part) if part.rides_on else part
+            first = leader_of(move, root) or leader
             start = min(max(leader.start, 0.0), 0.99)
-            shift = -part.lead / 50.0 * (1.0 - start)
+            begin = min(max(first.start, 0.0), 0.99)
+            shift = -root.lead / 50.0 * (1.0 - begin)
             return start + shift, 1.0 + shift
     return part.start, travels_to_end(part)
 
@@ -3605,19 +3942,27 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
 def leaders(context, rig):
     """Parts in the selection that newcomers could ride along with, as
     (index, move, part) - the active object first, since that is the one
-    somebody clicked last and so most likely means."""
+    somebody clicked last and so most likely means.
+
+    One for each chain: every joint of a finger offers the same thing, a
+    ride on the whole finger, so a finger selected whole is one button, not
+    three. A follower may lead: its riders hang from what it hangs from.
+    """
     if rig is None:
         return []
     chosen = {o.name for o in context.selected_objects}
     active = context.view_layer.objects.active
-    # A follower is left out: its riders would copy only its own move, and
-    # be left behind by whatever carries it.
-    out = [(index, move, part)
-           for index, move in enumerate(rig.rigmoves.moves)
-           for part in move.parts
-           if part.kind == "OBJECT" and not part.leader and not part.follows
-           and part.name in chosen]
-    out.sort(key=lambda row: active is None or row[2].name != active.name)
+    rows = [(index, move, part)
+            for index, move in enumerate(rig.rigmoves.moves)
+            for part in move.parts
+            if part.kind == "OBJECT" and not part.leader and part.name in chosen]
+    rows.sort(key=lambda row: active is None or row[2].name != active.name)
+    out, chains = [], set()
+    for index, move, part in rows:
+        key = (index, chain_of(move, part)[0].name)
+        if key not in chains:
+            chains.add(key)
+            out.append((index, move, part))
     return out
 
 
@@ -3626,7 +3971,8 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
     bl_label = "Ride Along"
     bl_description = ("Have the selected objects copy this part's move, each "
                       "from where it stands: whatever it does to its own "
-                      "left, each of them does to theirs")
+                      "left, each of them does to theirs. Copies of a whole "
+                      "chain - a finger - ride along joint for joint")
     bl_options = {"REGISTER", "UNDO"}
     index: bpy.props.IntProperty()
     leader: bpy.props.StringProperty()
@@ -3643,7 +3989,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             return {"CANCELLED"}
         move = data.moves[self.index]
         leader = move.parts.get(self.leader)
-        if leader is None or leader.leader or leader.follows:
+        if leader is None or leader.leader or leader.kind != "OBJECT":
             return {"CANCELLED"}
         fresh = newcomers(context, rig)
         if not fresh:
@@ -3654,25 +4000,68 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             return {"CANCELLED"}
         if getattr(context.scene, "rigmoves_rig", None) is not rig:
             context.scene.rigmoves_rig = rig
+        # Whole copies of the chain the leader is part of first, joint for
+        # joint, each joint riding on the copy of the joint before it. Any
+        # object that copies no more than one joint rides along with the
+        # part that was clicked, as a rider always has. All of it worked out
+        # before anything is added: adding to the list of parts can move
+        # them, and a part held from before would point at nothing.
+        chain = chain_of(move, leader)
+        copies, alone = (match_copies(chain, fresh) if len(chain) > 1
+                         else ([], list(fresh)))
+        joining = []
+        for copy in copies:
+            for joint in chain:
+                obj = copy.get(joint.name)
+                if obj is None:
+                    continue
+                up = copy.get(joint.follows)
+                joining.append((obj, joint.name, up.name if up is not None else
+                                ride_on_existing(move, joint,
+                                                 body(obj, obj.matrix_world))))
+        for obj in alone:
+            joining.append((obj, leader.name,
+                            ride_on_existing(move, leader, body(obj, obj.matrix_world))))
+        lead_name, root_name = leader.name, chain[0].name
         # Where each stands now is the place it copies the move from. That is
         # all there is to record: the path itself is the leader's.
-        for obj in fresh:
+        for obj, joint, rides in joining:
             part = move.parts.add()
             part.name = obj.name
             part.kind = "OBJECT"
-            part.leader = leader.name
+            part.leader = joint
+            part.rides_on = rides
             part.before = flat(obj.matrix_world)
             part.has_before = True
-        said = ("'{:s}'".format(short(fresh[0].name, 18)) if len(fresh) == 1
-                else "{:d} objects".format(len(fresh)))
+            # A joint modelled hanging from another is hung there again if it
+            # stops riding along - unless that was this add-on's own hanging,
+            # which a copy of a follower brings with it.
+            if (obj.parent is not None and obj.parent.type != "ARMATURE"
+                    and not obj.get(FOLLOW_MARK)):
+                part.home_parent = obj.parent.name
+        adopt_riders(move, {obj.name for obj, _joint, _rides in joining})
+
+        def ride(count):
+            if not move.built:
+                return "will ride"
+            return "rides" if count == 1 else "ride"
+
+        told = []
+        if copies:
+            told.append("{:s} of '{:s}' {:s} along, joint for joint".format(
+                "1 copy" if len(copies) == 1 else "{:d} copies".format(len(copies)),
+                short(root_name, 18), ride(len(copies))))
+        if alone:
+            said = ("'{:s}'".format(short(alone[0].name, 18)) if len(alone) == 1
+                    else "{:d} objects".format(len(alone)))
+            told.append("{:s} {:s} along with '{:s}'".format(
+                said, ride(len(alone)), short(lead_name, 18)))
         if move.built:
             bpy.ops.rigmoves.build()
-            data.report = ("{:s} ride along with '{:s}'. Set each one's Lead "
-                           "under Riding along to send it ahead or behind."
-                           .format(said, short(leader.name, 18)))
+            data.report = ("{:s}. Set each one's Lead under Riding along to send "
+                           "it ahead or behind.".format(", and ".join(told)))
         else:
-            data.report = ("{:s} will ride along with '{:s}'. Record its After, "
-                           "then Build.".format(said, short(leader.name, 18)))
+            data.report = "{:s}. Record its After, then Build.".format(", and ".join(told))
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -3701,7 +4090,8 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
             return {"CANCELLED"}
         if not keeps_drags(self, data):
             return {"CANCELLED"}
-        rider = move.parts[self.part]
+        # A copied finger mirrors as one, by the setting on its first joint.
+        rider = copy_root(move, move.parts[self.part])
         rider.mirror = self.axis
         bpy.ops.rigmoves.build()
         data.report = ("'{:s}' mirrors its leader across {:s}.".format(
@@ -3714,8 +4104,9 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
 class RIGMOVES_OT_drop_rider(bpy.types.Operator):
     bl_idname = "rigmoves.drop_rider"
     bl_label = "Stop Riding Along"
-    bl_description = ("Take this object out of the move. It is unbound and "
-                      "stays where it is")
+    bl_description = ("Take this object out of the move - with the rest of its "
+                      "copy, for a copied finger. It is unbound and stays where "
+                      "it is")
     bl_options = {"REGISTER", "UNDO"}
     index: bpy.props.IntProperty()
     part: bpy.props.IntProperty()
@@ -3732,30 +4123,39 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
             return {"CANCELLED"}
         if not keeps_drags(self, data):
             return {"CANCELLED"}
-        rider = move.parts[self.part]
-        name = rider.name
-        # Its constraints, and with them their drivers, go before its bone
-        # does: a driver left on a bone that is gone is one Blender warns
-        # about on every update.
-        pose_bone = rig.pose.bones.get(part_bone(rider)) if rider.bone_name else None
-        if pose_bone is not None:
-            for constraint in list(pose_bone.constraints):
-                if constraint.type == "ACTION" and constraint.name.startswith(CONSTRAINT):
-                    rig.driver_remove('pose.bones["{:s}"].constraints["{:s}"].eval_time'
-                                      .format(bpy.utils.escape_identifier(pose_bone.name),
-                                              bpy.utils.escape_identifier(constraint.name)))
-                    pose_bone.constraints.remove(constraint)
-        if rider.bone_name:
-            unbind_object(rig, rider)
-            _action, _slot, bag = action_bits(move)
-            if bag is not None:
-                mine = bone_path(rider.bone_name, "")
-                for curve in [c for c in bag.fcurves if c.data_path.startswith(mine)]:
-                    bag.fcurves.remove(curve)
-        move.parts.remove(self.part)
-        # The build sweeps the bone, now that nothing claims it.
+        # The joints riding on it go with it: left behind they would hang
+        # from a bone about to be swept, and play only half a finger.
+        names = [p.name for p in copy_of(move, move.parts[self.part])]
+        _action, _slot, bag = action_bits(move)
+        for name in names:
+            rider = move.parts[name]
+            # Its constraints, and with them their drivers, go before its bone
+            # does: a driver left on a bone that is gone is one Blender warns
+            # about on every update.
+            pose_bone = rig.pose.bones.get(part_bone(rider)) if rider.bone_name else None
+            if pose_bone is not None:
+                for constraint in list(pose_bone.constraints):
+                    if constraint.type == "ACTION" and constraint.name.startswith(CONSTRAINT):
+                        rig.driver_remove(
+                            'pose.bones["{:s}"].constraints["{:s}"].eval_time'
+                            .format(bpy.utils.escape_identifier(pose_bone.name),
+                                    bpy.utils.escape_identifier(constraint.name)))
+                        pose_bone.constraints.remove(constraint)
+            if rider.bone_name:
+                unbind_object(rig, rider)
+                if bag is not None:
+                    mine = bone_path(rider.bone_name, "")
+                    for curve in [c for c in bag.fcurves if c.data_path.startswith(mine)]:
+                        bag.fcurves.remove(curve)
+        # By name, one at a time: each removal moves the ones after it.
+        for name in names:
+            move.parts.remove(move.parts.find(name))
+        # The build sweeps the bones, now that nothing claims them.
         bpy.ops.rigmoves.build()
-        data.report = "'{:s}' no longer rides along.".format(short(name, 24))
+        data.report = ("'{:s}' no longer rides along.".format(short(names[0], 24))
+                       if len(names) == 1 else
+                       "'{:s}' and the {:d} joint(s) riding on it no longer ride along."
+                       .format(short(names[0], 18), len(names) - 1))
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -4275,6 +4675,12 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         # leader's path - curve and all - as it stands now.
         riding = bind_riders(context, rig, data)
         lost = follow_leaders(rig, data)
+        # Each part moved by its own bone alone. A copy of a part made after
+        # it was bound, or a linked copy sharing its mesh, was moved by the
+        # other part's bone as well, half and half. Once every bone is made:
+        # a group left from a deleted rig only starts to pull when a part of
+        # its name joins, and its bone is made in this very Build.
+        healed = heal_bindings(rig, data)
 
         # Every move needs a stable name of its own, because a combined
         # control refers to its members by one - names change, this does not.
@@ -4428,6 +4834,10 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += (" {:d} stray keyframe track(s) on the parts and "
                             "{:d} on the rig were lifted, or the rig could not "
                             "move them.".format(keyed_objects, keyed_bones))
+        if healed:
+            data.report += (" {:d} part(s) copied from another were being moved "
+                             "by its bone as well as their own; now only by their "
+                             "own.".format(healed))
         if hung:
             data.report += " {:d} part(s) hung from the part they follow.".format(hung)
         if let_go:
@@ -5232,7 +5642,9 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             if not number:
                 note = box.row()
                 note.enabled = False
-                note.label(text="each copies its move from where it stands")
+                note.label(text="each copies its move from where it stands"
+                           if len(chain_of(move, part)) < 2 else
+                           "copies of the whole chain ride joint for joint")
 
         singled = {index for index, _move in indicated(context, rig)}
         for index, move in indicated(context, rig)[:2]:
@@ -5352,7 +5764,11 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
 
         # Riders have no delay of their own: each is placed against its
         # leader instead, ahead or behind, and travels at the leader's speed.
-        riders = sorted(riders_of(move), key=lambda row: row[1].leader)
+        # A copied finger is one row, its first joint's: the joints riding on
+        # it play by its Lead and Mirror, and go when it goes.
+        riders = sorted([(i, p) for i, p in riders_of(move)
+                         if copy_root(move, p).name == p.name],
+                        key=lambda row: row[1].leader)
         if riders:
             head, listed = layout.panel_prop(move, "show_riders")
             head.label(text="Riding along ({:d})".format(len(riders)), icon="LINKED")
@@ -5367,8 +5783,11 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                         said = listed.row()
                         said.enabled = False
                         said.label(text="with '{:s}'".format(short(part.leader, 22)))
+                    joints = len(copy_of(move, part)) - 1
                     line = listed.split(factor=0.42, align=True)
-                    line.label(text=short(part.name, 13), icon="OBJECT_DATA")
+                    line.label(text=short(part.name, 13) if not joints else
+                               "{:s} +{:d}".format(short(part.name, 10), joints),
+                               icon="OBJECT_DATA")
                     right = line.row(align=True)
                     right.prop(part, "lead", text="Lead", slider=True)
                     # One button that steps through the choices: a mirror

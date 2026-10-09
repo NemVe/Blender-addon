@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.15.0
+# CopyThat (experiment) - v0.16.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -17,7 +17,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.15.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.16.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
 
 ## Use
@@ -199,6 +199,36 @@ A follower goes where it is carried, so its path is not curved: curve the
 part it follows instead, and a part with a curved path straightens it
 before it follows.
 
+### Copies of a whole finger
+
+Four fingers, and only the first one recorded. Set it up as above - the
+second segment follows the first, the third the second, each turning on its
+knuckle - record its curl and Build. Then select every segment of the other
+fingers, in any order, as many fingers as you like, and last any segment of
+the recorded finger, so it is the active object. Press **Ride Along With
+'...'**: the other fingers curl with it, every one from where it stands.
+
+Each copy is matched to the recorded finger joint for joint, by where its
+pieces stand and which way they face - names and the order you clicked in
+do not matter. Its first segment rides along with the first, its second
+with the second, hanging from its own first, and so on. Every joint bends
+as the recorded one does, about its own knuckle, carried by the joints
+before it. A copy can stand anywhere and face any way; one mirrored with
+**Ctrl+M** curls the mirror way by itself.
+
+A copied finger is one row under **Riding along**, with **+2** for the
+joints that come with it. Its **Lead** sends the whole finger ahead or
+behind, its joints in step - fingers at 0, -10, -20 and -30 close one after
+another. Its **Mirror** mirrors every joint, and its **x** takes the whole
+finger out. A joint added later finds the copy it belongs to. An object
+that copies no more than one joint rides along with the part you clicked,
+as a rider always has.
+
+A follower can lead a rider of its own too: a second claw riding along with
+the first hangs from the same arm, and swings with it. And a part that
+leads riders can be given a part to follow; its riders hang from that part
+too, from the next Build.
+
 ### Several moves under one control
 
 Record one group of parts, then another, then press **Combine**. A new control
@@ -350,6 +380,21 @@ bone is turned from the leader, and every Build gives it a copy of the
 leader's channels. The same channels on a bone turned the same way are the
 same move, seen from the rider - at every point along the path, not only at
 the recorded poses.
+
+A copied finger's joints are riders like any other, each with a bone turned
+from its own leader's. The bone of each hangs from the bone of the joint
+before it in the same copy, and plays its leader's own channels - which are
+that joint's move against the joint before it - so the copy bends joint by
+joint, carried as the recorded finger is. A rider of a follower with no
+copy of what its leader follows hangs from that very part. Every joint of a
+copy is shifted in time by one amount, its first joint's Lead, so the copy
+keeps the recorded finger's timing between its joints.
+
+Each bound object is moved by its own bone and nothing else. Blender keeps
+vertex groups on the mesh, not the object, so an object sharing its mesh
+with another is given a mesh of its own when it is bound; and the group a
+copy of a bound part brings for the other part's bone is taken off - when
+it is bound, and at every Build.
 
 A follower's bone hangs from the bone of the part it follows, so it plays its
 own path in its parent's space. Choosing a part to follow on a built move
@@ -694,6 +739,28 @@ and one lifted 1 m:
   looked for an old copy in `bpy.types`, which does not list property groups,
   so nothing was taken down and the first class refused to register again. The
   old copy is now asked for through its base type, which does find it.
+- **A copy of a rigged part was moved by the original's bone as well**
+  (0.16.0). Shift+D on a part that is already bound copies its binding with
+  it: the original's vertex group, at full weight. Bound to a bone of its
+  own as well, the copy was moved by both bones, half and half - which looks
+  right only while the two do the same thing. Four cubes riding round a
+  curve, three of them copied from the second: mirror the second across Z
+  and the other three ran straight from A to B. The copied group is taken
+  off when the copy is bound now, and every Build heals a file made before.
+- **Linked copies moved each other** (0.16.0). Alt+D copies share one mesh,
+  and Blender keeps vertex groups on the mesh, so binding the copy gave the
+  original the copy's group too: each was moved half by the other's bone,
+  the leader included. A bound object gets a mesh of its own now.
+- **A group left from a deleted rig pulled a part once a part of its name
+  joined** (0.16.0). Copied from a part of an old rig, a segment kept that
+  part's group under a name no bone had - until an object of that name rode
+  along, and its bone was made. The first finger was then pulled by the
+  second finger's bones as well. Bindings are healed after every bone of a
+  Build is made.
+- **Ride Along with several objects at once could crash Blender** (0.16.0).
+  It read the leader back after adding the new riders to the list of parts,
+  and adding can move that list in memory. Six at once crashed it in five
+  runs out of eight. Everything is worked out before anything is added now.
 
 ## Known rough edges
 
@@ -713,9 +780,16 @@ and one lifted 1 m:
 - Two moves sharing a part compose in the order they were made, which is not
   shown anywhere.
 - A move can be in only one combined control at a time.
-- A part follows another part of the same move. A follower cannot lead
-  riders - they would copy only its own move and be left behind - and a part
-  that leads riders cannot follow.
+- A part follows another part of the same move.
+- Copies of a finger are matched to it by where their pieces stand. A copy
+  built differently - a joint more or fewer, segments of very different
+  lengths, or bent at the knuckles - may be matched only in part, and what
+  is left over rides along with the part you clicked. The **+** under Riding
+  along says how many joints each copy got.
+- Mirror on a copied finger mirrors each joint across its own axis. Across
+  an axis along the finger the curl goes the other way, as meant; across the
+  finger's length it is no mirror image of the whole finger. For that, copy
+  it with Ctrl+M, which mirrors by itself.
 - An object parented to something outside the rig - a finger to a hand that
   is not in the move - is taken off that parent while it is bound, so moving
   the hand leaves it behind. Parent the rig to the hand instead.
