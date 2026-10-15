@@ -30,6 +30,7 @@ import math
 import random
 
 import bpy
+import bmesh  # after bpy: as a module, bpy is what makes bmesh importable
 from mathutils import Euler, Matrix, Quaternion, Vector
 from mathutils.bvhtree import BVHTree
 from mathutils.geometry import interpolate_bezier
@@ -37,7 +38,7 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 17, 1),
+    "version": (0, 18, 0),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -3789,6 +3790,13 @@ SPREAD_ORDERS = [
      "By how far down a Follows chain each part hangs: a finger, a tentacle"),
     ("RANDOM", "Random", "In no order, the same every time for the same seed")]
 AXIS_ITEMS = [(name, name, "World " + name) for name in AXES]
+SPREAD_BY = [
+    ("STEP", "Step",
+     "A start, and how much each place in the order adds to the one before: "
+     "parts that stand in the same place share one"),
+    ("RANGE", "Range",
+     "A first and a last value, and the parts between spread evenly from one "
+     "to the other, however many there are")]
 
 # The same limits the Lead and Delay properties have, which a spread has to
 # keep to however wide the First and Last it was given.
@@ -3966,6 +3974,30 @@ def scaled_to_one(values):
     return [v / top if top > 1e-9 else 0.0 for v in values]
 
 
+def spread_keys(rig, move, reference, parts, order, axis, both_ways):
+    """The number that puts each of these parts in order, for an order that
+    goes by position: the angle round the ring, the distance from the
+    reference, the place along the axis, or how far down a chain it hangs.
+
+    The reference is the part the others are measured from; None means the
+    first of the parts.
+    """
+    names = [p.name for p in parts]
+    if order == "CHAIN":
+        return [float(follow_depth(move, p)) for p in parts]
+    stands_in = reference is None or reference.name in names
+    ahead = reference if reference is not None else parts[0]
+    everyone = parts if stands_in else parts + [ahead]
+    spots = spots_of(rig, move, everyone)
+    where = spots[:len(parts)]
+    start = spots[names.index(ahead.name)] if stands_in else spots[-1]
+    if order == "DISTANCE":
+        return [(w - start).length for w in where]
+    if order == "AXIS":
+        return [w[AXES.index(axis)] for w in where]
+    return ring_angles(where, start, stands_in, both_ways)
+
+
 def spread_shares(rig, move, groups, order, axis, both_ways, seed):
     """Where in the spread each part falls, 0 to 1, as {part name: share}.
 
@@ -3978,34 +4010,72 @@ def spread_shares(rig, move, groups, order, axis, both_ways, seed):
     shares = {}
     for reference, parts in groups:
         names = [p.name for p in parts]
-        if order == "CHAIN":
-            values = scaled_to_one([float(follow_depth(move, p)) for p in parts])
-        elif order == "RANDOM":
+        if order == "RANDOM":
             values = [chance.random() for _part in parts]
         else:
-            stands_in = reference is None or reference.name in names
-            ahead = reference if reference is not None else parts[0]
-            everyone = parts if stands_in else parts + [ahead]
-            spots = spots_of(rig, move, everyone)
-            where = spots[:len(parts)]
-            start = spots[names.index(ahead.name)] if stands_in else spots[-1]
-            if order == "DISTANCE":
-                values = scaled_to_one([(w - start).length for w in where])
-            elif order == "AXIS":
-                along = [w[AXES.index(axis)] for w in where]
-                low, high = min(along), max(along)
+            keys = spread_keys(rig, move, reference, parts, order, axis, both_ways)
+            if order == "AXIS":
+                low, high = min(keys), max(keys)
                 values = [(a - low) / (high - low) if high - low > 1e-9 else 0.0
-                          for a in along]
+                          for a in keys]
             else:
-                values = scaled_to_one(ring_angles(where, start, stands_in,
-                                                   both_ways))
+                values = scaled_to_one(keys)
         shares.update(zip(names, values))
     return shares
 
 
-def spread_values(what, parts, shares, first, last):
-    """Write the spread - `first` to `last` by each part's share - into the
-    Leads or Delays of these parts, and say how many were held to the limit.
+def tied_ranks(keys):
+    """Each key's place in the order, counting from 0, with keys that are the
+    same - to within a small tolerance - sharing one place.
+
+    The tolerance is a ten-thousandth of how far the keys run, because the
+    two sides of a ring, or a row of parts all at one height, come out a hair
+    apart from float rounding, and that noise must not be taken for an order.
+    """
+    order = sorted(range(len(keys)), key=lambda n: keys[n])
+    tolerance = max(1e-6, 1e-4 * (keys[order[-1]] - keys[order[0]]))
+    out, rank = [0] * len(keys), 0
+    for before, now in zip(order, order[1:]):
+        if keys[now] - keys[before] > tolerance:
+            rank += 1
+        out[now] = rank
+    return out
+
+
+def spread_ranks(rig, move, groups, what, order, axis, both_ways, seed):
+    """Which place in the order each part takes, as {part name: rank}.
+
+    Parts the order cannot tell apart share a rank: the two sides of a ring
+    folded in half, parts at the same height along an axis, joints at the same
+    depth down a chain. Random deals the places out, none shared, the same
+    way for the same seed.
+
+    For Leads the leader is rank 0, with the Lead of 0 it always has, so its
+    riders start at rank 1. For Delays the first part is rank 0.
+    """
+    chance = random.Random(seed)
+    ranks = {}
+    for reference, parts in groups:
+        if order == "RANDOM":
+            found = list(range(len(parts)))
+            chance.shuffle(found)
+        else:
+            keys = spread_keys(rig, move, reference, parts, order, axis, both_ways)
+            if order == "CHAIN":
+                # The depth itself, not the place among those that are here:
+                # a joint two down waits two steps even with the one between
+                # not in the spread.
+                found = [int(round(k - min(keys))) for k in keys]
+            else:
+                found = tied_ranks(keys)
+        after = 1 if what == "LEAD" else 0
+        ranks.update((p.name, rank + after) for p, rank in zip(parts, found))
+    return ranks
+
+
+def spread_put(what, parts, values):
+    """Write these values - one for each part - into the Leads or Delays of
+    the parts, rounded and held to the limits, and say how many were held.
 
     Every value goes in with the drivers left alone, and the caller refreshes
     them once at the end: a ring of twelve riders was twelve full rewrites.
@@ -4013,8 +4083,7 @@ def spread_values(what, parts, shares, first, last):
     limited = 0
     WRITING["many"] = True
     try:
-        for part in parts:
-            value = first + (last - first) * shares[part.name]
+        for part, value in zip(parts, values):
             if what == "LEAD":
                 # Half a step goes outwards either way, so two sides of a ring
                 # round alike.
@@ -4029,6 +4098,13 @@ def spread_values(what, parts, shares, first, last):
     finally:
         WRITING["many"] = False
     return limited
+
+
+def spread_values(what, parts, shares, first, last):
+    """Write the spread - `first` to `last` by each part's share - into the
+    Leads or Delays of these parts, and say how many were held to the limit."""
+    return spread_put(what, parts, [first + (last - first) * shares[part.name]
+                                    for part in parts])
 
 
 def spread_groups(context, move, what, only_selected=False):
@@ -5511,6 +5587,25 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
     # not for a Delay, and invoke picks the right ones.
     order: bpy.props.EnumProperty(name="Order", items=SPREAD_ORDERS,
                                   default="AROUND", options={"SKIP_SAVE"})
+    by: bpy.props.EnumProperty(
+        name="By", items=SPREAD_BY, default="STEP",
+        description="How the values are given: a start and a step for each "
+                    "place in the order, or a first and a last with the rest "
+                    "spread between them")
+    start: bpy.props.FloatProperty(
+        name="Start", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
+        soft_max=50.0, precision=2, options={"SKIP_SAVE"},
+        description="The value of the first place in the order. A leader is "
+                    "that place for its riders, and always plays at 0, so a "
+                    "rider's value is this plus its step for each place after "
+                    "the leader")
+    step: bpy.props.FloatProperty(
+        name="Step", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
+        soft_max=50.0, precision=2, options={"SKIP_SAVE"},
+        description="What each place in the order adds to the one before. For "
+                    "Leads, below 0 each waits more than the one before it and "
+                    "above 0 each goes earlier; for Delays, above 0 each waits "
+                    "that much longer")
     first: bpy.props.FloatProperty(
         name="First", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
         soft_max=50.0, precision=2, options={"SKIP_SAVE"},
@@ -5529,6 +5624,13 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
                     "every rider (or every part) of the move")
     axis: bpy.props.EnumProperty(name="Axis", items=AXIS_ITEMS, default="X")
     seed: bpy.props.IntProperty(name="Seed", default=1, min=0, max=100000)
+
+    def step_by(self):
+        """The step to use: the one given, or - for a script that gave none -
+        the one a Lead or a Delay is usually spread by."""
+        if self.properties.is_property_set("step"):
+            return self.step
+        return -10.0 if self.what == "LEAD" else 0.1
 
     def plan(self, context):
         """(rig, data, move, groups) - or None, with the reason said."""
@@ -5568,6 +5670,10 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
             self.first = wanted[1]
         if not props.is_property_set("last"):
             self.last = wanted[2]
+        if not props.is_property_set("start"):
+            self.start = 0.0
+        if not props.is_property_set("step"):
+            self.step = self.step_by()
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
@@ -5582,10 +5688,15 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
             layout.prop(self, "axis", expand=True)
         elif self.order == "RANDOM":
             layout.prop(self, "seed")
+        layout.prop(self, "by", expand=True)
         noun = "Lead" if self.what == "LEAD" else "Delay"
         column = layout.column(align=True)
-        column.prop(self, "first", text="First " + noun)
-        column.prop(self, "last", text="Last " + noun)
+        if self.by == "STEP":
+            column.prop(self, "start", text="Start " + noun)
+            column.prop(self, "step", text=noun + " step")
+        else:
+            column.prop(self, "first", text="First " + noun)
+            column.prop(self, "last", text="Last " + noun)
 
     def execute(self, context):
         found = self.plan(context)
@@ -5597,18 +5708,27 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
                            "no chain to spread down. Pick another order.")
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
-        shares = spread_shares(rig, move, groups, self.order, self.axis,
-                               self.both_ways, self.seed)
         parts = [part for _ahead, group in groups for part in group]
-        limited = spread_values(self.what, parts, shares, self.first, self.last)
+        if self.by == "STEP":
+            step = self.step_by()
+            ranks = spread_ranks(rig, move, groups, self.what, self.order,
+                                 self.axis, self.both_ways, self.seed)
+            limited = spread_put(self.what, parts,
+                                 [self.start + step * ranks[p.name] for p in parts])
+            given = "in steps of {:g} from {:g}".format(step, self.start)
+        else:
+            shares = spread_shares(rig, move, groups, self.order, self.axis,
+                                   self.both_ways, self.seed)
+            limited = spread_values(self.what, parts, shares, self.first, self.last)
+            given = "from {:g} to {:g}".format(self.first, self.last)
         # Once, for all of them: a built move plays the new values at once.
         data.report = ""
         refresh_drivers(rig, data, move)
         cramped = data.report
-        data.report = "Spread the {:s} of {:s} from {:g} to {:g}, {:s}.".format(
+        data.report = "Spread the {:s} of {:s} {:s}, {:s}.".format(
             "Leads" if self.what == "LEAD" else "Delays",
             counted(len(parts), "rider" if self.what == "LEAD" else "part"),
-            self.first, self.last,
+            given,
             spread_words(self.what, self.order, groups, self.axis,
                          self.both_ways, self.seed))
         if limited:
@@ -6006,6 +6126,20 @@ RING_AXES = [("Z", "World Z", "About the world's up axis: a ring lying flat"),
              ("Y", "World Y", "About the world's Y axis")]
 
 
+RING_USES = [
+    ("COPY", "Make copies",
+     "Make a new copy of the part for every place round the ring, whatever "
+     "already stands there"),
+    ("ADOPT", "Use what's there",
+     "Take up the objects already modelled in the places round the ring, and "
+     "make nothing. Only an exact copy of the part, standing where a copy "
+     "would, is taken"),
+    ("FILL", "Fill the gaps",
+     "Take up what is already modelled in a place, and copy the part only "
+     "into the places where nothing stands: never a copy on top of a petal "
+     "that is there")]
+
+
 def ring_centre(scene, which):
     """The point a ring goes round."""
     if which == "CURSOR":
@@ -6089,16 +6223,225 @@ def discard_copies(copies):
             bpy.data.meshes.remove(mesh)
 
 
+def mesh_points(obj):
+    """The vertices of a mesh object, in its own space, in vertex order."""
+    values = [0.0] * (3 * len(obj.data.vertices))
+    obj.data.vertices.foreach_get("co", values)
+    return [Vector(values[i:i + 3]) for i in range(0, len(values), 3)]
+
+
+def diagonal(points):
+    """How far across the box round these points is, corner to corner."""
+    if not points:
+        return 0.0
+    low = Vector([min(p[a] for p in points) for a in range(3)])
+    high = Vector([max(p[a] for p in points) for a in range(3)])
+    return (high - low).length
+
+
+def parts_of_ours():
+    """The name of every part of every move of every rig of ours."""
+    known = set()
+    for owner in bpy.data.objects:
+        if owner.type == "ARMATURE":
+            for move in owner.rigmoves.moves:
+                known.update(p.name for p in move.parts)
+    return known
+
+
+def standing_candidates(context, rig):
+    """The meshes an already modelled copy could be: in this view layer, in
+    sight and free to select, and not part of any move of ours - an object a
+    move already plays is somebody's already, and is never taken."""
+    known = parts_of_ours()
+    # An object deleted from a script can leave a None in the layer's list
+    # until the next update.
+    return [obj for obj in context.view_layer.objects
+            if obj is not None and obj.type == "MESH" and obj is not rig
+            and obj.name not in known
+            and obj.data is not None and len(obj.data.vertices)
+            and obj.visible_get() and not obj.hide_select]
+
+
+def same_shape(mine, wanted, tolerance):
+    """Whether two lists of points are the same vertices, in the same order."""
+    return len(mine) == len(wanted) and all((a - b).length <= tolerance
+                                            for a, b in zip(mine, wanted))
+
+
+def find_standing(candidates, joints, turns):
+    """Which of these objects already stand in the places of a ring.
+
+    `joints` are the (name, Before, object) of the part being ringed, one for
+    each joint of its chain, and `turns` the turn that takes the part to each
+    place. A joint's place is the turn after its Before, and an object stands
+    in it when it is a copy of that joint's mesh: the same number of vertices,
+    and every one - in the same order - within a fiftieth of how big the joint
+    is across of where the joint's own vertex would land there. Nothing is
+    guessed about a mirror image or a different shape: it does not fit.
+
+    The best fit takes each place, and an object fits one place only. A place
+    is taken up only when every joint of it is found; one found in part is
+    left, and so are the objects that fitted it.
+
+    Returns (placed, partial, left): placed is {place number: {joint name:
+    (object, where it should stand)}}; partial the numbers of the places found
+    in part; left the objects with the vertex count of a joint that were taken
+    nowhere, each as the words saying why.
+    """
+    shapes = []
+    for name, seat, source in joints:
+        mine = mesh_points(source)
+        middle = sum(mine, Vector()) / len(mine) if mine else Vector()
+        across = diagonal([seat @ p for p in mine])
+        # How far out it reaches from its middle: the same whichever way round
+        # it stands, which a box round it is not.
+        reaches = max(((seat @ p) - (seat @ middle)).length for p in mine) if mine else 0.0
+        shapes.append((name, seat, mine, middle, max(0.02 * across, 1e-6), reaches))
+    # Only objects with a joint's number of vertices can be a copy of it; the
+    # rest of the scene is not even read.
+    counts = {len(shape[2]) for shape in shapes}
+    seen = []
+    for obj in candidates:
+        if len(obj.data.vertices) not in counts:
+            continue
+        mine = mesh_points(obj)
+        where = obj.matrix_world.copy()
+        world = [where @ p for p in mine]
+        seen.append((obj, mine, world, sum(world, Vector()) / len(world)))
+    hits = []
+    for number, turn in enumerate(turns):
+        for index, (_name, seat, mine, middle, reach, _across) in enumerate(shapes):
+            there = turn @ seat
+            wanted = there @ middle
+            for obj, theirs, world, centre in seen:
+                # The middle of the points is the cheap way to say no.
+                if len(theirs) != len(mine) or (centre - wanted).length > reach:
+                    continue
+                worst = 0.0
+                for have, own in zip(world, mine):
+                    worst = max(worst, (have - there @ own).length)
+                    if worst > reach:
+                        break
+                else:
+                    hits.append((worst, number, index, obj.name))
+    hits.sort()
+    owner, holder = {}, {}
+    for _worst, number, index, name in hits:
+        if name not in owner and (number, index) not in holder:
+            owner[name] = (number, index)
+            holder[(number, index)] = name
+    by_name = {obj.name: obj for obj, _theirs, _world, _centre in seen}
+    placed, partial = {}, []
+    for number, turn in enumerate(turns):
+        found = [index for index in range(len(shapes)) if (number, index) in holder]
+        if len(found) == len(shapes):
+            placed[number] = {shapes[index][0]: (by_name[holder[(number, index)]],
+                                                 turn @ shapes[index][1])
+                              for index in found}
+        elif found:
+            partial.append(number)
+    used = {obj.name for got in placed.values() for obj, _where in got.values()}
+    left = []
+    for obj, theirs, world, centre in sorted(seen, key=lambda row: row[0].name):
+        # Said against the joint it is most like, of those with its number of
+        # vertices: the one it is nearest in size to, in tenths, and of those
+        # the one it stands nearest. A second leaf's third segment is not a
+        # copy of the first leaf's third, whatever the first leaf's first
+        # looks like.
+        likes = [shape for shape in shapes if len(shape[2]) == len(theirs)]
+        if obj.name in used or not likes:
+            continue
+        size = max((w - centre).length for w in world)
+        like = min(likes, key=lambda shape: (
+            int(abs(size - shape[5]) / max(shape[5], 1e-6) / 0.1),
+            min((centre - turn @ shape[1] @ shape[3]).length
+                for turn in [Matrix.Identity(4)] + list(turns))))
+        rival = next((holder[(number, index)] for _worst, number, index, name in hits
+                      if name == obj.name and holder[(number, index)] in used), None)
+        if rival is not None:
+            why = "stands on the same place as '{:s}'".format(short(rival, 18))
+        elif any(name == obj.name for _worst, _number, _index, name in hits):
+            why = "fits a place where the rest of the chain is missing"
+        elif same_shape(theirs, like[2], like[4]):
+            why = "is a copy of '{:s}' that stands off the ring".format(short(like[0], 18))
+        else:
+            why = "is not a copy of '{:s}'".format(short(like[0], 18))
+        left.append("'{:s}' {:s}".format(short(obj.name, 18), why))
+    return placed, partial, left
+
+
+def turn_faces_over(mesh):
+    """Reverse the winding of every face, so that a mesh that was mirrored
+    faces outwards again."""
+    editing = bmesh.new()
+    editing.from_mesh(mesh)
+    bmesh.ops.reverse_faces(editing, faces=list(editing.faces))
+    editing.to_mesh(mesh)
+    editing.free()
+
+
+def reframe(obj, matrix):
+    """Stand an object on `matrix`, and move its mesh the other way, so that
+    nothing is seen to move: its origin and axes become the ones a copy would
+    have, with its vertices where they are in the world.
+
+    A mesh the object shares is given to it as a copy first, as the others
+    would otherwise move too. What hangs from the object is held where it is.
+    Returns what put_back needs to undo it.
+    """
+    was = obj.matrix_world.copy()
+    mesh, shared = obj.data, None
+    if mesh.users - int(mesh.use_fake_user) > 1:
+        shared = mesh
+        mesh = mesh.copy()
+        obj.data = mesh
+    inside = matrix.inverted_safe() @ was
+    mesh.transform(inside, shape_keys=True)
+    # A mirrored object (negative scale) shows its faces turned back the
+    # right way; stood on a plain matrix they need turning by hand.
+    if inside.determinant() < 0.0:
+        turn_faces_over(mesh)
+    mesh.update()
+    kept = [(kid, kid.matrix_world.copy()) for kid in obj.children]
+    obj.matrix_world = matrix
+    for kid, world in kept:
+        kid.matrix_world = world
+    return obj, was, shared, inside, kept
+
+
+def put_back(framed):
+    """Undo reframe, last first."""
+    for obj, was, shared, inside, kept in reversed(framed):
+        if shared is not None:
+            fresh = obj.data
+            obj.data = shared
+            if fresh.users == 0:
+                bpy.data.meshes.remove(fresh)
+        else:
+            obj.data.transform(inside.inverted_safe(), shape_keys=True)
+            if inside.determinant() < 0.0:
+                turn_faces_over(obj.data)
+            obj.data.update()
+        obj.matrix_world = was
+        for kid, world in kept:
+            kid.matrix_world = world
+
+
 class RIGMOVES_OT_ring(bpy.types.Operator):
     bl_idname = "rigmoves.ring"
     bl_label = "Ring"
     bl_description = ("Make copies of the active part - or of the whole chain "
                       "it is part of, a finger - round the 3D cursor and let "
                       "them ride along with it, each doing its move from its "
-                      "own place: one blade becomes a fan. Select the part "
-                      "first")
+                      "own place: one blade becomes a fan. Or take up the "
+                      "copies already modelled there. Select the part first")
     bl_options = {"REGISTER", "UNDO"}
     index: bpy.props.IntProperty(options={"HIDDEN"})
+    use: bpy.props.EnumProperty(
+        name="Use", items=RING_USES, default="FILL",
+        description="Whether to make the copies, take up the ones already "
+                    "modelled, or both: copies only where nothing stands")
     count: bpy.props.IntProperty(
         name="Count", default=6, min=2, max=200,
         description="How many there are round the ring, the original included")
@@ -6109,14 +6452,13 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         description="Share the original's mesh, so editing one edits them all. "
                     "Build gives each part a mesh of its own, because Blender "
                     "keeps a mesh's vertex groups with the mesh")
-    lead_first: bpy.props.IntProperty(
-        name="First Lead", default=0, min=-50, max=50,
-        description="The Lead of the copies nearest the original round the ring")
-    lead_last: bpy.props.IntProperty(
-        name="Last Lead", default=0, min=-50, max=50,
-        description="The Lead of the copies furthest from the original. Different "
-                    "from the first, they open one after another, spread both "
-                    "ways round the ring")
+    lead_step: bpy.props.IntProperty(
+        name="Lead step", default=0, min=-50, max=50,
+        description="What each copy's Lead is stepped by, further from the "
+                    "original round the ring: the two next to it are 1 step "
+                    "out, the two next to those 2, and so on, both ways round. "
+                    "Below 0 each waits more than the one before it; above 0 "
+                    "each goes earlier. 0 sends them all together")
 
     def refuse(self, data, said):
         data.report = said
@@ -6166,15 +6508,18 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
 
     def draw(self, context):
         layout = self.layout
+        layout.use_property_split = False
+        layout.label(text="Use")
+        layout.prop(self, "use", expand=True)
         layout.use_property_split = True
         layout.use_property_decorate = False
         layout.prop(self, "count")
         layout.prop(self, "center")
         layout.prop(self, "axis")
-        layout.prop(self, "linked")
-        column = layout.column(align=True)
-        column.prop(self, "lead_first")
-        column.prop(self, "lead_last")
+        copying = layout.row()
+        copying.active = self.use != "ADOPT"
+        copying.prop(self, "linked")
+        layout.prop(self, "lead_step")
 
     def execute(self, context):
         found = self.plan(context)
@@ -6213,31 +6558,65 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                               "there is nothing to add.".format(short(name, 18)))
             return {"CANCELLED"}
 
+        # What already stands in those places, when it is to be used.
+        placed, partial, left = {}, [], []
+        if self.use != "COPY":
+            context.view_layer.update()
+            placed, partial, left = find_standing(
+                standing_candidates(context, rig), joints, places)
+        outs = ""
+        if left:
+            outs = " Left out: {:s}{:s}.".format(
+                "; ".join(left[:3]),
+                "; and {:d} more".format(len(left) - 3) if len(left) > 3 else "")
+        if self.use == "ADOPT" and not placed:
+            self.refuse(data, "Nothing standing in the places round that ring is an "
+                              "exact copy of '{:s}', so nothing was taken up.{:s}".format(
+                                  short(name, 18), outs))
+            return {"CANCELLED"}
+
         taken = names_in_use()
-        copies, told = [], []
-        for turn in places:
-            number = free_ring_number([joint for joint, _seat, _source in joints], taken)
+        copies, riders, told, framed = [], [], [], []
+        for number, turn in enumerate(places):
             whole = {}
-            for joint_name, joint_seat, source in joints:
-                made = "{:s} {:d}".format(joint_name, number)
-                taken.add(made)
-                copy = copy_for_ring(source, made, self.linked)
-                copies.append((copy, joint_name))
-                whole[joint_name] = copy.name
-                copy.matrix_world = turn @ joint_seat
+            if number in placed:
+                # Taken as it stands, stood on the place a copy would have if
+                # it is not already there, so its move radiates from it.
+                for joint_name, (obj, where) in placed[number].items():
+                    slack = 1e-4 * (1.0 + max(abs(c) for c in where.translation))
+                    if not same_matrix(obj.matrix_world, where, slack):
+                        framed.append(reframe(obj, where))
+                    riders.append((obj, joint_name))
+                    whole[joint_name] = obj.name
+            elif self.use == "ADOPT" or number in partial:
+                # Something stands here, or this is no place to make copies.
+                continue
+            else:
+                copy_number = free_ring_number([joint for joint, _seat, _source in joints],
+                                               taken)
+                for joint_name, joint_seat, source in joints:
+                    made = "{:s} {:d}".format(joint_name, copy_number)
+                    taken.add(made)
+                    copy = copy_for_ring(source, made, self.linked)
+                    copies.append(copy)
+                    riders.append((copy, joint_name))
+                    whole[joint_name] = copy.name
+                    copy.matrix_world = turn @ joint_seat
             told.append(whole)
         context.view_layer.update()
-        objects = [copy for copy, _joint in copies]
+        objects = [obj for obj, _joint in riders]
+        # Read before the riders are added: they are not the same afterwards.
+        made_whole = len(copies) // len(joints)
 
         for other in context.selected_objects:
             other.select_set(False)
-        for copy in objects:
-            copy.select_set(True)
+        for obj in objects:
+            obj.select_set(True)
         leading = bpy.data.objects[name]
         leading.select_set(True)
         context.view_layer.objects.active = leading
         try:
-            # Told which copy is which joint: what is made here is known, and
+            # Told which object is which joint: what is made here is known, and
             # a copy of the last joints of a chain is not to be taken for one
             # of the first.
             done = bpy.ops.rigmoves.ride_along(index=self.index, leader=name,
@@ -6251,43 +6630,70 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         # that is not - an object Ride Along took for already known - stands
         # still, or is put back where an old part stood, and the report would
         # still say it rides along. Taken out again, with nothing left.
-        stranded = [copy.name for copy, joint in copies
-                    if move.parts.get(copy.name) is None
-                    or move.parts[copy.name].leader != joint]
+        stranded = [obj.name for obj, joint in riders
+                    if move.parts.get(obj.name) is None
+                    or move.parts[obj.name].leader != joint]
         if done != {"FINISHED"} or stranded:
-            take_riders_out(rig, move, [copy.name for copy in objects
-                                        if move.parts.find(copy.name) >= 0])
+            take_riders_out(rig, move, [obj.name for obj in objects
+                                        if move.parts.find(obj.name) >= 0])
             if move.built:
                 bpy.ops.rigmoves.build()
-            discard_copies(objects)
+            # Objects that were taken up are put back as they were found.
+            put_back(framed)
+            discard_copies(copies)
             self.refuse(data, "Not every copy of '{:s}' could be made to ride along, so "
                               "none were kept.".format(short(name, 18)))
             return {"CANCELLED"}
 
-        said = "{:s} of '{:s}'{:s} round {:s} {:s} along with it{:s}.".format(
-            counted(len(places), "copy", "copies"), short(name, 18),
-            " ({:s} each)".format(counted(len(joints), "joint")) if len(joints) > 1 else "",
-            "the 3D cursor" if self.center == "CURSOR" else "the world origin",
-            "rides" if len(places) == 1 else "ride",
-            ", joint for joint" if len(joints) > 1 else "")
+        said = self.first_sentence(name, joints, len(placed), made_whole)
+        if framed:
+            said += (" {:s} re-framed to stand on {:s} place, the mesh moved the "
+                     "other way so nothing shifted.".format(
+                         counted(len(framed), "object"),
+                         "its" if len(framed) == 1 else "their"))
+        if outs:
+            said += outs
+        if partial:
+            said += " {:s} had only part of a chain standing and {:s} left alone.".format(
+                counted(len(partial), "place"), "was" if len(partial) == 1 else "were")
         if skipped:
             said += " {:s} already held a copy and {:s} skipped.".format(
                 counted(skipped, "place"), "was" if skipped == 1 else "were")
-        if self.lead_first != self.lead_last:
+        if self.lead_step:
             # Out from the original both ways round: the two sides match. Only
             # for the copies made now: the Leads of riders already there are
             # theirs. A copied finger has the one Lead, its first joint's.
-            roots = [move.parts[copy.name] for copy, joint in copies
+            roots = [move.parts[obj.name] for obj, joint in riders
                      if joint == first_joint]
-            shares = spread_shares(rig, move, [(move.parts[name], roots)],
-                                   "AROUND", "Z", True, 0)
-            spread_values("LEAD", roots, shares, self.lead_first, self.lead_last)
+            ranks = spread_ranks(rig, move, [(move.parts[name], roots)], "LEAD",
+                                 "AROUND", "Z", True, 0)
+            limited = spread_put("LEAD", roots,
+                                 [self.lead_step * ranks[r.name] for r in roots])
             refresh_drivers(rig, data, move)
-            said += " Leads {:d} to {:d} out from it, both ways round.".format(
-                self.lead_first, self.lead_last)
+            said += " Leads step by {:d}, out from it both ways round.".format(
+                self.lead_step)
+            if limited:
+                said += " {:d} held at the limit.".format(limited)
         data.report = said
         self.report({"INFO"}, said)
         return {"FINISHED"}
+
+    def first_sentence(self, name, joints, taken, made):
+        """The first sentence of the report: what rides along with the part."""
+        if taken:
+            which = "{:s} of '{:s}'".format(
+                counted(taken, "modelled copy", "modelled copies"), short(name, 18))
+            if made:
+                which += " and {:s}".format(counted(made, "new one"))
+        else:
+            which = "{:s} of '{:s}'".format(counted(made, "copy", "copies"), short(name, 18))
+        return "{:s}{:s} round {:s} {:s} along with it{:s}{:s}.".format(
+            which,
+            " ({:s} each)".format(counted(len(joints), "joint")) if len(joints) > 1 else "",
+            "the 3D cursor" if self.center == "CURSOR" else "the world origin",
+            "rides" if taken + made == 1 else "ride",
+            ", joint for joint" if len(joints) > 1 else "",
+            " (nothing new made)" if taken and not made else "")
 
 
 def control_channel(carrier):

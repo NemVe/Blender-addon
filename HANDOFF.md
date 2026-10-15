@@ -45,9 +45,9 @@ promises to the user.
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 7,200 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 7,700 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 226 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 278 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
@@ -102,6 +102,8 @@ Features, in the order the user asked for them:
 | 0.17.0 | **Ring**: a part and the parts below it made into a ring of riders, through 0.16's Ride Along | `copy_for_ring`, `take_riders_out`, `RIGMOVES_OT_ring` |
 | 0.17.0 | Merge of the two lines of work: Spread and Ring work on 0.16's copy roots and chains; one binding fix (`own_binding`) and one leader read-back fix | see "The four tools of 0.17" |
 | 0.17.1 | Make Chain's order follows how joints are built (far end of the part before), not the nearest pivot, so a folded leaf chains right; plurals in the new tools' reports | `chain_order`, `touching_distance`, `counted` |
+| 0.18.0 | **Ring uses what is already modelled**: a Use choice (Make copies, Use what's there, Fill the gaps - the default); objects that are exact copies of the part's mesh are taken up, stood on their frame if they are not on it | `find_standing`, `standing_candidates`, `reframe`, `put_back`, `RING_USES`, `RIGMOVES_OT_ring` |
+| 0.18.0 | **Spread by Step**: Start and Step for each place in the order (default, -10 for Leads and 0.1 for Delays), ties share a place; Range is the old First and Last; Ring's Lead step is the same | `spread_keys`, `tied_ranks`, `spread_ranks`, `spread_put`, `SPREAD_BY`, `RIGMOVES_OT_spread` |
 
 ## The model underneath (read before changing any maths)
 
@@ -225,12 +227,21 @@ is: `Spread...` in the headers of Riding along and Timing, `Make Chain` and
 buttons. Each refuses in words, reports what it did in `data.report`, and is
 `REGISTER, UNDO`.
 
-- **Spread.** `spread_groups` says what is acted on: riders per leader for
+- **Spread (0.18 added By: Step or Range).** `spread_groups` says what is acted on: riders per leader for
   Leads, the Timing list for Delays - all of them by default, whatever the last
   tool left selected, and the selected ones (`held`) only with `only_selected`.
   Ring leaves its copies selected and Curl its first joint, so going by the
-  selection reached part of a flower or a tentacle and said it had worked. `spread_shares` gives each part a share 0 to
-  1, `spread_values` writes First to Last and holds it to the property limits.
+  selection reached part of a flower or a tentacle and said it had worked.
+  `spread_keys` is the number each order sorts by (angle, distance, place along
+  the axis, depth). By Range `spread_shares` scales it to 0..1 and `spread_values`
+  writes First to Last. By Step (the default) `spread_ranks` gives each part its
+  place in the order, parts the same to within a ten-thousandth of the spread
+  (`tied_ranks`) sharing one, the chain's depth as it is, Random a seeded shuffle;
+  a Lead's leader is place 0 so its riders start at 1, a Delay's first part is 0;
+  the value is Start + Step x place. Both end in `spread_put`, which rounds Leads,
+  holds both to the property limits and says how many were held.
+  `step` has a registered default of 0, so `step_by` supplies -10 / 0.1 when a
+  script gave none; `invoke` sets it per Lead or Delay.
   Writes set `WRITING["many"]` so `_timing_changed` skips, and the caller runs
   `refresh_drivers` once; a built move plays the new values with no Build.
   - Leads go to *copy roots* (`copy_root`): a copied finger has one Lead, its
@@ -303,9 +314,29 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     skipped. After `ride_along` every copy must be a rider of the joint it was
     copied from, or `take_riders_out` (the part of `drop_rider` that unbinds and
     removes) takes the lot back and the ring is refused.
-  - Leads are spread over the copy roots made now only, so an earlier ring keeps
-    its own. Never read a part held from before an `.add()` afterwards: `first_joint`
-    is read first for that reason.
+  - Leads are spread over the copy roots made now only (the ones taken up too),
+    so an earlier ring keeps its own; `lead_step` is the Spread's Step with the
+    same ranks, around both ways from the part. Never read a part held from
+    before an `.add()` afterwards: `first_joint` is read first for that reason.
+  - **Use** (0.18, `RING_USES`, default `FILL`). `find_standing` reads, for each
+    place and joint, every candidate (`standing_candidates`: visible, selectable
+    meshes in no move of any rig, with a joint's vertex count - the rest of the
+    scene is not read) and keeps it when every vertex, in order, is within 2% of
+    the joint's bounding diagonal of `turn @ Before @ local vertex`. The middle of
+    the points is the cheap first test. Best fit first, one object per place (a
+    twin on the same place is named, not taken). A place is `placed` only when all
+    its joints were found; found in part (`partial`) it is left alone - no copies
+    on top, in Fill too - and said. What is not taken but has a joint's vertex
+    count is `left`, named against the joint it is nearest in size to (the
+    farthest-from-middle reach, not the bounding box, which turns with the
+    object) and then in place. `reframe` stands an object that is not on its
+    place on `E = turn @ Before`: the mesh takes `E^-1 @ M`, a shared mesh is
+    copied first, children are held in the world, a mirrored frame (negative
+    determinant) gets its faces turned over (`Mesh.transform` does not), and the
+    result goes in a list so `put_back` can undo it if Ride Along fails. The whole
+    thing is inside the operator, so Ctrl+Z restores meshes too. Taken objects and
+    copies share the `told` pairing. `bpy.data.objects.remove` leaves `None` in
+    `view_layer.objects` until an update: `standing_candidates` skips them.
   - Vertex group names live on the mesh, so linked copies share groups with
     the leader. `own_binding` (0.16, called by `bind_object`) gives a bound
     object its own mesh and drops groups for other parts' bones; Build heals
@@ -377,7 +408,9 @@ undo with a window override).
    Run the review workflow on the whole.
 3. **The new buttons have not been seen in a real window.** Their placement is
    tested against a logging layout, not drawn: look at the `Spread...` button in
-   the panel headers, which are narrow, and at the `Ring...` row.
+   the panel headers, which are narrow, and at the `Ring...` row. Also the 0.18
+   dialogs: Ring's three-way **Use** (drawn expanded, in a column of its own) and
+   Spread's **By** (expanded) with its Start/Step or First/Last.
 4. **Known rough edges** (listed in the guide):
    - Dragging the base of a finger shown bent shears it on screen until
      Record. Record gets it right.

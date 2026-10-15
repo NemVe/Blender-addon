@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.17.1
+# CopyThat (experiment) - v0.18.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -17,7 +17,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.17.1.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.18.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
 
 ## Use
@@ -126,7 +126,9 @@ and press **Ride Along With '...'**. Each of them now does what the recorded
 petal does, but from where it stands and facing its own way: whatever the
 leader does to its own left, a rider does to *its* own left. Eight petals
 round a centre all open outwards, each in its own direction, from one
-control.
+control. If the petals are modelled already and stand round a centre, you need
+not select them by hand: **Ring** with **Use what's there** finds them and sets
+them riding for you (see Ring, below).
 
 A rider turns about its leader's pivot, carried over to where it stands:
 set the pivot on the leader - its hinge, its base - and every rider swings
@@ -179,34 +181,78 @@ the reason when it cannot, and is one Ctrl+Z.
 
 *When:* the same part goes round a centre - the petals of a flower, the
 blades of a fan, the teeth of a gear, a crown of spikes - and you would rather
-not model it eight times and select them all for Ride Along.
+not select them all for Ride Along. Either the other copies are not modelled
+yet and Ring makes them, or they are modelled already and Ring picks them up.
 
 *Recipe:* record the part's move, put the 3D cursor on the centre, select the
 part so it is the active object, press **Ring...** (in the move, under **Curve
-the Path**), set the **Count**, **OK**.
+the Path**), pick **Use**, set the **Count**, **OK**.
 
-- **Count** includes the original: 6 is the part and five copies.
-- The copies stand at the part's **Before** - not where it is standing now,
+**Use** is one of three:
+
+| Use | What it does | When |
+|---|---|---|
+| **Make copies** | a new copy for every place round the ring, whatever already stands there | nothing is modelled but the one part |
+| **Use what's there** | takes up the objects already standing in the places, and makes nothing | every petal is modelled already, and you do not want one more object |
+| **Fill the gaps** (the default) | takes up what stands in a place, and copies the part only into the places where nothing does | most are modelled and a few are missing - or you are not sure. It never puts a copy on top of a petal that is there |
+
+How an object already there is told from one that is not:
+
+- Only a mesh object that is in no move of this add-on, in view and free to
+  select, is looked at. Hidden ones, locked ones and ones a move plays already
+  are never taken.
+- It has to be a copy of the part's mesh: the same number of vertices, in the
+  same order, and every one within a fiftieth of how big the part is across of
+  where the part's own vertex would land in that place. So a petal modelled
+  twice, or Alt+D, or one with its transforms applied, is a copy; a mirror image
+  of the petal is not, and nor is a petal of another shape with as many
+  vertices.
+- For a finger or a leaf (the part with the parts that follow it), a place is
+  taken only when **every** joint of it is found. Found in part, the place is
+  left alone - nothing taken, and nothing copied on top of it - and the report
+  says so.
+- Where two objects stand on one place, the closer fit is taken and the other is
+  named in the report.
+- The report names what was left out and why, up to three: "'Leaf B1' is not a
+  copy of 'Leaf A1'", "'Stray' is a copy of 'Petal' that stands off the ring",
+  "'Twin' stands on the same place as 'Petal 3'". It looks at objects with as many
+  vertices as a joint of the part, because those are the ones you may have meant.
+  When nothing fits, **Use what's there** is turned down with those names and
+  nothing is changed.
+- **Re-framed.** A rider copies its leader's move from its own origin and axes,
+  so a petal modelled with its origin somewhere else, or its rotation or scale
+  applied, would swing about the wrong point. Such an object is stood on the
+  frame a copy would have - its origin and axes where the part's are, turned to
+  its place - and its mesh is moved the other way, so nothing is seen to move.
+  The report says how many. A mesh shared with other objects is given its own
+  first, so they stay as they were; whatever is parented to a re-framed object
+  stays where it is. An object already on its frame is not touched. It is all one
+  Ctrl+Z, and a ring that cannot be finished puts every object back as found.
+
+What it makes, and the rest:
+
+- **Count** includes the original: 6 is the part and five more.
+- The places stand at the part's **Before** - not where it is standing now,
   so it may be showing its After - turned round the centre a share of a full
   turn each. **Round** is the 3D cursor or the world origin. **About** is the
   world's Z by default - a ring lying flat - or the world's X or Y, or the **3D
   Cursor's Z** for a ring that is tipped. Mind that last one: placing the cursor
   with Shift+right-click turns it to face the view, and a ring made about its Z
   stands facing the view too.
-- They are named "Petal 2" and on, the lowest numbers free - free among the
+- Copies are named "Petal 2" and on, the lowest numbers free - free among the
   objects and among the parts of every rig, so a copy that takes the name of one
   deleted from the move is never mistaken for it - and put in the same
-  collections.
+  collections. Objects picked up keep their names.
 - **Linked copies** (the default) share the original's mesh, so editing one in
   edit mode edits them all. They share it until Build: Blender keeps a mesh's
   vertex groups with the mesh, and each part is bound by a group of its own,
   so Build gives every one a mesh of its own. Untick it and the copies have
-  their own from the start.
+  their own from the start. It has nothing to do with objects picked up.
 - Nothing that bound or hung the original comes with a copy: not its Armature
   modifier, its bone's vertex group, its Follows mark, its parent, or keys on
   its own transform.
-- The copies then ride along with the part, exactly as if you had pressed Ride
-  Along on them. On a built move that is a Build.
+- Copies and objects picked up then ride along with the part, exactly as if you
+  had pressed Ride Along on them. On a built move that is a Build.
 - The part is ringed with the parts that follow it, below it - never with the
   ones it follows. Ring a finger's first joint and every finger comes whole,
   each curling from where it stands (see Copies of a whole finger); the copies
@@ -216,20 +262,22 @@ the Path**), set the **Count**, **OK**.
   flaps from its own place. Ring a joint in the middle of a finger and its copies
   hang from the joint above, which they are carried by.
 - A second Ring over the first - or a bigger one - adds only the places that are
-  missing: a place that already holds a copy of the part is skipped, and the
+  missing: a place that already holds a rider of the part is skipped, and the
   report says how many. Ring 4 then Ring 8 adds the 4 missing. A ring with
   nothing to add is turned down.
-- **First Lead** and **Last Lead**: set different, they are spread out from the
-  original both ways round the ring (see Spread, Around a ring, both ways), so
-  the blades open one after another, the two sides alike. Only the copies made
-  now are given a Lead; those of an earlier ring keep theirs. A copied finger has
-  one Lead, its first joint's, so the fingers go one after another with their
-  joints in step. Leave them equal and every copy moves with the original.
+- **Lead step**: set to anything but 0, the Leads are stepped from the original
+  both ways round the ring (see Spread, Around a ring, both ways), so the blades
+  open one after another, the two sides alike: -10 is 10 later for each step out
+  from the original. The report counts any held at the limit. Only the places
+  filled now are given a Lead; those of an earlier ring keep theirs. A copied
+  finger has one Lead, its first joint's, so the fingers go one after another
+  with their joints in step. Leave it at 0 and every copy moves with the
+  original.
 
 It asks before it makes anything: a part that is not in the move, a rider, a
 part with no Before, or a part dragged and not recorded on a built move are
 each turned down in words, and nothing is left behind. So is a ring that cannot
-be finished: if a copy does not become a rider of the part it was made from, none
+be finished: if an object does not become a rider of the part it stands for, none
 are kept. A part that follows another is not turned down.
 
 ### Spread: Leads and Delays in one go
@@ -239,29 +287,50 @@ should go one after the next, a row should topple in a wave - and you do not
 want to type a number into every row.
 
 *Recipe:* press **Spread...** in the header of **Riding along** (Leads) or of
-**Timing** (Delays), pick an **Order**, set the **First** and **Last** value,
-**OK**.
+**Timing** (Delays), pick an **Order**, pick **By**, set the values, **OK**.
 
-Every part falls somewhere from 0 to 1 in the order you pick, and gets
-First + (Last - First) x that. Leads are whole numbers held to -50 to 50,
-Delays held to 0 to 0.99; if any were held, the report says how many.
+**By** says how the values are given:
 
-| Order | The part comes later the... |
-|---|---|
-| **Around a ring** | further round the ring it stands from the start, one way round. **Both ways** folds it in half, so the two sides of the ring match: the parts either side of the start go together |
-| **By distance** | further it is from the start: a ripple |
-| **Along an axis** | further along world X, Y or Z: dominoes, a wave across a grid |
-| **Down a chain** | further down a **Follows** chain it hangs: a finger or a tentacle (Delays only) |
-| **Random** | no order - the same every time for the same **Seed** |
+- **Step** (the default): a **Start** and a **Step**. Every part takes a place in
+  the order, and gets Start + Step x its place, counting from 0. The default is a
+  Start of 0 and a Step of **-10** for Leads, **0.1** for Delays. Below 0 each
+  rider waits more than the one before it, above 0 each goes earlier; for Delays
+  each waits that much longer. It is a *step*, so adding a petal gives it the next
+  value and leaves the rest as they were - **+10 each** is +10, +20, +30 whether
+  there are four petals or forty.
+- **Range**: a **First** and a **Last**, and the parts between are spread evenly
+  from one to the other, however many there are. Handy when it is the last that
+  matters: the last petal opens at -40, and whatever is between is shared out.
 
+Parts the order cannot tell apart share a place, so they get the same value:
+
+| Order | The part comes later the... | Parts that share a place |
+|---|---|---|
+| **Around a ring** | further round the ring it stands from the start, one way round. **Both ways** folds it in half, so the two sides of the ring match: the parts either side of the start go together | the two sides of the ring, with **Both ways** |
+| **By distance** | further it is from the start: a ripple | parts the same distance away |
+| **Along an axis** | further along world X, Y or Z: dominoes, a wave across a grid | parts at the same place along it |
+| **Down a chain** | further down a **Follows** chain it hangs: a finger or a tentacle (Delays only) | joints at the same depth - the branches of a tree |
+| **Random** | no order - the same every time for the same **Seed**. The places are dealt out, none shared | none |
+
+"The same" is to within a ten-thousandth of how far the parts run, so the two
+sides of a ring, a hair apart from rounding, are one place.
+
+Eight petals round a flower, **Step** -10, **Around a ring**, **Both ways**:
+the leader is place 0 and plays at 0 as it always does; the riders start at place
+1 and get -10, -20, -30, -40, -30, -20, -10 - the pair next to the leader go
+together, and the petal opposite it is the last.
+
+- Leads are whole numbers held to -50 to 50, Delays held to 0 to 0.99; if any
+  were held the report says how many ("3 held at the limit").
 - Leads belong to riders. Each leader's riders are put in order among
   themselves, so two rings with a leader each both get the whole range. The
-  start is the leader. A copied finger has one Lead, its first joint's, so
-  that is what is spread and counted - one for a whole finger - and selecting
-  any joint of a copy selects the copy. Down a chain is not offered for Leads:
-  riders have no Follows chain of their own.
+  start is the leader, which is place 0, so a rider's Lead is Start + Step x its
+  place with the first rider at place 1. A copied finger has one Lead, its first
+  joint's, so that is what is spread and counted - one for a whole finger - and
+  selecting any joint of a copy selects the copy. Down a chain is not offered for
+  Leads: riders have no Follows chain of their own.
 - Delays belong to the parts in the **Timing** list. The start is the active
-  part, or the first one.
+  part, or the first one, which is place 0 and gets Start.
 - **All** of them, by default, whatever is selected: Ring leaves its own copies
   selected and Curl its first joint, and a spread that went only by that left the
   rest of a flower or a tentacle as it was. Tick **Only the selected** to spread
@@ -657,10 +726,17 @@ the power factor^k for a part k below it, taken the short way round.
 
 Spread works out an angle round a ring from the best-fit plane of the parts'
 spots and writes the values with the drivers left alone, then refreshes them
-once. Ring copies the object - every joint of it, for a chain - takes off what
-the original was bound by, sets each copy on the original's Before turned
-about the axis, finds the copies of a chain joint for joint, and presses Ride
-Along on them.
+once. By Range each part's share of the way is its angle, distance, place or
+depth over the biggest; by Step it is its place in the order, where parts the
+order cannot tell apart share one. Ring copies the object - every joint of it,
+for a chain - takes off what the original was bound by, sets each copy on the
+original's Before turned about the axis, and presses Ride Along on them, told
+which copy is which joint. Use what's there looks instead at the meshes in the
+scene with as many vertices as a joint has: one stands in a place when every
+vertex, in order, is within a fiftieth of the part's size of the joint's own
+vertex put there. The best fit takes each place, a place is taken only with all
+its joints, and an object not on its frame is stood on it with its mesh moved
+the other way (`reframe`), before the same Ride Along.
 
 ## Tested on
 
@@ -1036,6 +1112,14 @@ and one lifted 1 m:
   Spread count in the right number now: "1 copy ... rides along", "2 places ... were
   skipped", "1 part below ... bends".
 
+- **Ring made a copy on top of every petal that was modelled already.** A flower with
+  its eight petals modelled got eight more on top, and the six inner petals the same,
+  to be deleted by hand. Ring has a **Use** choice now: **Fill the gaps**, the default,
+  copies only where nothing stands, and **Use what's there** makes nothing.
+- **Spread by First and Last changed every value when a petal was added.** Round a
+  ring, the last petal always got the Last, so a ninth petal moved the other eight.
+  **By Step** gives a part the value of its place in the order, and nothing else moves.
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -1049,6 +1133,10 @@ and one lifted 1 m:
   recorded from a half-posed start will be wrong at the ends.
 - Steps are only offered once a move has bones, so for objects that means
   after the first build.
+- Use what's there compares vertex by vertex, in vertex order. A petal whose vertices
+  were renumbered by editing it, or one sculpted a little off the part's shape, is not
+  a copy of it and is named as left out; a fiftieth of the part's size is the leeway.
+  A leaf with one joint different is left alone as a whole place, not copied on top.
 - An object is bound whole, to one bone. Parts that bend need a rig of their
   own and the bone workflow.
 - Two moves sharing a part compose in the order they were made, which is not

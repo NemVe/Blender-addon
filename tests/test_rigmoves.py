@@ -1700,6 +1700,9 @@ class TestSpread(CopyThatCase):
         return [round(p.start, 4) for p in self.move.parts if not p.leader]
 
     def spread(self, what, **kwargs):
+        # These tests are about the Range: a first and a last, and what falls
+        # between. The Step has its own tests below.
+        kwargs.setdefault("by", "RANGE")
         return bpy.ops.rigmoves.spread(index=0, what=what, **kwargs)
 
     def ring_of_riders(self, count=8, start=0.0, leader_on_ring=False):
@@ -2040,6 +2043,170 @@ class TestSpread(CopyThatCase):
         undo_once()
         self.assertEqual([round(p.start, 4) for p in rig().rigmoves.moves[0].parts],
                          [0.0, 0.0, 0.0])
+
+    # -- by Step ------------------------------------------------------------
+
+    def stepped(self, what, **kwargs):
+        """The Spread as it comes: by Step, whatever the tests above asked."""
+        return bpy.ops.rigmoves.spread(index=0, what=what, **kwargs)
+
+    def test_by_step_is_what_a_spread_does_unless_told_otherwise(self):
+        props = bpy.ops.rigmoves.spread.get_rna_type().properties
+        self.assertEqual(props["by"].default, "STEP")
+        self.assertEqual({item.identifier for item in props["by"].enum_items},
+                         {"STEP", "RANGE"})
+        self.assertIn("each waits more", props["step"].description)
+        self.assertIn("each goes earlier", props["step"].description)
+
+    def test_leads_step_ten_each_both_ways_round_eight_petals(self):
+        # Eight on the ring, the leader one of them, so seven riders: the two
+        # next to the leader are a step out, and the one opposite four.
+        self.ring_of_riders(count=7, leader_on_ring=True)
+        self.assertEqual(self.stepped("LEAD", order="AROUND", both_ways=True),
+                         {"FINISHED"})
+        self.assertEqual(self.leads(), [-10, -20, -30, -40, -30, -20, -10])
+        self.assertIn("Spread the Leads of 7 riders in steps of -10 from 0, round the "
+                      "ring from 'Leader', both ways.", rig().rigmoves.report)
+
+    def test_leads_step_one_way_round_gives_every_rider_a_step_of_its_own(self):
+        self.ring_of_riders(count=7, leader_on_ring=True)
+        self.stepped("LEAD", order="AROUND", step=5.0)
+        self.assertEqual(self.leads(), [5, 10, 15, 20, 25, 30, 35])
+
+    def test_the_leader_is_rank_zero_so_start_is_added_to_the_riders_only(self):
+        self.ring_of_riders(count=4)
+        self.stepped("LEAD", order="AROUND", start=-5.0, step=-10.0)
+        self.assertEqual(self.leads(), [-15, -25, -35, -45])
+        self.assertEqual(self.move.parts["Leader"].lead, 0)
+
+    def test_a_step_of_a_half_goes_outwards_to_the_next_lead(self):
+        self.ring_of_riders(count=4)
+        self.stepped("LEAD", order="AROUND", step=-2.5)
+        self.assertEqual(self.leads(), [-3, -5, -8, -10])
+
+    def test_delays_step_a_tenth_each_along_an_axis_by_default(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(5)])
+        select(*objects)
+        self.assertEqual(self.stepped("DELAY", order="AXIS", axis="X"), {"FINISHED"})
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.2, 0.3, 0.4])
+        self.assertIn("in steps of 0.1 from 0", rig().rigmoves.report)
+
+    def test_the_first_part_gets_the_start_and_each_next_one_a_step_more(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(4)])
+        select(*objects)
+        self.stepped("DELAY", order="AXIS", axis="X", start=0.2, step=0.15)
+        self.assertEqual(self.delays(), [0.2, 0.35, 0.5, 0.65])
+
+    def test_delays_sort_the_order_not_the_order_they_were_listed_in(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in (3, 0, 2, 1)])
+        select(*objects)
+        self.stepped("DELAY", order="AXIS", axis="X")
+        self.assertEqual(self.delays(), [0.3, 0.0, 0.2, 0.1])
+
+    def test_parts_at_the_same_place_along_an_axis_share_a_step(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in (0, 1, 1, 2)])
+        select(*objects)
+        self.stepped("DELAY", order="AXIS", axis="X")
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.1, 0.2])
+
+    def test_a_hair_between_two_places_is_not_a_step(self):
+        # Float rounding puts the two sides of a ring a hair apart.
+        objects = self.parts_at([(x, 0.0, 0.0) for x in (0.0, 1.0, 1.0 + 1e-7, 2.0)])
+        select(*objects)
+        self.stepped("DELAY", order="AXIS", axis="X")
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.1, 0.2])
+        self.assertEqual(rigmoves.tied_ranks([0.0, 1.0, 1.0 + 1e-7, 2.0, 0.5]),
+                         [0, 2, 2, 3, 1])
+
+    def test_distance_ties_parts_the_same_distance_from_the_active_one(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in (0, 1, -1, 2)])
+        select(*objects)
+        self.stepped("DELAY", order="DISTANCE")
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.1, 0.2])
+
+    def test_delays_round_a_ring_both_ways_share_a_step_with_their_mirror(self):
+        objects = self.parts_at(ring_places((0.0, 0.0, 0.0), 6, 3.0))
+        select(*objects)
+        self.stepped("DELAY", order="AROUND", both_ways=True)
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.2, 0.3, 0.2, 0.1])
+        # One way round nobody shares.
+        self.stepped("DELAY", order="AROUND")
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
+
+    def test_down_a_chain_each_joint_is_a_step_deeper_and_branches_share(self):
+        objects = self.parts_at([(x + 0.5, 0.0, 0.0) for x in range(4)])
+        self.move.parts[1].follows = "P0"
+        self.move.parts[2].follows = "P0"
+        self.move.parts[3].follows = "P1"
+        select(*objects)
+        self.stepped("DELAY", order="CHAIN")
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.1, 0.2])
+
+    def test_random_deals_out_the_steps_the_same_way_for_a_seed(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(6)])
+        select(*objects)
+        self.stepped("DELAY", order="RANDOM", seed=5)
+        dealt = self.delays()
+        self.assertEqual(sorted(dealt), [0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
+        self.stepped("DELAY", order="RANDOM", seed=5)
+        self.assertEqual(self.delays(), dealt)
+        self.stepped("DELAY", order="RANDOM", seed=6)
+        self.assertNotEqual(self.delays(), dealt)
+
+    def test_steps_past_what_a_lead_can_be_are_held_and_counted(self):
+        self.ring_of_riders(count=4)
+        self.stepped("LEAD", order="AROUND", step=-30.0)
+        self.assertEqual(self.leads(), [-30, -50, -50, -50])
+        self.assertIn("3 held at the limit", rig().rigmoves.report)
+
+    def test_steps_past_what_a_delay_can_be_are_held_and_counted(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(4)])
+        select(*objects)
+        self.stepped("DELAY", order="AXIS", axis="X", step=0.5)
+        self.assertEqual(self.delays(), [0.0, 0.5, 0.99, 0.99])
+        self.assertIn("2 held at the limit", rig().rigmoves.report)
+
+    def test_a_step_that_is_not_held_says_nothing_of_a_limit(self):
+        self.ring_of_riders(count=4)
+        self.stepped("LEAD", order="AROUND", step=-10.0)
+        self.assertNotIn("limit", rig().rigmoves.report)
+
+    def test_by_range_is_still_there_with_its_first_and_last(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(5)])
+        select(*objects)
+        self.stepped("DELAY", order="AXIS", axis="X", by="RANGE", first=0.0, last=0.8)
+        self.assertEqual(self.delays(), [0.0, 0.2, 0.4, 0.6, 0.8])
+        self.assertIn("from 0 to 0.8", rig().rigmoves.report)
+
+    def test_a_step_spread_can_be_undone(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(3)])
+        select(*objects)
+        undo_push()
+        self.stepped("DELAY", order="AXIS", axis="X")
+        undo_push()
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.2])
+        undo_once()
+        self.assertEqual([round(p.start, 4) for p in rig().rigmoves.moves[0].parts],
+                         [0.0, 0.0, 0.0])
+
+    def test_the_dialog_shows_a_start_and_a_step_or_a_first_and_a_last(self):
+        # What the dialog draws, run against a stand-in for its layout.
+        for by, shown in (("STEP", ["Start Lead", "Lead step"]),
+                          ("RANGE", ["First Lead", "Last Lead"])):
+            texts = []
+
+            class Column:
+                def prop(self, _data, name, text=None, **_kwargs):
+                    texts.append(text)
+
+            class Layout(Sketch):
+                def column(self, **_kwargs):
+                    return Column()
+
+            stand_in = types.SimpleNamespace(
+                layout=Layout([]), order="AROUND", what="LEAD", by=by)
+            rigmoves.RIGMOVES_OT_spread.draw(stand_in, bpy.context)
+            self.assertEqual(texts, shown)
 
     # -- the pieces ---------------------------------------------------------
 
@@ -2873,15 +3040,15 @@ class TestRing(CopyThatCase):
         self.assertNotIn("Blade 2", riders)
 
     def test_leads_are_spread_out_from_the_blade_both_ways(self):
-        self.assertEqual(self.ring(count=6, lead_first=0, lead_last=-30), {"FINISHED"})
+        self.assertEqual(self.ring(count=6, lead_step=-10), {"FINISHED"})
         parts = rig().rigmoves.moves[0].parts
         self.assertEqual({p.name: p.lead for p in parts if p.leader},
                          {"Blade 2": -10, "Blade 3": -20, "Blade 4": -30,
                           "Blade 5": -20, "Blade 6": -10})
-        self.assertIn("Leads 0 to -30", rig().rigmoves.report)
+        self.assertIn("Leads step by -10", rig().rigmoves.report)
 
-    def test_no_spread_of_leads_when_first_and_last_agree(self):
-        self.ring(count=6, lead_first=5, lead_last=5)
+    def test_no_spread_of_leads_without_a_lead_step(self):
+        self.ring(count=6, lead_step=0)
         parts = rig().rigmoves.moves[0].parts
         self.assertEqual({p.lead for p in parts if p.leader}, {0})
 
@@ -2957,13 +3124,13 @@ class TestRing(CopyThatCase):
         self.assertEqual(self.stock(), stock)
 
     def test_a_second_ring_leaves_the_leads_of_the_first_alone(self):
-        self.ring(count=4, lead_first=0, lead_last=-30)
+        self.ring(count=4, lead_step=-15)
         self.move.parts["Blade 2"].lead = 7
-        self.assertEqual(self.ring(count=8, lead_first=0, lead_last=-40), {"FINISHED"})
+        self.assertEqual(self.ring(count=8, lead_step=-20), {"FINISHED"})
         leads = {p.name: p.lead for p in self.move.parts if p.leader}
         self.assertEqual((leads["Blade 2"], leads["Blade 3"], leads["Blade 4"]), (7, -30, -15))
         new = sorted(v for n, v in leads.items() if n not in ("Blade 2", "Blade 3", "Blade 4"))
-        self.assertEqual(new, [-40, -40, -13, -13])
+        self.assertEqual(new, [-40, -40, -20, -20])
 
     def test_a_ring_made_again_after_the_copies_were_deleted_is_all_new(self):
         # The parts of deleted copies stay in the move; a new copy that took
@@ -3073,7 +3240,7 @@ class TestRingAroundAFarHub(CopyThatCase):
                 bpy.ops.rigmoves.build()
                 select(blade)
                 self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=12, axis="CURSOR_Z",
-                                                       lead_first=0, lead_last=30),
+                                                       lead_step=5),
                                  {"FINISHED"})
                 leads = {p.name: p.lead for p in rig().rigmoves.moves[0].parts if p.leader}
                 self.assertEqual([leads["Blade {:d}".format(n)] for n in range(2, 13)],
@@ -3391,8 +3558,8 @@ class TestEndToEnd(CopyThatCase):
         self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
         bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
         select(blade)
-        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8, lead_first=0,
-                                               lead_last=-40), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8, lead_step=-10),
+                         {"FINISHED"})
         bpy.ops.rigmoves.build()
         move = rig().rigmoves.moves[0]
         leads = {p.name: p.lead for p in move.parts if p.leader}
@@ -3443,7 +3610,8 @@ class TestEndToEnd(CopyThatCase):
                                                      rig_name=rig().name), {"FINISHED"})
         select(lead)
         self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", order="AXIS",
-                                                 axis="X", first=-10.0, last=-50.0),
+                                                 axis="X", by="RANGE",
+                                                 first=-10.0, last=-50.0),
                          {"FINISHED"})
         move = rig().rigmoves.moves[0]
         by_place = [move.parts[riders[x].name].lead for x in sorted(riders)]
@@ -3503,7 +3671,8 @@ class TestEndToEnd(CopyThatCase):
         bpy.ops.rigmoves.build()
         select(*segments.values())
         self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="DELAY", order="CHAIN",
-                                                 first=0.0, last=0.4), {"FINISHED"})
+                                                 by="RANGE", first=0.0, last=0.4),
+                         {"FINISHED"})
         delays = [round(move.parts["Seg{:d}".format(n)].start, 4) for n in range(1, 6)]
         self.assertEqual(delays, [0.0, 0.1, 0.2, 0.3, 0.4])
         for share in (0.0, 0.5, 1.0):
@@ -4042,7 +4211,7 @@ class TestRingAFinger(CopyThatCase):
                 self.assertLess(drift(obj, expected), TOLERANCE, obj.name)
 
     def test_leads_go_to_whole_fingers_by_their_first_joint(self):
-        self.assertEqual(self.ring(count=5, lead_first=0, lead_last=-40), {"FINISHED"})
+        self.assertEqual(self.ring(count=5, lead_step=-20), {"FINISHED"})
         leads = {p.name: p.lead for p in self.move.parts if p.leader}
         self.assertEqual({n: v for n, v in leads.items() if n.startswith("Seg1")},
                          {"Seg1 2": -20, "Seg1 3": -40, "Seg1 4": -40, "Seg1 5": -20})
@@ -4096,7 +4265,8 @@ class TestRingAFinger(CopyThatCase):
         self.ring(count=5)
         select(self.segments[0])
         self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", order="AROUND",
-                                                 first=0.0, last=-40.0, both_ways=True),
+                                                 by="RANGE", first=0.0, last=-40.0,
+                                                 both_ways=True),
                          {"FINISHED"})
         leads = {p.name: p.lead for p in self.move.parts if p.leader}
         self.assertEqual({n: v for n, v in leads.items() if n.startswith("Seg1")},
@@ -4138,7 +4308,7 @@ class TestRingAFinger(CopyThatCase):
         self.ring(count=5)
         select(self.joint(1, 2))
         self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", order="RANDOM",
-                                                 first=-10.0, last=-10.0,
+                                                 by="RANGE", first=-10.0, last=-10.0,
                                                  only_selected=True), {"FINISHED"})
         leads = {p.name: p.lead for p in self.move.parts if p.leader}
         self.assertEqual({n: v for n, v in leads.items() if v}, {"Seg1 3": -10})
@@ -4174,6 +4344,612 @@ class TestRingAFinger(CopyThatCase):
         self.assertEqual(self.move.parts["Seg3"].follows, "Seg1")
         self.assertIn("4 joints of copied chains no longer ride joint for joint",
                       rig().rigmoves.report)
+
+
+def prism(name, sides, radius, length, twist=0.25):
+    """A closed shape with no symmetry at all, so a copy of it can be told from
+    a mirror image of it, or from another shape with as many vertices: the
+    bottom ring's vertices are unevenly far out, and the top ring is smaller
+    and turned."""
+    radii = [1.0, 0.55, 0.9, 0.45, 1.1, 0.7]
+    verts = []
+    for scale, turn, height in ((1.0, 0.0, 0.0), (0.6, twist, length)):
+        for i in range(sides):
+            angle = 2.0 * math.pi * i / sides + turn
+            reach = radius * scale * radii[i % len(radii)]
+            verts.append((reach * math.cos(angle), reach * math.sin(angle), height))
+    faces = [tuple(reversed(range(sides))), tuple(range(sides, 2 * sides))]
+    for i in range(sides):
+        j = (i + 1) % sides
+        faces.append((i, j, sides + j, sides + i))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    return mesh
+
+
+def stood(name, mesh, matrix):
+    """An object of this mesh in the scene, standing on this matrix."""
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.matrix_world = matrix
+    return obj
+
+
+def faces_out(mesh):
+    """Whether every face of a mesh faces away from the middle of it."""
+    middle = sum((v.co for v in mesh.vertices), Vector()) / len(mesh.vertices)
+    return all((p.center - middle).dot(p.normal) > 0.0 for p in mesh.polygons)
+
+
+class TestRingWhatIsThere(CopyThatCase):
+    """The bare flower: every petal is modelled already. Ring takes them up
+    instead of making copies on top of them.
+
+    Eight outer petals on a ring about the world's Z, a leader and seven; six
+    inner petals of another shape, offset round the same ring; a leaf of three
+    segments with five copies of it round the same axis, and a second leaf of
+    the same number of vertices and another shape. Nothing is in a move yet.
+    """
+
+    OPEN = 60.0
+    BEND = 25.0
+    KNUCKLES = [Vector((2.0 + 0.5 * n, 0.0, 0.3)) for n in range(3)]
+
+    def setUp(self):
+        super().setUp()
+        # The leader hinged on its base, facing outwards from the world's Z.
+        azimuth = math.radians(-90.0)
+        self.base = (Matrix.Translation((0.4 * math.cos(azimuth), 0.4 * math.sin(azimuth),
+                                         1.0))
+                     @ Matrix.Rotation(azimuth, 4, "Z"))
+        shape = prism("Outer Shape", 4, 0.15, 1.0)
+        self.leader = stood("Outer Leader", shape, self.base)
+        self.outer = [self.leader] + [
+            stood("Outer {:d}".format(k + 1), shape.copy(), self.turn(k) @ self.base)
+            for k in range(1, 8)]
+        self.inner = []
+        for k in range(6):
+            spot = Matrix.Rotation(math.radians(30.0 + 60.0 * k), 4, "Z")
+            self.inner.append(stood(
+                "Inner {:d}".format(k + 1) if k else "Inner Leader",
+                prism("Inner Shape {:d}".format(k), 4, 0.1, 0.7),
+                spot @ Matrix.Translation((0.25, 0.0, 1.05))))
+        # Leaf A lies along X, each segment hinged on its base about Y.
+        lay = Matrix.Rotation(math.radians(90.0), 4, "Y")
+        self.leaf_homes = [Matrix.Translation(k) @ lay for k in self.KNUCKLES]
+        sizes = [(0.12, 0.5), (0.1, 0.44), (0.08, 0.38)]
+        leaf_shape = [prism("Leaf Shape {:d}".format(n), 6, *sizes[n]) for n in range(3)]
+        self.leaf = [stood("Leaf {:d}".format(n + 1), leaf_shape[n], self.leaf_homes[n])
+                     for n in range(3)]
+        self.leaf_copies = {}
+        for k in range(1, 6):
+            self.leaf_copies[k] = [
+                stood("Leaf {:d} copy {:d}".format(n + 1, k + 1), leaf_shape[n].copy(),
+                      self.turn(k, 6) @ self.leaf_homes[n]) for n in range(3)]
+        # Leaf B: three segments as big as leaf A's, with as many vertices,
+        # twisted the other way, standing between two places of the ring.
+        self.other_leaf = [
+            stood("Leaf B{:d}".format(n + 1),
+                  prism("Leaf B Shape {:d}".format(n), 6, *sizes[n], twist=-0.5),
+                  Matrix.Rotation(math.radians(30.0), 4, "Z") @ self.leaf_homes[n])
+            for n in range(3)]
+        bpy.context.view_layer.update()
+
+    @staticmethod
+    def turn(number, count=8):
+        return Matrix.Rotation(math.radians(360.0 * number / count), 4, "Z")
+
+    @staticmethod
+    def drop(objects):
+        """Delete these from the scene, as a user would."""
+        for obj in objects:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.context.view_layer.update()
+
+    def rig_the_flower(self):
+        """The leader and leaf A in one move: the leader opened, the leaf
+        bent at each joint, and After recorded."""
+        select(self.leader, *self.leaf)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        select(*self.leaf)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.leader.matrix_world = self.base @ Matrix.Rotation(
+            math.radians(self.OPEN), 4, "X")
+        carry = Matrix.Identity(4)
+        for knuckle, home, segment in zip(self.KNUCKLES, self.leaf_homes, self.leaf):
+            carry = carry @ turn_about(knuckle, "Y", self.BEND)
+            segment.matrix_world = carry @ home
+            bpy.context.view_layer.update()
+        self.after_leader = rest_points(self.leader)
+        self.after_leaf = [rest_points(segment) for segment in self.leaf]
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    def ring(self, active=None, **kwargs):
+        select(active or self.leader)
+        kwargs.setdefault("count", 8)
+        return bpy.ops.rigmoves.ring(index=0, **kwargs)
+
+    def stock(self):
+        return (sorted(o.name for o in bpy.data.objects), sorted(m.name for m in bpy.data.meshes),
+                len(rig().rigmoves.moves[0].parts))
+
+    def report(self):
+        return rig().rigmoves.report
+
+    def check_petals(self, petals, share):
+        """Every petal of the ring where it should be at this share of the
+        move: the leader's After, turned round the ring to its own place."""
+        for number, petal in petals.items():
+            if share == 0.0:
+                expected = [self.turn(number) @ self.base @ v.co for v in self.leader.data.vertices]
+            else:
+                expected = [self.turn(number) @ p for p in self.after_leader]
+            self.assertLess(drift(petal, expected), TOLERANCE, petal.name)
+
+    def petals(self):
+        return {k: self.outer[k] for k in range(1, 8)}
+
+    # -- Use what's there ---------------------------------------------------
+
+    def test_the_default_is_to_fill_the_gaps(self):
+        props = bpy.ops.rigmoves.ring.get_rna_type().properties
+        self.assertEqual(props["use"].default, "FILL")
+        self.assertEqual([item.name for item in props["use"].enum_items],
+                         ["Make copies", "Use what's there", "Fill the gaps"])
+
+    def test_the_petals_that_are_there_ride_along_and_nothing_is_made(self):
+        self.rig_the_flower()
+        names = sorted(o.name for o in bpy.data.objects)
+        meshes = len(bpy.data.meshes)
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertEqual(sorted(o.name for o in bpy.data.objects), names)
+        self.assertEqual(len(bpy.data.meshes), meshes)
+        riders = {p.name: p.leader for p in self.move.parts if p.leader}
+        self.assertEqual(riders, {"Outer {:d}".format(k + 1): "Outer Leader"
+                                  for k in range(1, 8)})
+        self.assertIn("7 modelled copies of 'Outer Leader' round the 3D cursor ride "
+                      "along with it (nothing new made).", self.report())
+
+    def test_the_default_does_the_same_where_nothing_is_missing(self):
+        self.rig_the_flower()
+        names = sorted(o.name for o in bpy.data.objects)
+        self.assertEqual(self.ring(), {"FINISHED"})
+        self.assertEqual(sorted(o.name for o in bpy.data.objects), names)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 7)
+
+    def test_what_is_left_out_is_named_and_the_reason_given(self):
+        self.rig_the_flower()
+        self.ring(use="ADOPT")
+        # The inner petals have as many vertices and are another shape.
+        self.assertIn("Left out: 'Inner 2' is not a copy of 'Outer Leader'; "
+                      "'Inner 3' is not a copy of 'Outer Leader'; 'Inner 4' is not a "
+                      "copy of 'Outer Leader'; and 3 more.", self.report())
+
+    def test_adopted_petals_open_like_the_leader_turned_to_their_own_place(self):
+        self.rig_the_flower()
+        self.ring(use="ADOPT")
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.check_petals(self.petals(), 0.0)
+        drive(self.move, 1.0)
+        self.check_petals(self.petals(), 1.0)
+        self.assertLess(drift(self.leader, self.after_leader), TOLERANCE)
+
+    def test_petals_taken_up_on_a_built_move_play_at_once(self):
+        self.rig_the_flower()
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        drive(self.move, 1.0)
+        self.check_petals(self.petals(), 1.0)
+        drive(self.move, 0.0)
+        self.check_petals(self.petals(), 0.0)
+
+    def test_a_chain_is_taken_up_whole_and_a_second_leaf_is_left_out(self):
+        self.rig_the_flower()
+        names = sorted(o.name for o in bpy.data.objects)
+        self.assertEqual(self.ring(active=self.leaf[0], use="ADOPT", count=6),
+                         {"FINISHED"})
+        self.assertEqual(sorted(o.name for o in bpy.data.objects), names)
+        for k in range(1, 6):
+            for n, obj in enumerate(self.leaf_copies[k]):
+                part = self.move.parts[obj.name]
+                self.assertEqual(part.leader, "Leaf {:d}".format(n + 1))
+                self.assertEqual(part.rides_on, "" if not n else
+                                 self.leaf_copies[k][n - 1].name)
+        self.assertIn("5 modelled copies of 'Leaf 1' (3 joints each) round the 3D "
+                      "cursor ride along with it, joint for joint (nothing new made).",
+                      self.report())
+        for n in range(3):
+            self.assertIn("'Leaf B{:d}' is not a copy of 'Leaf {:d}'".format(n + 1, n + 1),
+                          self.report())
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        for k, joints in self.leaf_copies.items():
+            for obj, after in zip(joints, self.after_leaf):
+                expected = [self.turn(k, 6) @ p for p in after]
+                self.assertLess(drift(obj, expected), TOLERANCE, obj.name)
+
+    def test_both_rings_of_the_flower_one_after_the_other_make_nothing(self):
+        self.rig_the_flower()
+        names = sorted(o.name for o in bpy.data.objects)
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertEqual(self.ring(active=self.leaf[0], use="ADOPT", count=6),
+                         {"FINISHED"})
+        self.assertEqual(sorted(o.name for o in bpy.data.objects), names)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 7 + 15)
+
+    def test_a_chain_with_one_wrong_joint_is_left_alone_whole(self):
+        # The second segment of the third copy is a mirror image: the place
+        # has only part of its chain, and nothing is taken up or made there.
+        wrong = self.leaf_copies[3][1]
+        wrong.data.transform(Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0))))
+        self.rig_the_flower()
+        names = sorted(o.name for o in bpy.data.objects)
+        for use in ("ADOPT", "FILL"):
+            self.assertEqual(self.ring(active=self.leaf[0], use=use, count=6),
+                             {"FINISHED"}, use)
+            self.assertEqual(sorted(o.name for o in bpy.data.objects), names, use)
+            riders = {p.name for p in self.move.parts if p.leader}
+            self.assertFalse(riders & {o.name for o in self.leaf_copies[3]}, use)
+            self.assertEqual(len(riders), 12, use)
+            self.assertIn("'Leaf 2 copy 4' is not a copy of 'Leaf 2'", self.report())
+            self.assertIn("1 place had only part of a chain standing and was left alone",
+                          self.report())
+            break
+
+    def test_a_petal_off_by_a_hair_is_taken_and_one_well_off_is_not(self):
+        self.rig_the_flower()
+        self.outer[2].location.x += 0.005
+        self.outer[5].location.x += 0.15
+        bpy.context.view_layer.update()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        riders = {p.name for p in self.move.parts if p.leader}
+        self.assertIn("Outer 3", riders)
+        self.assertNotIn("Outer 6", riders)
+        self.assertEqual(len(riders), 6)
+        # Off a hair, it is stood on its place, and says so.
+        self.assertIn("1 object re-framed", self.report())
+
+    def test_a_mirrored_petal_is_not_taken(self):
+        self.drop(self.inner)
+        mirror = self.outer[3]
+        mirror.data.transform(Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0))))
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        riders = {p.name for p in self.move.parts if p.leader}
+        self.assertNotIn(mirror.name, riders)
+        self.assertEqual(len(riders), 6)
+        self.assertIn("Left out: '{:s}' is not a copy of 'Outer Leader'".format(mirror.name),
+                      self.report())
+
+    def test_a_petal_that_is_a_copy_standing_off_the_ring_is_named_so(self):
+        self.drop(self.inner)
+        stray = stood("Stray", self.leader.data.copy(),
+                      self.turn(0.5) @ self.base)
+        self.rig_the_flower()
+        self.ring(use="ADOPT")
+        self.assertIn("'Stray' is a copy of 'Outer Leader' that stands off the ring",
+                      self.report())
+        self.assertNotIn(stray.name, {p.name for p in self.move.parts})
+
+    def test_two_petals_on_one_place_take_it_once(self):
+        self.drop(self.inner)
+        twin = stood("Twin", self.outer[2].data.copy(), self.turn(2) @ self.base)
+        self.rig_the_flower()
+        self.ring(use="ADOPT")
+        riders = {p.name for p in self.move.parts if p.leader}
+        self.assertEqual(len(riders), 7)
+        self.assertEqual(len(riders & {"Twin", "Outer 3"}), 1)
+        self.assertIn("stands on the same place as", self.report())
+        self.assertIsNotNone(twin)
+
+    def test_what_a_move_already_plays_is_never_taken(self):
+        self.rig_the_flower()
+        # A petal that is a part of the move already, riding along on another
+        # leader, is not for taking.
+        select(self.leader, self.outer[1])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Outer Leader",
+                                                     rig_name=rig().name), {"FINISHED"})
+        riders = lambda: {p.name: p.leader for p in self.move.parts if p.leader}  # noqa: E731
+        self.assertEqual(riders(), {"Outer 2": "Outer Leader"})
+        # The ring starts at the place that rider holds, and skips it.
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertEqual(len(riders()), 7)
+        self.assertIn("1 place already held a copy and was skipped", self.report())
+
+    def test_nothing_that_fits_is_refused_and_leaves_nothing(self):
+        self.drop(self.outer[1:])
+        self.rig_the_flower()
+        stock = self.stock()
+        self.assertEqual(self.ring(use="ADOPT"), {"CANCELLED"})
+        self.assertEqual(self.stock(), stock)
+        self.assertIn("Nothing standing in the places round that ring is an exact copy of "
+                      "'Outer Leader'", self.report())
+
+    def test_hidden_petals_are_not_taken(self):
+        self.drop(self.inner)
+        self.outer[4].hide_set(True)
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertNotIn("Outer 5", {p.name for p in self.move.parts})
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 6)
+
+    def test_a_place_already_taken_up_is_skipped_the_next_time(self):
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertEqual(self.ring(use="ADOPT"), {"CANCELLED"})
+        self.assertIn("nothing to add", self.report())
+
+    # -- Fill the gaps ------------------------------------------------------
+
+    def test_filling_the_gaps_makes_exactly_the_petals_that_are_missing(self):
+        gone = [3, 4, 6]
+        self.drop([self.outer[k] for k in gone])
+        self.drop(self.inner)
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(use="FILL"), {"FINISHED"})
+        made = {o.name for o in bpy.data.objects} - before
+        self.assertEqual(len(made), 3)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 7)
+        self.assertIn("4 modelled copies of 'Outer Leader' and 3 new ones round the 3D "
+                      "cursor ride along with it.", self.report())
+        # Each missing place has one petal, and none stands on another.
+        spots = []
+        for part in self.move.parts:
+            if part.leader:
+                spots.append(as_matrix_of(part.before).translation)
+        for i, one in enumerate(spots):
+            for other in spots[i + 1:]:
+                self.assertGreater((one - other).length, 0.1)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        petals = {k: self.outer[k] if k not in gone else
+                  bpy.data.objects["Outer Leader {:d}".format(2 + gone.index(k))]
+                  for k in range(1, 8)}
+        self.check_petals(petals, 1.0)
+
+    def test_filling_the_gaps_with_nothing_missing_makes_nothing(self):
+        self.drop(self.inner)
+        self.rig_the_flower()
+        names = sorted(o.name for o in bpy.data.objects)
+        self.ring(use="FILL")
+        self.assertEqual(sorted(o.name for o in bpy.data.objects), names)
+
+    def test_filling_the_gaps_of_a_leaf_copies_the_whole_chain_where_none_stands(self):
+        self.drop(self.leaf_copies[2] + self.leaf_copies[4])
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(active=self.leaf[0], use="FILL", count=6), {"FINISHED"})
+        self.assertEqual(len({o.name for o in bpy.data.objects} - before), 6)
+        self.assertIn("3 modelled copies of 'Leaf 1' and 2 new ones", self.report())
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        riders = [p for p in self.move.parts if p.leader]
+        self.assertEqual(len(riders), 15)
+        for part in riders:
+            self.assertTrue(part.rides_on == "" or self.move.parts[part.rides_on].leader)
+
+    def test_making_copies_makes_one_for_every_place_whatever_stands_there(self):
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(use="COPY"), {"FINISHED"})
+        self.assertEqual(len({o.name for o in bpy.data.objects} - before), 7)
+        self.assertEqual({p.name for p in self.move.parts if p.leader} & before, set())
+        self.assertEqual(self.report(),
+                         "7 copies of 'Outer Leader' round the 3D cursor ride along with it.")
+
+    # -- stood on the place a copy would have -------------------------------
+
+    def bake(self, petals):
+        """Apply every transform: the mesh holds the world's coordinates and
+        the object is at the world's origin, unturned."""
+        for petal in petals:
+            world = petal.matrix_world.copy()
+            petal.data.transform(world)
+            petal.matrix_world = Matrix.Identity(4)
+
+    def test_petals_with_their_transforms_applied_are_re_framed(self):
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        stood_at = {p.name: rest_points(p) for p in self.outer[1:]}
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertIn("7 objects re-framed to stand on their place", self.report())
+        for number, petal in self.petals().items():
+            self.assertTrue(same_matrix_of(petal.matrix_world, self.turn(number) @ self.base),
+                            petal.name)
+            # Nothing is seen to move, and the mesh is the leader's again.
+            self.assertLess(max((a - b).length for a, b in
+                                zip(rest_points(petal), stood_at[petal.name])), 1e-5)
+            self.assertLess(max((a.co - b.co).length for a, b in
+                                zip(petal.data.vertices, self.leader.data.vertices)), 1e-5)
+            self.assertTrue(same_matrix_of(
+                rigmoves.as_matrix(self.move.parts[petal.name].before), petal.matrix_world))
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.check_petals(self.petals(), 0.0)
+        drive(self.move, 1.0)
+        self.check_petals(self.petals(), 1.0)
+
+    def test_petals_with_only_their_rotation_applied_are_re_framed_and_radiate(self):
+        # Origin still on the hinge, but turned to the world's axes: a frame
+        # the move would turn about the wrong way.
+        self.drop(self.inner)
+        for petal in self.outer[1:]:
+            world = petal.matrix_world.copy()
+            petal.data.transform(world.to_3x3().to_4x4())
+            petal.matrix_world = Matrix.Translation(world.translation)
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        # The third petal faces along the world's X, with no rotation to
+        # apply: it is on its frame already.
+        self.assertIn("6 objects re-framed", self.report())
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_petals(self.petals(), 1.0)
+
+    def test_a_shared_mesh_is_made_single_user_before_it_is_moved(self):
+        self.drop(self.inner)
+        # Seven petals and a twin elsewhere, all on one mesh whose origin is
+        # off the hinge: each is on the right place with the wrong origin.
+        shared = self.leader.data.copy()
+        shared.name = "Shared Shape"
+        slide = Matrix.Translation((0.0, 0.1, 0.0))
+        shared.transform(slide.inverted())
+        for k, petal in zip(range(1, 8), self.outer[1:]):
+            petal.data = shared
+            petal.matrix_world = self.turn(k) @ self.base @ slide
+        twin = stood("Twin", shared, Matrix.Translation((5.0, 5.0, 0.0)))
+        stood_at = {p.name: rest_points(p) for p in self.outer[1:] + [twin]}
+        self.assertEqual(shared.users, 8)
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertIn("7 objects re-framed", self.report())
+        meshes = {p.data.name for p in self.outer[1:]}
+        self.assertEqual(len(meshes), 7)
+        self.assertNotIn("Shared Shape", meshes)
+        for petal in self.outer[1:]:
+            self.assertEqual(petal.data.users, 1, petal.name)
+            self.assertLess(max((a - b).length for a, b in
+                                zip(rest_points(petal), stood_at[petal.name])), 1e-5)
+        # The twin still has the mesh it had, where it was.
+        self.assertIs(twin.data, shared)
+        self.assertEqual(shared.users, 1)
+        self.assertLess(max((a - b).length for a, b in
+                            zip(rest_points(twin), stood_at["Twin"])), 1e-6)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_petals(self.petals(), 1.0)
+
+    def test_what_hangs_from_a_re_framed_petal_stays_where_it_is(self):
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        drop = stood("Dew", prism("Dew Shape", 3, 0.03, 0.05), Matrix.Translation((0.3, 0.2, 1.2)))
+        drop.parent = self.outer[2]
+        drop.matrix_parent_inverse = self.outer[2].matrix_world.inverted()
+        bpy.context.view_layer.update()
+        where = drop.matrix_world.copy()
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertTrue(same_matrix_of(drop.matrix_world, where))
+
+    def test_a_mirrored_object_with_negative_scale_is_stood_up_with_its_faces_out(self):
+        # The mesh is mirrored in the object's own space and the object scaled
+        # by -1 to make up for it: it looks like the copy, with a frame that is
+        # a mirror. Stood on a plain frame its faces have to be turned.
+        self.drop(self.inner)
+        flip = Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0)))
+        petal = self.outer[2]
+        petal.data.transform(flip)
+        rigmoves.turn_faces_over(petal.data)
+        petal.matrix_world = self.turn(2) @ self.base @ flip
+        self.assertLess(petal.matrix_world.determinant(), 0.0)
+        self.assertTrue(faces_out(petal.data))
+        stood_at = rest_points(petal)
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertIn("Outer 3", {p.name for p in self.move.parts if p.leader})
+        self.assertGreater(petal.matrix_world.determinant(), 0.0)
+        # The mesh was mirrored back, so its faces were turned back with it.
+        self.assertTrue(faces_out(petal.data))
+        self.assertLess(max((a - b).length for a, b in zip(rest_points(petal), stood_at)),
+                        1e-5)
+
+    def test_a_petal_already_on_its_place_is_not_re_framed(self):
+        self.rig_the_flower()
+        self.ring(use="ADOPT")
+        self.assertNotIn("re-framed", self.report())
+
+    # -- undo, and a ring that cannot be finished ---------------------------
+
+    def test_a_ring_that_re_framed_petals_can_be_undone(self):
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        self.rig_the_flower()
+        select(self.leader)
+        was = {o.name: (rest_points(o), o.matrix_world.copy(), o.data.name)
+               for o in self.outer}
+        stock = self.stock()
+        undo_push()
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8, use="ADOPT"), {"FINISHED"})
+        undo_push()
+        self.assertEqual(len([p for p in rig().rigmoves.moves[0].parts if p.leader]), 7)
+        undo_once()
+        self.assertEqual(self.stock(), stock)
+        for name, (points, matrix, mesh) in was.items():
+            obj = bpy.data.objects[name]
+            self.assertLess(max((a - b).length for a, b in zip(rest_points(obj), points)),
+                            1e-6, name)
+            self.assertTrue(same_matrix_of(obj.matrix_world, matrix, 1e-6), name)
+            self.assertEqual(obj.data.name, mesh)
+
+    def test_a_ring_that_fails_puts_every_petal_back_as_it_found_it(self):
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        self.rig_the_flower()
+        was = {o.name: (rest_points(o), o.matrix_world.copy()) for o in self.outer}
+        real = rigmoves.take_riders_out
+        # Ride Along is made to take none of them up.
+        shy = rigmoves.RIGMOVES_OT_ride_along.execute
+        rigmoves.RIGMOVES_OT_ride_along.execute = lambda self, context: {"CANCELLED"}
+        try:
+            self.assertEqual(self.ring(use="ADOPT"), {"CANCELLED"})
+        finally:
+            rigmoves.RIGMOVES_OT_ride_along.execute = shy
+            rigmoves.take_riders_out = real
+        self.assertIn("none were kept", self.report())
+        for name, (points, matrix) in was.items():
+            obj = bpy.data.objects[name]
+            self.assertLess(max((a - b).length for a, b in zip(rest_points(obj), points)),
+                            1e-6, name)
+            self.assertTrue(same_matrix_of(obj.matrix_world, matrix, 1e-6), name)
+        self.assertEqual(len([p for p in rig().rigmoves.moves[0].parts if p.leader]), 0)
+
+    # -- the Lead step ------------------------------------------------------
+
+    def test_a_lead_step_goes_to_the_petals_taken_up_both_ways_round(self):
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT", lead_step=-10), {"FINISHED"})
+        leads = {p.name: p.lead for p in self.move.parts if p.leader}
+        self.assertEqual([leads["Outer {:d}".format(k + 1)] for k in range(1, 8)],
+                         [-10, -20, -30, -40, -30, -20, -10])
+        self.assertIn("Leads step by -10", self.report())
+
+    def test_a_lead_step_past_the_limit_is_held_and_counted(self):
+        self.rig_the_flower()
+        self.ring(use="ADOPT", lead_step=-20)
+        leads = {p.name: p.lead for p in self.move.parts if p.leader}
+        self.assertEqual(sorted(leads.values()), [-50, -50, -50, -40, -40, -20, -20])
+        self.assertIn("3 held at the limit", self.report())
+
+    def test_the_dialog_shows_the_three_ways_to_use_and_a_lead_step(self):
+        shown = []
+
+        class Layout(Sketch):
+            def prop(self, _data, name, **_kwargs):
+                shown.append(name)
+
+            def row(self, **_kwargs):
+                return Layout(self.log, self.where)
+
+        stand_in = types.SimpleNamespace(layout=Layout([]), use="FILL")
+        rigmoves.RIGMOVES_OT_ring.draw(stand_in, bpy.context)
+        self.assertEqual(shown, ["use", "count", "center", "axis", "linked", "lead_step"])
+
+
+def as_matrix_of(values):
+    return rigmoves.as_matrix(values)
+
+
+def same_matrix_of(a, b, tolerance=1e-4):
+    return rigmoves.same_matrix(a, b, tolerance)
+
+
+def rigmoves_part(move, obj):
+    return move.parts[obj.name]
 
 
 class TestCombined(CopyThatCase):
