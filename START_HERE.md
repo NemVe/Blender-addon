@@ -40,9 +40,8 @@ guide: what the add-on promises).
 
 - **Version:**
   - 0.18.0 is pushed (dbc6d22).
-  - 0.18.1 (the safety fixes below) was being made when this was written.
-    Check `git log` for "0.18.1".
-  - 278+ tests pass:
+  - 0.18.1 (the safety fixes below) is pushed (fddbd6e).
+  - 325 tests pass:
     `.venv/bin/python tests/test_rigmoves.py`; `ruff check rigmoves tests tools`.
 - **Features, in order:**
   - Before/After/Steps, Build Sliders, Play and the handle;
@@ -71,9 +70,9 @@ guide: what the add-on promises).
   - Size the default step to fit ±40.
   - Clearer reports.
 
-  The full list is in the review output, mirrored in the commit message. If
-  0.18.1 is not in `git log`, redo it from that list (see the message to the
-  implementer in this session).
+  Done and pushed; the commit message has the details and the guide's bug list
+  the five user-facing entries. Ring's own Lead step stays 0 unless typed (it is
+  not sized to fit).
 - **Not yet seen in a real Blender window:** the Ring… and Spread… dialogs.
   The user confirmed the panel shows Ring… and Spread… (0.17.1 screenshot).
 

@@ -30,7 +30,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 ## Installation
 
-CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.18.0.zip`).
+CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.18.1.zip`).
 
 ### Removing an older version first (RigMoves or an old CopyThat)
 
@@ -394,12 +394,17 @@ It replaces the links the chosen parts already have to one another, so a chain m
 
 **How it picks up what is already modelled**
 
-- Only mesh objects that are in no move yet, that are visible and free to select, are looked at.
-- An object counts only if it is a copy of the part's mesh: the same number of vertices, in the same order, each within a fiftieth of the part's size of where the part's own vertex would land in that place. A petal modelled twice, or copied with Alt+D, is a copy. A mirror image of the petal is not, and nor is a different petal with the same vertex count.
-- For a finger or a leaf (a part with parts that follow it), a place is taken only when every joint of it is found. Found in part, the place is left alone, and the report says so.
-- Where two objects stand on one place, the closer fit is taken and the other is named in the report.
-- The report names what was left out and why. When nothing fits, **Use what's there** is turned down with those names, and nothing is changed.
-- A rider copies its leader's move from its own origin and axes, so a petal modelled with its origin somewhere else would swing about the wrong point. Such an object is stood on the frame a copy would have, and its mesh is moved the other way, so nothing is seen to move. The report says how many. Objects that share a mesh with others are given their own first, so the others stay as they were.
+Ring takes an object up, or stands it on a new frame, only when that is provably safe. Anything else is left exactly as it is, and the report says why.
+
+- **It has to be a copy of the part's mesh.** The same number of vertices, and every vertex of one within a fiftieth of the part's size of a vertex of the other, once it stands in the place. The numbering does not matter, so a half of a flower made with Ctrl+M, or the teeth of a gear copied with Shift+D and moved with G and never turned, are taken. A mirror image of a petal that is not the same on both sides is not a copy, and nor is a different petal with the same vertex count.
+- **Who may be taken.** A mesh object that is visible, free to select (a collection with selection switched off counts), local and editable, in no move yet, and with no keys, drivers or NLA of its own. Left alone, and named in the report: "has keys or drivers of its own", "is linked from a library", "cannot be edited", "is hidden", "cannot be selected", "is already part of a move".
+- **Standing an object on a new frame.** A rider copies its leader's move from its own origin and axes, so a petal modelled with its origin somewhere else, or its rotation or scale applied, would swing about the wrong point. Such an object is stood on the frame a copy would have, and its mesh is moved the other way. It gets a mesh of its own, so objects that shared the old one stay as they were. This is done only to plain objects. An object with constraints, instancing, particles, other objects depending on it (a Child Of, a Shrinkwrap target, a child hung from its vertices), or a modifier that reads its frame (anything but Subdivision, Triangulate, Edge Split, Weighted Normal or an Armature of another rig; Bevel and Solidify only at a scale of 1) is left alone.
+- **Then it is checked.** After the change the result is compared with what it was: where every vertex is in the world, and which way every face faces. If anything differs, the object is put back exactly and left alone: "cannot be re-framed safely (re-framing it would change how it looks): set its origin and rotation like the leader's, or use Make copies". The report says how many were re-framed. Textures that use an object's own or generated coordinates are not checked.
+- **A finger or a leaf (a part with parts that follow it)** is taken only when every joint of the place is found and can be re-framed. Found in part, the place is left alone, and the report says so.
+- **Where two objects stand on one place,** the closer fit is taken and the other is named in the report.
+- **Nothing is copied on top of anything.** In **Fill the gaps**, a place is skipped when any mesh object at all stands in it: hidden, in a move, with any number of vertices, a petal scaled a little or with a vertex nudged. The report says how many places had something standing there that is not a copy. **Use what's there** says how many places were empty, and that **Fill the gaps** would copy the part there.
+- **A wrong centre or Count is caught.** If copies of the part stand near the ring but on none of its places, the ring is round the wrong point or has the wrong Count, and copying between them would double the flower. **Fill the gaps** is turned down: "7 copies of 'Petal' stand near the ring but off its places: check the centre (3D cursor) and Count. Nothing done." **Use what's there** says the same as a note. **Make copies** is never turned down.
+- **The report names what was left out and why,** up to three, the nearest to the ring's places first. When nothing can be taken or made, Ring is turned down with those names and nothing is changed.
 
 **What Ring makes**
 
@@ -425,7 +430,7 @@ It replaces the links the chosen parts already have to one another, so a chain m
 
 It writes once for all of them, and a built move plays the new values at once. No Build. If any value hits the limit (Leads are whole numbers from -50 to 50, Delays from 0 to 0.99), the report says how many were held at the limit.
 
-**By Step (the default).** You give a **Start** and a **Step** (the dialog calls them "Start Lead" and "Lead step", or "Start Delay" and "Delay step"). Every part takes a place in the order, and gets Start + Step x its place, counting from 0. For Leads, below 0 each rider waits more than the one before it; above 0 each goes earlier. For Delays, each waits that much longer. It is a *step*, so adding a petal later gives it the next value and leaves the rest as they were: a Step of -10 gives -10, -20, -30 whether there are four petals or forty.
+**By Step (the default).** You give a **Start** and a **Step** (the dialog calls them "Start Lead" and "Lead step", or "Start Delay" and "Delay step"). Every part takes a place in the order, and gets Start + Step x its place, counting from 0. The dialog opens with a Step of -10 for Leads and 0.1 for Delays, made smaller when the last place would run past 40 of the 50 a Lead can be (0.9 of the 0.99 a Delay can be): a wave held at the limit stops dead there. Twelve spikes one way round get -3, both ways -6, and eight petals both ways keep -10. For Leads, **Around a ring** opens with **Both ways** on. A Step you type is kept as you typed it, and what it holds at the limit is still counted. For Leads, below 0 each rider waits more than the one before it; above 0 each goes earlier. For Delays, each waits that much longer. It is a *step*, so adding a petal later gives it the next value and leaves the rest as they were: a Step of -10 gives -10, -20, -30 whether there are four petals or forty.
 
 **By Range.** You give a **First** and a **Last**, and the parts between are spread evenly from one to the other, however many there are. Handy when it is the last that matters: the last petal opens at -40 and whatever is between is shared out. (A part added later changes the share of the others.)
 
@@ -690,6 +695,7 @@ Read the grey report box at the bottom of the panel first. It says what happened
 
 ## Version history
 
+- **0.18.1:** Ring takes up or re-frames an object only when that is provably safe. It leaves alone, and names, objects with keys or drivers of their own, linked from a library, or that cannot be selected; it re-frames only plain objects and puts back anything that would look different. Objects are matched as sets of points, so a Ctrl+M half of a flower and the teeth of a gear copied and never turned are taken. Fill the gaps never copies onto anything standing in a place, and is turned down when copies stand near the ring but off its places (a wrong 3D cursor or Count). Spread's default Step is sized to fit, and Both ways opens on for Leads around a ring.
 - **0.18.0:** Ring can use what is already modelled: a **Use** choice (Make copies, Use what's there, Fill the gaps). Spread works by **Step** (a start and a step for each place in the order) or **Range**. Ring's Lead step works the same way.
 - **0.17.1:** Make Chain follows the way joints are built, so a leaf folded in pleats is chained in the right order. Reports use the right singular and plural.
 - **0.17.0:** the four tools: **Spread**, **Make Chain**, **Curl** and **Ring**.
