@@ -1742,6 +1742,80 @@ class TestSpread(CopyThatCase):
         self.spread("LEAD", order="AROUND", first=0.0, last=30.0, both_ways=True)
         self.assertEqual(self.leads(), [10, 20, 30, 20, 10])
 
+    def test_leads_along_an_arc_of_a_ring(self):
+        # A half-open fan: the leader and riders every 30 degrees from 0 to
+        # 150 round the origin. The middle of an arc is not the average of its
+        # parts, which put the 150 degree blade before the 120 degree one.
+        leader = cube("Leader", (4.0, 0.0, 0.0))
+        self.lifted([leader])
+        for number in range(1, 6):
+            angle = math.radians(30.0 * number)
+            self.ride(leader, (4.0 * math.cos(angle), 4.0 * math.sin(angle), 0.0),
+                      "R{:d}".format(number))
+        select(leader)
+        self.spread("LEAD", order="AROUND", first=0.0, last=50.0)
+        self.assertEqual(self.leads(), [10, 20, 30, 40, 50])
+        self.spread("LEAD", order="AROUND", first=0.0, last=50.0, both_ways=True)
+        self.assertEqual(self.leads(), [10, 20, 30, 40, 50])
+
+    def test_leads_for_a_few_picked_out_of_a_ring(self):
+        leader = cube("Leader", (4.0, 0.0, 0.0))
+        self.lifted([leader])
+        riders = {}
+        for number in range(1, 8):
+            angle = math.radians(45.0 * number)
+            riders[number] = self.ride(leader, (4.0 * math.cos(angle),
+                                                4.0 * math.sin(angle), 0.0),
+                                       "R{:d}".format(number))
+        select(riders[1], riders[2], riders[3])
+        for both_ways in (True, False):
+            self.spread("LEAD", order="AROUND", first=0.0, last=30.0,
+                        both_ways=both_ways, only_selected=True)
+            self.assertEqual([self.move.parts[riders[n].name].lead for n in (1, 2, 3)],
+                             [10, 20, 30])
+
+    def test_a_spread_reaches_every_rider_whatever_was_left_selected(self):
+        # Two rings with a leader each, and the second ring's copies selected,
+        # as Ring leaves them: the first ring still gets its whole range.
+        one, two = cube("One", (0.0, 0.0, 0.0)), cube("Two", (20.0, 0.0, 0.0))
+        self.lifted([one, two])
+        second = []
+        for leader, centre in ((one, (0.0, 0.0, 0.0)), (two, (20.0, 0.0, 0.0))):
+            for number, where in enumerate(ring_places(centre, 4, 3.0)):
+                made = self.ride(leader, where, "{:s}{:d}".format(leader.name, number))
+                if leader is two:
+                    second.append(made)
+        select(two, *second)
+        self.assertEqual(self.spread("LEAD", order="AROUND", first=0.0, last=30.0),
+                         {"FINISHED"})
+        self.assertEqual(self.leads("One"), [0, 10, 20, 30])
+        self.assertEqual(self.leads("Two"), [0, 10, 20, 30])
+
+    def test_delays_reach_every_part_whatever_was_left_selected(self):
+        # A tentacle after a Curl has only its first joint selected.
+        objects = self.parts_at([(x + 0.5, 0.0, 0.0) for x in range(4)])
+        for number in range(1, 4):
+            self.move.parts[number].follows = "P{:d}".format(number - 1)
+        select(objects[0])
+        self.assertEqual(self.spread("DELAY", order="CHAIN", first=0.0, last=0.6),
+                         {"FINISHED"})
+        self.assertEqual(self.delays(), [0.0, 0.2, 0.4, 0.6])
+
+    def test_only_the_selected_says_so_when_none_is(self):
+        self.parts_at([(x, 0.0, 0.0) for x in range(3)])
+        select_none()
+        self.assertEqual(self.spread("DELAY", order="AXIS", axis="X", first=0.0,
+                                     last=0.5, only_selected=True), {"CANCELLED"})
+        self.assertIn("None of the parts", rig().rigmoves.report)
+        self.assertEqual(self.delays(), [0.0, 0.0, 0.0])
+
+    def test_the_report_counts_one_in_the_singular(self):
+        self.parts_at([(0.0, 0.0, 0.0)])
+        self.assertEqual(self.spread("DELAY", order="AXIS", axis="X", first=0.0,
+                                     last=0.5), {"FINISHED"})
+        self.assertIn("Delays of 1 part from", rig().rigmoves.report)
+        self.assertNotIn("1 parts", rig().rigmoves.report)
+
     def test_leads_run_one_way_round_without_both_ways(self):
         # Counter-clockwise looking down the ring's normal, which is up.
         self.ring_of_riders(count=4)
@@ -1842,7 +1916,7 @@ class TestSpread(CopyThatCase):
             if part.leader:
                 part.lead = 7
         select(leader, riders[1], riders[3])
-        self.spread("LEAD", order="AROUND", first=0.0, last=30.0)
+        self.spread("LEAD", order="AROUND", first=0.0, last=30.0, only_selected=True)
         self.assertEqual(self.leads(), [7, 0, 7, 30])
 
     def test_leads_are_held_to_what_a_lead_can_be(self):
@@ -1945,7 +2019,8 @@ class TestSpread(CopyThatCase):
         for part in self.move.parts:
             part.start = 0.05
         select(objects[3], objects[1])
-        self.spread("DELAY", order="AXIS", axis="X", first=0.2, last=0.4)
+        self.spread("DELAY", order="AXIS", axis="X", first=0.2, last=0.4,
+                    only_selected=True)
         self.assertEqual(self.delays(), [0.05, 0.2, 0.05, 0.4])
 
     def test_delays_are_held_to_what_a_delay_can_be(self):
@@ -2085,6 +2160,57 @@ class TestMakeChain(CopyThatCase):
                 self.move.parts["Seg{:d}".format(number - 1)]
             self.assertEqual(bones[part.bone_name].parent.name, ahead.bone_name)
 
+    def test_a_chain_made_from_the_wrong_end_can_be_made_again(self):
+        self.assertEqual(self.chain(first=4), {"FINISHED"})
+        self.assertEqual(self.follows(),
+                         {"Seg4": "", "Seg3": "Seg4", "Seg2": "Seg3", "Seg1": "Seg2"})
+        # The first press left Seg1 following Seg2; from the other end that
+        # would close a loop with the first link. The old links are replaced.
+        self.assertEqual(self.chain(first=1), {"FINISHED"})
+        self.assertEqual(self.follows(),
+                         {"Seg1": "", "Seg2": "Seg1", "Seg3": "Seg2", "Seg4": "Seg3"})
+        said = rig().rigmoves.report
+        self.assertIn("Chain: Seg1 > Seg2 > Seg3 > Seg4", said)
+        self.assertIn("Replaced: ", said)
+        self.assertIn("Seg1 followed Seg2", said)
+        self.assertEqual(self.segments[2].parent, self.segments[1])
+
+    def test_a_built_chain_made_again_waits_for_one_build(self):
+        bpy.ops.rigmoves.build()
+        self.chain(first=4)
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.chain(first=1), {"FINISHED"})
+        self.assertTrue(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        bpy.ops.rigmoves.build()
+        self.assertFalse(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        bones = rig().data.bones
+        for number in (2, 3, 4):
+            part = self.move.parts["Seg{:d}".format(number)]
+            ahead = self.move.parts["Seg{:d}".format(number - 1)]
+            self.assertEqual(bones[part.bone_name].parent.name, ahead.bone_name)
+
+    def test_a_chain_made_again_over_one_with_a_link_outside_keeps_that_link(self):
+        # Seg1 follows a palm that is not among the chosen: that stays.
+        palm = cube("Palm", (-2.0, 0.0, 0.0))
+        select(palm, self.segments[1])
+        bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name)
+        self.move.parts["Seg1"].follows = "Palm"
+        self.assertEqual(self.chain(first=1), {"FINISHED"})
+        self.assertEqual(self.follows()["Seg1"], "Palm")
+        self.assertEqual(self.follows()["Seg2"], "Seg1")
+
+    def test_a_chain_refused_at_its_first_link_puts_the_old_links_back(self):
+        self.chain(first=4)
+        before = self.follows()
+        rider = cube("Rider", (0.7, 0.0, 0.0))
+        select(self.segments[3], rider)
+        bpy.ops.rigmoves.ride_along(index=0, leader="Seg4", rig_name=rig().name)
+        select(self.segments[1], self.segments[2], self.segments[3], self.segments[4],
+               rider)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"CANCELLED"})
+        self.assertIn("riders copy their leader instead", rig().rigmoves.report)
+        self.assertEqual({n: f for n, f in self.follows().items() if n != "Rider"}, before)
+
     def test_a_part_that_leads_riders_may_follow(self):
         # It used to be turned down: its riders would be left behind. They
         # hang from what it hangs from now, so it is chained like any other.
@@ -2192,6 +2318,14 @@ class TestCurl(CopyThatCase):
     def check_places(self, places):
         for segment, place in zip(self.segments, places):
             expected = [place @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def check_places_of(self, numbers, places):
+        """Only these segments, by their place in the list - the others have
+        been deleted, and what is left of them is not an object any more."""
+        for number in numbers:
+            segment = bpy.data.objects["Seg{:d}".format(number + 1)]
+            expected = [places[number] @ v.co for v in segment.data.vertices]
             self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
 
     def check_joints(self):
@@ -2385,6 +2519,50 @@ class TestCurl(CopyThatCase):
         self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"CANCELLED"})
         self.assertIn("rides along", rig().rigmoves.report)
 
+    def lose(self, number):
+        """The object of this segment deleted, as in the viewport."""
+        bpy.data.objects.remove(self.segments[number], do_unlink=True)
+        bpy.context.view_layer.update()
+
+    def test_a_lost_tip_is_left_out_and_the_rest_bend(self):
+        self.lose(4)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+        self.check_places_of(range(4), self.bent_by((20.0,) * 5))
+        self.assertIn("1 left out", rig().rigmoves.report)
+        self.assertIn("3 part(s) below", rig().rigmoves.report)
+
+    def test_a_lost_part_with_parts_below_it_is_a_refusal_and_nothing_moves(self):
+        self.lose(2)
+        self.pose_root(20.0)
+        stood = {n: bpy.data.objects[n].matrix_world.copy() for n in ("Seg2", "Seg4", "Seg5")}
+        self.assertEqual(self.curl(), {"CANCELLED"})
+        self.assertIn("'Seg3' has lost its object", rig().rigmoves.report)
+        for name, place in stood.items():
+            self.assertTrue(rigmoves.same_matrix(bpy.data.objects[name].matrix_world,
+                                                 place, 1e-6), name)
+
+    def test_a_chain_lost_below_the_first_has_nothing_to_bend(self):
+        for number in (1, 2, 3, 4):
+            self.lose(number)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"CANCELLED"})
+        self.assertIn("Nothing is left to bend", rig().rigmoves.report)
+
+    def test_a_curl_from_a_joint_whose_parent_is_lost_bends_from_where_it_is(self):
+        self.lose(0)
+        self.segments[1].matrix_world = turn_about(self.KNUCKLES[1], "Y", 20.0) @ self.homes[1]
+        bpy.context.view_layer.update()
+        select(self.segments[1])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"FINISHED"})
+        # Nothing carries the second any more: its own bend and the ones below.
+        places = self.bent_by((0.0,) * 5)
+        carry = Matrix.Identity(4)
+        for number in range(1, 5):
+            carry = carry @ turn_about(self.KNUCKLES[number], "Y", 20.0)
+            places[number] = carry @ self.homes[number]
+        self.check_places_of(range(1, 5), places)
+
     def test_a_curl_can_be_undone(self):
         self.pose_root(20.0)
         select(self.segments[0])
@@ -2548,6 +2726,8 @@ class TestRing(CopyThatCase):
 
     def ring(self, **kwargs):
         select(self.blade)
+        # About the tilted cursor's own Z, as this fixture is built for.
+        kwargs.setdefault("axis", "CURSOR_Z")
         return bpy.ops.rigmoves.ring(index=0, **kwargs)
 
     def copies(self):
@@ -2702,6 +2882,94 @@ class TestRing(CopyThatCase):
         self.assertIn("rides along with 'Blade'", rig().rigmoves.report)
         self.assertEqual(self.stock(), stock)
 
+    def test_the_ring_is_flat_by_default_even_with_the_cursor_tilted(self):
+        # Shift+right-click turns the cursor to face the view: the default is
+        # the world's up, and the cursor's own Z is a choice.
+        select(self.blade)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=6), {"FINISHED"})
+        for copy in self.copies():
+            self.assertAlmostEqual(copy.matrix_world.translation.z,
+                                   self.home.translation.z, places=4)
+
+    def test_a_second_ring_adds_only_the_places_that_are_missing(self):
+        self.assertEqual(self.ring(count=4), {"FINISHED"})
+        self.assertEqual(self.ring(count=8), {"FINISHED"})
+        riders = [p.name for p in self.move.parts if p.leader]
+        self.assertEqual(len(riders), 7)
+        places = [bpy.data.objects[n].matrix_world.translation.copy() for n in riders]
+        places.append(self.home.translation.copy())
+        for number, here in enumerate(places):
+            for there in places[number + 1:]:
+                self.assertGreater((here - there).length, 0.1)
+        said = rig().rigmoves.report
+        self.assertIn("4 copies of 'Blade'", said)
+        self.assertIn("3 place(s) already held a copy", said)
+
+    def test_the_same_ring_again_is_refused_and_leaves_nothing(self):
+        self.ring(count=4)
+        stock = self.stock()
+        self.assertEqual(self.ring(count=4), {"CANCELLED"})
+        self.assertIn("nothing to add", rig().rigmoves.report)
+        self.assertEqual(self.stock(), stock)
+
+    def test_a_second_ring_leaves_the_leads_of_the_first_alone(self):
+        self.ring(count=4, lead_first=0, lead_last=-30)
+        self.move.parts["Blade 2"].lead = 7
+        self.assertEqual(self.ring(count=8, lead_first=0, lead_last=-40), {"FINISHED"})
+        leads = {p.name: p.lead for p in self.move.parts if p.leader}
+        self.assertEqual((leads["Blade 2"], leads["Blade 3"], leads["Blade 4"]), (7, -30, -15))
+        new = sorted(v for n, v in leads.items() if n not in ("Blade 2", "Blade 3", "Blade 4"))
+        self.assertEqual(new, [-40, -40, -13, -13])
+
+    def test_a_ring_made_again_after_the_copies_were_deleted_is_all_new(self):
+        # The parts of deleted copies stay in the move; a new copy that took
+        # one's name was never bound, and stood at the old place for good.
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.ring(count=4), {"FINISHED"})
+        for number in (2, 3, 4):
+            bpy.data.objects.remove(bpy.data.objects["Blade {:d}".format(number)],
+                                    do_unlink=True)
+        self.assertEqual(self.ring(count=6), {"FINISHED"})
+        news = {"Blade {:d}".format(n): n - 4 for n in range(5, 10)}
+        self.assertEqual({p.name for p in self.move.parts if p.leader and p.name in news},
+                         set(news))
+        drive(self.move, 1.0)
+        leader_points = world_points(self.blade)
+        for name, number in news.items():
+            copy = bpy.data.objects[name]
+            self.assertEqual(len([m for m in copy.modifiers if m.type == "ARMATURE"]), 1, name)
+            turn = self.turned(number, 6)
+            self.assertLess(max((a - turn @ b).length
+                                for a, b in zip(world_points(copy), leader_points)),
+                            TOLERANCE, name)
+
+    def hide_the_last_copy_from_ride_along(self, **kwargs):
+        was = rigmoves.newcomers
+        rigmoves.newcomers = lambda context, rig_: was(context, rig_)[:-1]
+        try:
+            return self.ring(**kwargs)
+        finally:
+            rigmoves.newcomers = was
+
+    def test_a_copy_that_is_not_taken_up_takes_the_whole_ring_back(self):
+        stock = self.stock()
+        self.assertEqual(self.hide_the_last_copy_from_ride_along(count=4), {"CANCELLED"})
+        self.assertIn("none were kept", rig().rigmoves.report)
+        self.assertEqual(self.stock(), stock)
+
+    def test_the_same_on_a_built_move_leaves_the_rig_as_it_was(self):
+        bpy.ops.rigmoves.build()
+        stock = self.stock()
+        bones = sorted(b.name for b in rig().data.bones)
+        constraints = sum(len(pb.constraints) for pb in rig().pose.bones)
+        self.assertEqual(self.hide_the_last_copy_from_ride_along(count=4), {"CANCELLED"})
+        self.assertEqual(self.stock(), stock)
+        self.assertEqual(sorted(b.name for b in rig().data.bones), bones)
+        self.assertEqual(sum(len(pb.constraints) for pb in rig().pose.bones), constraints)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.blade, rest_points(self.blade)), 5.0)
+        self.check_ring_at(50.0, count=1)
+
     def test_a_ring_can_be_undone(self):
         select(self.blade)
         stock = self.stock()
@@ -2730,6 +2998,118 @@ class TestRing(CopyThatCase):
         self.assertEqual(found, [(("body:expanded", "row"), "Ring…")])
 
 
+class TestRingAroundAFarHub(CopyThatCase):
+    """Blades pivoting on a hub a long way from the world's origin: the pivots
+    carried over to each blade are one point, a hair apart from float rounding,
+    which grows with the distance."""
+
+    def test_leads_come_out_even_whatever_the_distance_from_the_origin(self):
+        for hub, rotation in (((60.0, 25.0, 0.0), (0.0, 0.0, 0.0)),
+                              ((37.3, -21.7, 12.9), (0.5, -0.3, 0.2))):
+            with self.subTest(hub=hub):
+                bpy.ops.wm.read_factory_settings(use_empty=True)
+                scene = bpy.context.scene
+                hub = Vector(hub)
+                scene.cursor.location = hub
+                scene.cursor.rotation_euler = rotation
+                bpy.context.view_layer.update()
+                axis = (scene.cursor.matrix.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+                side = axis.orthogonal().normalized()
+                blade = cube("Blade", hub + side * 3.0)
+                blade.scale = (0.3, 0.3, 1.0)
+                bpy.context.view_layer.update()
+                select(blade)
+                bpy.ops.rigmoves.new_move()
+                blade.matrix_world = (turn_about(hub + side, axis.cross(side), 40.0)
+                                      @ blade.matrix_world)
+                bpy.context.view_layer.update()
+                bpy.ops.rigmoves.record(index=0, which="AFTER")
+                select(blade)
+                bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+                bpy.ops.rigmoves.build()
+                select(blade)
+                self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=12, axis="CURSOR_Z",
+                                                       lead_first=0, lead_last=30),
+                                 {"FINISHED"})
+                leads = {p.name: p.lead for p in rig().rigmoves.moves[0].parts if p.leader}
+                self.assertEqual([leads["Blade {:d}".format(n)] for n in range(2, 13)],
+                                 [5, 10, 15, 20, 25, 30, 25, 20, 15, 10, 5])
+
+
+class TestRingABladeOnAHub(CopyThatCase):
+    """A fan made the usual way: the blade follows the hub, which has a spin of
+    its own, and the blade a flap of its own. The blade is ringed and the hub
+    never is; each copy hangs from what the blade hangs from."""
+
+    def setUp(self):
+        super().setUp()
+        scene = bpy.context.scene
+        self.centre = Vector((0.0, 0.0, 1.0))
+        self.hub = cube("Hub", self.centre)
+        self.hub.scale = (0.5, 0.5, 0.1)
+        self.blade = cube("Blade", (1.5, 0.0, 1.0))
+        self.blade.scale = (1.5, 0.3, 0.04)
+        bpy.context.view_layer.update()
+        self.hub_home = self.hub.matrix_world.copy()
+        self.blade_home = self.blade.matrix_world.copy()
+        self.hinge = Vector((0.75, 0.0, 1.0))
+        select(self.hub, self.blade)
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        self.move.parts["Blade"].follows = "Hub"
+        scene.cursor.location = self.hinge
+        select(self.blade)
+        bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        scene.cursor.location = self.centre
+        # The hub spins 72 degrees and the blade, on top of being carried by
+        # it, flaps 50 about its hinge.
+        self.hub.matrix_world = self.spin(72.0) @ self.hub_home
+        bpy.context.view_layer.update()
+        self.blade.matrix_world = self.spin(72.0) @ self.flap(50.0) @ self.blade_home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+
+    def spin(self, degrees):
+        return turn_about(self.centre, "Z", degrees)
+
+    def flap(self, degrees):
+        return turn_about(self.hinge, "Y", degrees)
+
+    def ring(self):
+        select(self.blade)
+        return bpy.ops.rigmoves.ring(index=0, count=5)
+
+    def test_the_blade_is_ringed_the_hub_is_not_and_the_copies_hang_from_the_hub(self):
+        self.assertEqual(self.ring(), {"FINISHED"})
+        self.assertIsNone(bpy.data.objects.get("Hub 2"))
+        riders = [p for p in self.move.parts if p.leader]
+        self.assertEqual(len(riders), 4)
+        self.assertEqual({p.leader for p in riders}, {"Blade"})
+        bones = rig().data.bones
+        for rider in riders:
+            self.assertEqual(bones[rider.bone_name].parent.name,
+                             self.move.parts["Hub"].bone_name, rider.name)
+        self.assertEqual(self.move.parts["Blade"].follows, "Hub")
+
+    def test_every_blade_is_carried_by_the_hub_and_flaps_from_its_own_place(self):
+        self.assertEqual(self.ring(), {"FINISHED"})
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            carried = (self.spin(eased(72.0, share)) @ self.flap(eased(50.0, share))
+                       @ self.blade_home)
+            for number in range(5):
+                blade = self.blade if not number else bpy.data.objects[
+                    "Blade {:d}".format(number + 1)]
+                turn = turn_about(self.centre, "Z", 72.0 * number)
+                # Round the hub, carried by it: the same as the recorded blade
+                # turned to where it stands - not a flap alone.
+                expected = [turn @ carried @ self.blade_home.inverted() @ self.blade_home
+                            @ v.co for v in blade.data.vertices]
+                self.assertLess(drift(blade, expected), TOLERANCE,
+                                "{:s} at {:g}".format(blade.name, share))
+
+
 class TestLinkedParts(CopyThatCase):
     """Two parts that are linked duplicates share one mesh, and so its groups."""
 
@@ -2753,6 +3133,80 @@ class TestLinkedParts(CopyThatCase):
         self.assertLess(drift(one, after["One"]), TOLERANCE)
         self.assertLess(drift(two, after["Two"]), TOLERANCE)
         self.assertIsNot(one.data, two.data)
+
+    def share_as_0_15_left_them(self, objects, names):
+        """The state 0.15 left Alt+D copies in once they were bound: one mesh,
+        and on it a full-weight group for the bone of every one of them."""
+        for obj in objects[1:]:
+            obj.data = objects[0].data
+        for name in names:
+            group = objects[0].vertex_groups.get(name) or objects[0].vertex_groups.new(name=name)
+            group.add(range(len(objects[0].data.vertices)), 1.0, "REPLACE")
+
+    def test_a_build_gives_linked_duplicates_bound_long_ago_meshes_of_their_own(self):
+        one, two = cube("One", (0.0, 0.0, 0.0)), cube("Two", (5.0, 0.0, 0.0))
+        select(one, two)
+        bpy.ops.rigmoves.new_move()
+        one.location.z += 1.0
+        two.location.y += 2.0
+        bpy.context.view_layer.update()
+        after = {o.name: rest_points(o) for o in (one, two)}
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        move = rig().rigmoves.moves[0]
+        self.share_as_0_15_left_them([one, two], ["One", "Two"])
+        # As the file plays in 0.15: each pulled by both bones.
+        drive(move, 1.0)
+        self.assertGreater(drift(one, after["One"]), 0.1)
+        bpy.ops.rigmoves.build()
+        drive(move, 1.0)
+        self.assertLess(drift(one, after["One"]), TOLERANCE)
+        self.assertLess(drift(two, after["Two"]), TOLERANCE)
+        self.assertIsNot(one.data, two.data)
+        self.assertEqual([g.name for g in one.vertex_groups], ["One"])
+        self.assertEqual([g.name for g in two.vertex_groups], ["Two"])
+
+    def test_a_build_heals_a_flower_of_linked_petals_bound_long_ago(self):
+        # Each petal faces its own way, so each bone moves it differently: with
+        # every bone pulling every petal, none of them goes where it should.
+        petal = cube("Petal", (0.0, 0.0, 0.0))
+        select(petal)
+        bpy.ops.rigmoves.new_move()
+        petal.location += Vector((1.0, 0.0, 1.0))
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        riders = []
+        for number in range(1, 4):
+            rider = cube("R{:d}".format(number), (3.0 * number, 0.0, 0.0))
+            rider.rotation_euler.z = math.radians(90.0 * number)
+            bpy.context.view_layer.update()
+            select(petal, rider)
+            bpy.ops.rigmoves.ride_along(index=0, leader="Petal", rig_name=rig().name)
+            riders.append(rider)
+        bpy.ops.rigmoves.build()
+        move = rig().rigmoves.moves[0]
+        petals = [petal] + riders
+        self.share_as_0_15_left_them(petals, [o.name for o in petals])
+        rest = {o.name: rest_points(o) for o in petals}
+
+        def moved(obj, turn):
+            by = Matrix.Rotation(math.radians(turn), 3, "Z") @ Vector((1.0, 0.0, 1.0))
+            return [p + by for p in rest[obj.name]]
+
+        turns = {o.name: 90.0 * n for n, o in enumerate(petals)}
+        drive(move, 1.0)
+        self.assertGreater(max(drift(o, moved(o, turns[o.name])) for o in petals), 0.1)
+        bpy.ops.rigmoves.build()
+        drive(move, 1.0)
+        for obj in petals:
+            self.assertLess(drift(obj, moved(obj, turns[obj.name])), TOLERANCE, obj.name)
+            self.assertEqual([g.name for g in obj.vertex_groups], [obj.name])
+        self.assertEqual(len({o.data.name for o in petals}), 4)
+
+
+def select_none():
+    for obj in bpy.context.view_layer.objects:
+        obj.select_set(False)
 
 
 def eased(degrees, progress):
@@ -3289,6 +3743,7 @@ class TestRingAFinger(CopyThatCase):
 
     def ring(self, active=0, **kwargs):
         select(self.segments[active])
+        kwargs.setdefault("axis", "CURSOR_Z")
         return bpy.ops.rigmoves.ring(index=0, **kwargs)
 
     def joint(self, number, finger):
@@ -3349,12 +3804,39 @@ class TestRingAFinger(CopyThatCase):
         drive(self.move, 0.0)
         self.check_fingers((0.0, 0.0, 0.0))
 
-    def test_ringing_a_joint_in_the_middle_rings_the_whole_finger(self):
+    def test_ringing_a_joint_in_the_middle_rings_it_and_the_ones_below_it(self):
+        # The second segment and the third, not the first: the copies hang from
+        # the first, as the second does, and are carried by it.
         self.assertEqual(self.ring(active=1, count=5), {"FINISHED"})
-        self.assertEqual(len([p for p in self.move.parts if p.leader]), 12)
+        riders = [p.name for p in self.move.parts if p.leader]
+        self.assertEqual(len(riders), 8)
+        self.assertFalse([n for n in riders if n.startswith("Seg1")])
+        self.assertIsNone(bpy.data.objects.get("Seg1 2"))
+        for finger in range(1, 5):
+            self.assertEqual(self.move.parts["Seg3 {:d}".format(finger + 1)].rides_on,
+                             "Seg2 {:d}".format(finger + 1))
+            self.assertEqual(self.move.parts["Seg2 {:d}".format(finger + 1)].rides_on, "")
         bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        for finger in range(1, 5):
+            for number in (1, 2):
+                obj = self.joint(number, finger)
+                expected = [self.turned(finger) @ self.homes[number] @ v.co
+                            for v in obj.data.vertices]
+                self.assertLess(drift(obj, expected), TOLERANCE, obj.name)
+        # Closed, each copy is carried by the first segment's 30 degrees and
+        # bends its own joints from where it stands.
         drive(self.move, 1.0)
-        self.check_fingers((30.0, 30.0, 30.0))
+        carried = turn_about(self.KNUCKLES[0], "Y", 30.0)
+        for finger in range(1, 5):
+            own = turn_about(self.KNUCKLES[1], "Y", 30.0)
+            places = [carried @ self.turned(finger) @ own @ self.homes[1],
+                      carried @ self.turned(finger) @ own
+                      @ turn_about(self.KNUCKLES[2], "Y", 30.0) @ self.homes[2]]
+            for number, place in zip((1, 2), places):
+                obj = self.joint(number, finger)
+                expected = [place @ v.co for v in obj.data.vertices]
+                self.assertLess(drift(obj, expected), TOLERANCE, obj.name)
 
     def test_leads_go_to_whole_fingers_by_their_first_joint(self):
         self.assertEqual(self.ring(count=5, lead_first=0, lead_last=-40), {"FINISHED"})
@@ -3376,24 +3858,34 @@ class TestRingAFinger(CopyThatCase):
             # 1.8 long that is a hair under a thousandth of a unit at the tip.
             self.check_fingers(angles, tolerance=5e-4)
 
-    def test_copies_too_close_to_tell_apart_leave_nothing_behind(self):
+    def test_a_finger_with_a_joint_not_taken_up_takes_the_whole_ring_back(self):
         stock = (sorted(o.name for o in bpy.data.objects),
                  sorted(m.name for m in bpy.data.meshes), len(self.move.parts))
-        was = rigmoves.match_copies
-        rigmoves.match_copies = lambda chain, objects: ([], list(objects))
+        was = rigmoves.newcomers
+        rigmoves.newcomers = lambda context, rig_: was(context, rig_)[:-1]
         try:
             self.assertEqual(self.ring(count=5), {"CANCELLED"})
         finally:
-            rigmoves.match_copies = was
-        self.assertIn("too close together", rig().rigmoves.report)
+            rigmoves.newcomers = was
+        self.assertIn("none were kept", rig().rigmoves.report)
         self.assertEqual((sorted(o.name for o in bpy.data.objects),
                           sorted(m.name for m in bpy.data.meshes),
                           len(rig().rigmoves.moves[0].parts)), stock)
 
+    def test_the_copies_of_a_joint_and_the_ones_below_it_are_not_taken_for_the_first_two(self):
+        # Segments alike: a copy of the second and third looks just like a copy
+        # of the first and second, and is told which it is.
+        self.assertEqual(self.ring(active=1, count=3), {"FINISHED"})
+        for finger in (2, 3):
+            self.assertEqual(self.move.parts["Seg2 {:d}".format(finger)].leader, "Seg2")
+            self.assertEqual(self.move.parts["Seg3 {:d}".format(finger)].leader, "Seg3")
+
     def test_a_part_that_follows_may_be_ringed_and_nothing_is_refused_for_it(self):
+        # The last segment has nothing below it: it is ringed alone, and the
+        # two copies ride along with it, hanging from the second segment.
         select(self.segments[2])
         self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=3), {"FINISHED"})
-        self.assertEqual(len([p for p in self.move.parts if p.leader]), 6)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 2)
 
     # -- the other tools, with copied fingers about --------------------------
 
@@ -3414,7 +3906,8 @@ class TestRingAFinger(CopyThatCase):
         self.ring(count=5)
         select(self.joint(1, 2))
         self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", order="RANDOM",
-                                                 first=-10.0, last=-10.0), {"FINISHED"})
+                                                 first=-10.0, last=-10.0,
+                                                 only_selected=True), {"FINISHED"})
         leads = {p.name: p.lead for p in self.move.parts if p.leader}
         self.assertEqual({n: v for n, v in leads.items() if v}, {"Seg1 3": -10})
 

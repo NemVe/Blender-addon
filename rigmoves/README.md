@@ -188,10 +188,15 @@ the Path**), set the **Count**, **OK**.
 - **Count** includes the original: 6 is the part and five copies.
 - The copies stand at the part's **Before** - not where it is standing now,
   so it may be showing its After - turned round the centre a share of a full
-  turn each. **Round** is the 3D cursor or the world origin; **About** is the
-  cursor's own Z (tip the cursor and the ring tips with it) or the world's X,
-  Y or Z.
-- They are named "Petal 2" to "Petal 6" and put in the same collections.
+  turn each. **Round** is the 3D cursor or the world origin. **About** is the
+  world's Z by default - a ring lying flat - or the world's X or Y, or the **3D
+  Cursor's Z** for a ring that is tipped. Mind that last one: placing the cursor
+  with Shift+right-click turns it to face the view, and a ring made about its Z
+  stands facing the view too.
+- They are named "Petal 2" and on, the lowest numbers free - free among the
+  objects and among the parts of every rig, so a copy that takes the name of one
+  deleted from the move is never mistaken for it - and put in the same
+  collections.
 - **Linked copies** (the default) share the original's mesh, so editing one in
   edit mode edits them all. They share it until Build: Blender keeps a mesh's
   vertex groups with the mesh, and each part is bound by a group of its own,
@@ -202,23 +207,30 @@ the Path**), set the **Count**, **OK**.
   its own transform.
 - The copies then ride along with the part, exactly as if you had pressed Ride
   Along on them. On a built move that is a Build.
-- A part in a chain - a finger's first joint, or any joint of it - is ringed
-  whole: Ride Along takes copies of a whole chain joint for joint (see Copies
-  of a whole finger), so a ring of a finger is a ring of whole fingers, each
-  curling from where it stands. The copies are named per joint, "Seg1 2",
-  "Seg2 2", "Seg3 2", and so on. Each copy is matched to the finger before
-  anything is made part of the move: if copies stand too close together to be
-  told apart, the ring is turned down and nothing is left behind.
+- The part is ringed with the parts that follow it, below it - never with the
+  ones it follows. Ring a finger's first joint and every finger comes whole,
+  each curling from where it stands (see Copies of a whole finger); the copies
+  are named per joint, "Seg1 2", "Seg2 2", "Seg3 2". Ring the blade of a fan that
+  follows its hub, and the hub is not copied: every copy hangs from the hub as
+  the blade does, so blades ringed round a spinning hub spin with it, and each
+  flaps from its own place. Ring a joint in the middle of a finger and its copies
+  hang from the joint above, which they are carried by.
+- A second Ring over the first - or a bigger one - adds only the places that are
+  missing: a place that already holds a copy of the part is skipped, and the
+  report says how many. Ring 4 then Ring 8 adds the 4 missing. A ring with
+  nothing to add is turned down.
 - **First Lead** and **Last Lead**: set different, they are spread out from the
   original both ways round the ring (see Spread, Around a ring, both ways), so
-  the blades open one after another, the two sides alike. A copied finger has
+  the blades open one after another, the two sides alike. Only the copies made
+  now are given a Lead; those of an earlier ring keep theirs. A copied finger has
   one Lead, its first joint's, so the fingers go one after another with their
   joints in step. Leave them equal and every copy moves with the original.
 
 It asks before it makes anything: a part that is not in the move, a rider, a
 part with no Before, or a part dragged and not recorded on a built move are
-each turned down in words, and nothing is left behind. A part that follows
-another is not turned down - it is ringed with the chain it hangs in.
+each turned down in words, and nothing is left behind. So is a ring that cannot
+be finished: if a copy does not become a rider of the part it was made from, none
+are kept. A part that follows another is not turned down.
 
 ### Spread: Leads and Delays in one go
 
@@ -250,8 +262,10 @@ Delays held to 0 to 0.99; if any were held, the report says how many.
   riders have no Follows chain of their own.
 - Delays belong to the parts in the **Timing** list. The start is the active
   part, or the first one.
-- If some of them are selected, only those are spread. Select nothing among
-  them and it is all of them.
+- **All** of them, by default, whatever is selected: Ring leaves its own copies
+  selected and Curl its first joint, and a spread that went only by that left the
+  rest of a flower or a tentacle as it was. Tick **Only the selected** to spread
+  just the parts selected now.
 - Parts are placed by their pivot at Before - a rider's is its leader's,
   carried over to where it stands. Where every pivot is the same point, as with
   the blades of a fan all turning about its hub, the middle of each part is
@@ -342,7 +356,13 @@ that is not in the chain yet; each is set to follow the one before. It goes
 through the same choice as the dropdowns, so a rider, a curved part and a loop
 are turned down with their reason, and the chain stops there, keeping the
 links already made. A part that leads riders may be chained: its riders hang
-from what it hangs from. The report names the order: "Chain: Seg1 > Seg2 >
+from what it hangs from.
+
+It replaces the links the chosen parts already have to one another, so a chain
+made from the wrong end is made again from the right one, and the report says
+which old links it replaced. A part the chain starts from may follow something
+that is not chosen - a finger on a palm - and keeps that. A chain refused at
+its first link changes nothing. The report names the order: "Chain: Seg1 > Seg2 >
 Seg3 > Seg4". On a loose move the objects hang from one another at once; on a
 built one the red note waits for Build, like any **Follows** change.
 
@@ -381,7 +401,9 @@ It also refuses when nothing follows the part, when the part rides along, and
 when the part has not been turned.
 
 Curl puts every part below the root where its bend says, replacing whatever
-bend it had. Copies of the finger ride along with it once a Build has copied
+bend it had. A part whose object has been deleted is left out if it is at the
+end of the chain, and the report says so; if parts hang from it, Curl is turned
+down, saying which, and nothing is moved. Copies of the finger ride along with it once a Build has copied
 the new path onto them, so after **Record After** press **Build**; the report
 says so when there are copies.
 
@@ -942,6 +964,45 @@ and one lifted 1 m:
   is no longer in its move". Everything is worked out before anything is added
   now.
 
+- **Leads came out scrambled for blades turning about a far-off hub.** Blades whose
+  pivots are all one point - the hub - are ordered by where they stand instead,
+  but "one point" was an absolute 0.00001: far from the world's origin the pivots
+  carried over to each blade differ by float rounding that is larger than that, and
+  the rounding was put in order. It is measured against how far apart the blades
+  stand now.
+- **Spread round an arc, or a few picked out of a ring, was lopsided.** The middle
+  of the ring was the average of the parts, which is the middle of a full ring only:
+  the blades of a half-open fan or a wing came out in the wrong order, and the
+  third of three picked from a ring before the second. The ring is a circle fitted
+  to the parts now - the hub the Leads are measured from left out of it.
+- **A ring made again after its copies were deleted never bound the new copies.**
+  The deleted copies' parts stay in the move, and a new copy that took the name of
+  one was taken for it: not bound, put back where the old one stood, and the report
+  said it rode along. Copies are numbered past every name in use, in the objects and
+  in the parts of every rig, and a ring that cannot be finished takes itself back.
+- **Make Chain could not be done again from the other end.** The old links, which
+  closed a loop with the new ones, were the reason it was refused. It replaces the
+  links among the chosen parts, and says which.
+- **Curl failed with a Python error when an object of the chain was gone.** A lost
+  tip is left out now, and a lost part with parts hanging from it is turned down
+  with its name.
+- **A Spread after a Ring or a Curl reached only what that tool had left
+  selected.** The first ring of a flower was never given its Leads, and a tentacle
+  its Delays, and the report said it had worked. A spread takes every rider or part
+  unless **Only the selected** is ticked.
+- **Ring tipped toward the camera after the usual Shift+right-click.** That puts the
+  cursor on the spot and turns it to face the view, and a ring about the cursor's Z
+  stood facing the view too. About the world's Z is the default now.
+- **A fan blade that follows its hub could not be ringed**, and the way out the
+  refusal gave stacked hubs on the centre. A part is ringed with the parts below it,
+  never above, and each copy hangs from what the part hangs from.
+- **A second Ring stacked copies on top of the first's.** A place that already
+  holds a copy is skipped; the report says how many, and the Leads of the earlier
+  copies are left alone.
+- **Files bound before 0.16 with Alt+D copies stayed broken.** Already healed by every
+  Build in this version - the check for parts moved by another part's bone as well
+  covers copies that share one mesh - and now tested from the state 0.15 left.
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -998,8 +1059,6 @@ and one lifted 1 m:
   panel, not on the button.
 - Ring's linked copies share one mesh only until Build, which gives every bound
   part a mesh of its own; edit-mode changes after that are one part's alone.
-- Ring of a chain finds its copies by where they stand. Copies that overlap
-  too much to be told apart are turned down; make the ring wider.
 - Spread's ring takes the best-fit plane of the parts' spots. Parts that are not
   roughly on one ring - a scatter - get an order that is the plane's, and is
   seldom what was meant: use By distance or Along an axis instead.

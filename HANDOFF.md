@@ -45,16 +45,16 @@ promises to the user.
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 7,000 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 7,200 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 188 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 215 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
 
 **Commands:**
 
-    .venv/bin/python tests/test_rigmoves.py      # all tests, about 14 s
+    .venv/bin/python tests/test_rigmoves.py      # all tests, about 16 s
     .venv/bin/python tests/test_rigmoves.py TestFollowers   # one class
     ruff check rigmoves tests tools
     python tools/build_zip.py
@@ -99,7 +99,7 @@ Features, in the order the user asked for them:
 | 0.17.0 | **Spread**: Leads or Delays filled in one go, by ring, distance, axis, chain or at random | `spread_shares`, `spread_values`, `ring_angles`, `ring_normal`, `part_spot`/`rider_spot`, `RIGMOVES_OT_spread` |
 | 0.17.0 | **Make Chain**: Follows down a line, nearest neighbour from the active part; says which copied joints stop riding joint for joint | `chain_order`, `RIGMOVES_OT_make_chain` |
 | 0.17.0 | **Curl**: the first joint's bend repeated down every follower, each joint `factor` times the one before | `bend_of`, `quaternion_power`, `shows_a_pose`, `RIGMOVES_OT_curl` |
-| 0.17.0 | **Ring**: one part - or a whole chain, through 0.16's Ride Along - made into a ring of riders | `copy_for_ring`, `RIGMOVES_OT_ring` |
+| 0.17.0 | **Ring**: a part and the parts below it made into a ring of riders, through 0.16's Ride Along | `copy_for_ring`, `take_riders_out`, `RIGMOVES_OT_ring` |
 | 0.17.0 | Merge of the two lines of work: Spread and Ring work on 0.16's copy roots and chains; one binding fix (`own_binding`) and one leader read-back fix | see "The four tools of 0.17" |
 
 ## The model underneath (read before changing any maths)
@@ -219,8 +219,10 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
 `REGISTER, UNDO`.
 
 - **Spread.** `spread_groups` says what is acted on: riders per leader for
-  Leads, the Timing list for Delays, and only the selected ones among them
-  (`held`) if some are selected. `spread_shares` gives each part a share 0 to
+  Leads, the Timing list for Delays - all of them by default, whatever the last
+  tool left selected, and the selected ones (`held`) only with `only_selected`.
+  Ring leaves its copies selected and Curl its first joint, so going by the
+  selection reached part of a flower or a tentacle and said it had worked. `spread_shares` gives each part a share 0 to
   1, `spread_values` writes First to Last and holds it to the property limits.
   Writes set `WRITING["many"]` so `_timing_changed` skips, and the caller runs
   `refresh_drivers` once; a built move plays the new values with no Build.
@@ -232,15 +234,23 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     the rider's own origin put the leader's hinge on a different ring from the
     riders and the Leads came out lopsided.
   - If every pivot is the same point (a fan's blades about the hub), `spots_of`
-    uses each part's middle.
+    uses each part's middle. "The same point" is relative to how far apart the
+    middles are (float rounding grows with the distance from the origin; a fixed
+    1e-5 sorted the noise for hubs 45+ units out).
   - Around a ring: the plane is the SVD best fit (`ring_normal`, numpy), the
-    sign picked so the answer is stable; a reference sitting on the middle has no
-    direction, so the first target gives it.
+    sign picked so the answer is stable. The ring's centre is `circle_centre`, a
+    least-squares circle in that plane through the *targets'* spots when there
+    are three or more - the reference may be the hub, and an average of an arc is
+    not its centre - else the average of all points, and also when the fit is ill
+    conditioned. A reference sitting on the middle has no direction, so the first
+    target gives it.
 - **Make Chain** sets `part.follows` link by link, so `_follows_changed` does all
   the validating. The chain stops at the first refusal and keeps what it made.
-  A part that leads riders may be chained (0.16 allowed it). It reports how many
-  copied joints `riding_on` no longer pairs, since a changed Follows undoes the
-  pairing.
+  A part that leads riders may be chained (0.16 allowed it). It first clears the
+  links the chosen parts have to one another - kept, they refuse a chain made from
+  the other end as a loop - and puts them back if the chain is refused at its first
+  link. It reports the old links it replaced, and how many copied joints
+  `riding_on` no longer pairs, since a changed Follows undoes the pairing.
 - **Curl.** Part F following Q is put at `carried(Q) @ D_F @ B_F`, where
   `carried(Q) = W_Q B_Q^-1` and `D_F` is the root's bend (a quaternion in its own
   frame) raised to `factor**k`, applied about F's pivot in F's own frame
@@ -256,15 +266,30 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
   - Followers whose new bend is none read as "only carried" in Record and keep
     their old keys (factor 0, which straightens everything below the root). Not
     handled.
+  - A part whose object is gone (`carried_by` returns None): a lost tip is left
+    out and reported; a lost part that parts with objects hang from refuses.
 - **Ring.** Everything is checked in `plan` before anything is made, so a refusal
   leaves nothing. Copies are made with `copy_for_ring`, placed at
-  `as_matrix(part.before)` turned about the axis, then the existing
-  `ride_along` runs (a Build when the move is built).
-  - A part in a chain is ringed whole: `plan` takes `chain_of`, every joint is
-    copied (named "<joint> N") and 0.16's `match_copies` pairs the copies with
-    the joints. It is run once on the copies *before* `ride_along`, so copies it
-    cannot tell apart are discarded and nothing is left behind; `ride_along` then
-    finds the same pairing. Leads are spread over copy roots of the chain root.
+  `as_matrix(part.before)` turned about the axis (world Z by default: the cursor
+  takes the view's rotation with Shift+right-click, so its Z tilts rings), then the
+  existing `ride_along` runs (a Build when the move is built).
+  - The part and the parts below it (`chain_below`) are copied, never the parts it
+    follows. `ride_along` is given `pairing`, a JSON list of `{joint: copy}` for
+    each whole copy, in place of `match_copies`: a copy of joints 2-3 of a finger
+    of alike segments looks just like a copy of joints 1-2, and the matching, which
+    is for objects the user made, took it for that. A blade that follows a hub is
+    ringed alone and its copies hang from the hub's bone (`rider_holder`); a copy of
+    a middle joint hangs from the joint above it.
+  - Copies are numbered from 2 past every name in use, objects *and* parts of every
+    rig (`names_in_use`): the parts of deleted copies stay in the move, and a new
+    object under such a name is "already known" to `newcomers` and was never
+    bound. A place already holding a rider of the part (its object still there) is
+    skipped. After `ride_along` every copy must be a rider of the joint it was
+    copied from, or `take_riders_out` (the part of `drop_rider` that unbinds and
+    removes) takes the lot back and the ring is refused.
+  - Leads are spread over the copy roots made now only, so an earlier ring keeps
+    its own. Never read a part held from before an `.add()` afterwards: `first_joint`
+    is read first for that reason.
   - Vertex group names live on the mesh, so linked copies share groups with
     the leader. `own_binding` (0.16, called by `bind_object`) gives a bound
     object its own mesh and drops groups for other parts' bones; Build heals
@@ -329,10 +354,11 @@ undo with a window override).
    - in `TestFollowers`: `test_turning_the_base_*`,
      `test_followers_listed_first_*` and `test_a_follower_not_hung_*`;
    - every test in `TestFollowersAdded`.
-2. **No independent review of 0.14.2-0.17.0 yet.** 0.16.0 was checked on the
-   user's own Fingers.blend and Cubes.blend (copies, headless); the four tools
-   of 0.17.0 and their merge with it have not been reviewed by a second pair of
-   eyes. Run the review workflow on them.
+2. **Reviewed, partly.** The four tools of 0.17.0 were reviewed on the code before
+   the merge with 0.16.0 (two lenses, each finding reproduced headless): twelve
+   findings, all fixed on the merged code and listed in the guide's bug list. The
+   merged code itself has not been reviewed again, and 0.14.2-0.14.4 never was.
+   Run the review workflow on the whole.
 3. **The new buttons have not been seen in a real window.** Their placement is
    tested against a logging layout, not drawn: look at the `Spread...` button in
    the panel headers, which are narrow, and at the `Ring...` row.
