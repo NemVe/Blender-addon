@@ -2723,6 +2723,170 @@ class TestLinkedParts(CopyThatCase):
         self.assertAlmostEqual(centre(two).x, 5.0, places=4)
 
 
+def eased(degrees, progress):
+    """How far a turn of this many degrees has got when its bone is this far
+    along its path. A pose is keyed as a quaternion and blended straight
+    between the keys, so the angle is not even along the way: it is what the
+    share says only at the two ends and the middle, which is where the other
+    tests look. Anywhere else this is the angle Blender really shows."""
+    half = math.radians(degrees) / 2.0
+    return math.degrees(2.0 * math.atan2(progress * math.sin(half),
+                                         1.0 - progress + progress * math.cos(half)))
+
+
+class TestEndToEnd(CopyThatCase):
+    """Three different models, each made with the new tools and checked by
+    where the deformed meshes really are."""
+
+    def meshes_match(self, pairs, label=""):
+        """Each (object, expected world matrix) lands where it should."""
+        for obj, place in pairs:
+            expected = [place @ v.co for v in obj.data.vertices]
+            self.assertLess(drift(obj, expected), TOLERANCE, "{:s} {:s}".format(obj.name, label))
+
+    def test_a_fan_from_one_blade(self):
+        # One blade that sweeps open about a hinge on its inner end. Ring it
+        # eight times round the hub, the Leads spread out from it both ways
+        # round, and the fan opens from the blade outwards.
+        blade = cube("Blade", (2.0, 0.0, 0.0))
+        blade.scale = (1.2, 0.3, 0.04)
+        bpy.context.view_layer.update()
+        home = blade.matrix_world.copy()
+        hinge = Vector((1.4, 0.0, 0.0))
+
+        def sweep(degrees):
+            return turn_about(hinge, "Z", degrees)
+
+        record_move([blade], lambda: setattr(blade, "matrix_world", sweep(60.0) @ home))
+        bpy.context.scene.cursor.location = hinge
+        select(blade)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
+        select(blade)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8, lead_first=0,
+                                               lead_last=-40), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        move = rig().rigmoves.moves[0]
+        leads = {p.name: p.lead for p in move.parts if p.leader}
+        self.assertEqual([leads["Blade {:d}".format(n)] for n in range(2, 9)],
+                         [-10, -20, -30, -40, -30, -20, -10])
+        # Behind by a fifth of a leader per ten points of Lead: on a control
+        # that now runs 1.8 leaders long, each blade's own share is its
+        # progress on the leader's, less its lead.
+        waits = [0.0] + [-leads["Blade {:d}".format(n)] / 50.0 for n in range(2, 9)]
+        blades = [blade] + [bpy.data.objects["Blade {:d}".format(n)] for n in range(2, 9)]
+        for share in (0.0, 0.3, 0.5, 0.8, 1.0):
+            drive(move, share)
+            pairs = []
+            for number, (obj, wait) in enumerate(zip(blades, waits)):
+                progress = min(1.0, max(0.0, 1.8 * share - wait))
+                turn = turn_about((0.0, 0.0, 0.0), "Z", 45.0 * number)
+                pairs.append((obj, turn @ sweep(eased(60.0, progress)) @ home))
+            self.meshes_match(pairs, "at {:g}".format(share))
+
+    def test_dominoes_topple_in_a_wave(self):
+        # A standing domino that topples forward about its front foot, and
+        # six more along the row riding with it - made in no order - then
+        # Spread along X, so each goes over a little after the last.
+        def domino(name, x):
+            obj = cube(name, (x, 0.0, 1.0))
+            obj.scale = (0.2, 1.0, 2.0)
+            return obj
+
+        lead = domino("Lead", 0.0)
+        riders = {x: domino("D{:d}".format(i), x)
+                  for i, x in ((4, 6.0), (1, 1.5), (6, 9.0), (2, 3.0), (5, 7.5), (3, 4.5))}
+        bpy.context.view_layer.update()
+        home = {o.name: o.matrix_world.copy() for o in [lead] + list(riders.values())}
+
+        def foot(x):
+            return Vector((x + 0.1, 0.0, 0.0))
+
+        def topple(x, degrees):
+            return turn_about(foot(x), "Y", degrees)
+
+        record_move([lead], lambda: setattr(lead, "matrix_world",
+                                            topple(0.0, 90.0) @ home["Lead"]))
+        bpy.context.scene.cursor.location = foot(0.0)
+        select(lead)
+        bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        select(lead, *riders.values())
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Lead",
+                                                     rig_name=rig().name), {"FINISHED"})
+        select(lead)
+        self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", order="AXIS",
+                                                 axis="X", first=-10.0, last=-50.0),
+                         {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        by_place = [move.parts[riders[x].name].lead for x in sorted(riders)]
+        self.assertEqual(by_place, [-10, -18, -26, -34, -42, -50])
+        bpy.ops.rigmoves.build()
+        waits = {x: -move.parts[riders[x].name].lead / 50.0 for x in riders}
+        for share in (0.0, 0.25, 0.5, 0.75, 1.0):
+            drive(move, share)
+            # The control runs two leaders long: the last domino waits for
+            # the first to finish, so each one's share is 2 x share less its wait.
+            pairs = [(lead, topple(0.0, eased(90.0, min(1.0, 2.0 * share))) @ home["Lead"])]
+            for x, obj in riders.items():
+                progress = min(1.0, max(0.0, 2.0 * share - waits[x]))
+                pairs.append((obj, topple(x, eased(90.0, progress)) @ home[obj.name]))
+            self.meshes_match(pairs, "at {:g}".format(share))
+        # Half way: the leader is down, and the rest are further over the
+        # nearer they are - a wave along the row.
+        drive(move, 0.5)
+        tops = [centre(riders[x]).x for x in sorted(riders)]
+        self.assertEqual(tops, sorted(tops))
+
+    def test_a_tentacle_from_a_chain_a_curl_and_a_delay(self):
+        # Five segments made in no order. Make Chain strings them together,
+        # one turn of the first joint is Curl'd down the rest (tapering), and
+        # Spread gives each joint further down a longer Delay.
+        segments = {}
+        for number in (4, 1, 5, 3, 2):
+            seg = cube("Seg{:d}".format(number), (number - 0.5, 0.0, 0.0))
+            seg.scale = (1.0, 0.3, 0.3)
+            segments[number] = seg
+        bpy.context.view_layer.update()
+        homes = {n: o.matrix_world.copy() for n, o in segments.items()}
+        select(*segments.values())
+        bpy.ops.rigmoves.new_move()
+        move = rig().rigmoves.moves[0]
+        for number, seg in segments.items():
+            bpy.context.scene.cursor.location = (number - 1.0, 0.0, 0.0)
+            select(seg)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        select(segments[1], *[o for n, o in segments.items() if n != 1])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+
+        def bends(angles, shares=(1.0,) * 5):
+            out, carry = {}, Matrix.Identity(4)
+            for number, (degrees, share) in enumerate(zip(angles, shares), start=1):
+                carry = carry @ turn_about((number - 1.0, 0.0, 0.0), "Y", eased(degrees, share))
+                out[number] = carry @ homes[number]
+            return out
+
+        angles = (20.0, 20.0, 10.0, 5.0, 2.5)
+        segments[1].matrix_world = bends((20.0,))[1]
+        bpy.context.view_layer.update()
+        select(segments[1])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=0.5), {"FINISHED"})
+        self.meshes_match([(segments[n], p) for n, p in bends(angles).items()], "curled")
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        select(*segments.values())
+        self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="DELAY", order="CHAIN",
+                                                 first=0.0, last=0.4), {"FINISHED"})
+        delays = [round(move.parts["Seg{:d}".format(n)].start, 4) for n in range(1, 6)]
+        self.assertEqual(delays, [0.0, 0.1, 0.2, 0.3, 0.4])
+        for share in (0.0, 0.5, 1.0):
+            drive(move, share)
+            # Each joint waits its own delay, then runs to the end; the ones
+            # before it carry it as far as they have got.
+            progress = [min(1.0, max(0.0, (share - d) / (1.0 - d))) for d in delays]
+            self.meshes_match([(segments[n], p) for n, p in bends(angles, progress).items()],
+                              "at {:g}".format(share))
+
+
 class TestCombined(CopyThatCase):
 
     def test_combined_control_plays_members_in_order(self):
