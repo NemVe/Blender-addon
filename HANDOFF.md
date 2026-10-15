@@ -45,16 +45,16 @@ promises to the user.
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 5,500 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 6,500 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 83 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 159 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
 
 **Commands:**
 
-    .venv/bin/python tests/test_rigmoves.py      # all tests, about 6 s
+    .venv/bin/python tests/test_rigmoves.py      # all tests, about 12 s
     .venv/bin/python tests/test_rigmoves.py TestFollowers   # one class
     ruff check rigmoves tests tools
     python tools/build_zip.py
@@ -89,6 +89,11 @@ Features, in the order the user asked for them:
 | 0.14.1–0.14.4 | Follower fixes after the user's bug report and two reviews | see the guide's bug list |
 | 0.14.3 | Author credit | `bl_info` |
 | 0.15.0 | Renamed RigMoves to CopyThat | see the top of this file |
+| 0.16.0 | **Spread**: Leads or Delays filled in one go, by ring, distance, axis, chain or at random | `spread_shares`, `spread_values`, `ring_angles`, `ring_normal`, `part_spot`/`rider_spot`, `RIGMOVES_OT_spread` |
+| 0.16.0 | **Make Chain**: Follows down a line, nearest neighbour from the active part | `chain_order`, `RIGMOVES_OT_make_chain` |
+| 0.16.0 | **Curl**: the first joint's bend repeated down every follower | `bend_of`, `quaternion_power`, `shows_a_pose`, `RIGMOVES_OT_curl` |
+| 0.16.0 | **Ring**: one part made into a ring of riders | `copy_for_ring`, `RIGMOVES_OT_ring` |
+| 0.16.0 | Fixed: the ninth part of a move lost its leader; linked duplicates pulled each other | `RIGMOVES_OT_ride_along`, `bind_object` |
 
 ## The model underneath (read before changing any maths)
 
@@ -168,6 +173,65 @@ Features, in the order the user asked for them:
   (`keeps_drags`). Remember this when writing tests: a pivot set on new
   parts binds them.
 
+## The four tools of 0.16 (read before changing them)
+
+The goal was "make building any multi-part animation as fast as possible".
+The tools are generic (a finger, a fan, dominoes, a tentacle), not made for
+the user's flower. Each is an operator with a button where the eye already
+is: `Spread...` in the headers of Riding along and Timing, `Make Chain` and
+`Curl` at the top of Follows, `Ring...` in the move's body under the path
+buttons. Each refuses in words, reports what it did in `data.report`, and is
+`REGISTER, UNDO`.
+
+- **Spread.** `spread_groups` says what is acted on: riders per leader for
+  Leads, the Timing list for Delays, and only the selected ones among them
+  (`held`) if some are selected. `spread_shares` gives each part a share 0 to
+  1, `spread_values` writes First to Last and holds it to the property limits.
+  Writes set `WRITING["many"]` so `_timing_changed` skips, and the caller runs
+  `refresh_drivers` once; a built move plays the new values with no Build.
+  - A part's place is `part_spot`: its pivot at Before. A rider's pivot is its
+    leader's carried over (`rider_spot`, the same maths as `bind_riders`). Using
+    the rider's own origin put the leader's hinge on a different ring from the
+    riders and the Leads came out lopsided.
+  - If every pivot is the same point (a fan's blades about the hub), `spots_of`
+    uses each part's middle.
+  - Around a ring: the plane is the SVD best fit (`ring_normal`, numpy), the
+    sign picked so the answer is stable; a reference sitting on the middle has no
+    direction, so the first target gives it.
+- **Make Chain** sets `part.follows` link by link, so `_follows_changed` does all
+  the validating. The chain stops at the first refusal and keeps what it made.
+- **Curl.** Part F following Q is put at `carried(Q) @ D_F @ B_F`, where
+  `carried(Q) = W_Q B_Q^-1` and `D_F` is the root's bend (a quaternion in its own
+  frame) raised to `factor**(k-1)`, applied about F's pivot in F's own frame
+  *without scale*. The design wrote it as `W_Q B_Q^-1 B_F bend_F` with the bend
+  in local axes, which shears any object that has non-uniform scale (all the
+  test segments do). Parents first, a view-layer update after each.
+  - The first follower repeats the root's full bend: 20, 20, 10, 5, 2.5 at 0.5.
+  - It refuses unless every chain bone shows no pose (`shows_a_pose`, the same
+    read as Record), because `seen_poses` is exact only then. A Build is what
+    clears a pose the eye left.
+  - Followers whose new bend is none read as "only carried" in Record and keep
+    their old keys (factor 0, past the first joint). Not handled.
+- **Ring.** Everything is checked in `plan` before anything is made, so a refusal
+  leaves nothing. Copies are made with `copy_for_ring`, placed at
+  `as_matrix(part.before)` turned about the axis, then the existing
+  `ride_along` runs (a Build when the move is built).
+  - Vertex group names live on the mesh. Linked copies therefore share groups
+    with the leader, and two bound objects on one mesh pull each other.
+    `bind_object` now gives a bound object its own mesh and removes groups named
+    after other parts' bones. This also fixed Alt+D duplicates in any move.
+  - Never keep a collection item across `.add()`: it can move all the parts in
+    memory, and the stale pointer reads as empty. `ride_along` did, so the ninth
+    part of a move lost its leader.
+
+Test helpers added: `ring_places` (a tilted ring), `turn_about`, `eased` (a bone
+turn is blended as a quaternion between keys, so its angle is even only at the
+ends and middle - check off-centre shares with it), `Sketch` and
+`drawn_buttons()` (runs the panel's draw code against a layout that logs the
+buttons, so placement is tested), and `undo_push`/`undo_once` (headless
+Blender has no undo history until asked: push a step before and after, then
+undo with a window override).
+
 ## Code style (match it)
 
 - Comments say why, in plain prose, without jargon. Docstrings explain
@@ -206,8 +270,12 @@ Features, in the order the user asked for them:
    - in `TestFollowers`: `test_turning_the_base_*`,
      `test_followers_listed_first_*` and `test_a_follower_not_hung_*`;
    - every test in `TestFollowersAdded`.
-2. **No independent review of 0.14.2–0.14.4 yet.**
-3. **Known rough edges** (listed in the guide):
+2. **No independent review of 0.14.2–0.14.4 or 0.16.0 yet.** Run the review
+   workflow on the four new tools.
+3. **The new buttons have not been seen in a real window.** Their placement is
+   tested against a logging layout, not drawn: look at the `Spread...` button in
+   the panel headers, which are narrow, and at the `Ring...` row.
+4. **Known rough edges** (listed in the guide):
    - Dragging the base of a finger shown bent shears it on screen until
      Record. Record gets it right.
    - Posing before the Build that a Follows change waits for records what
@@ -219,19 +287,17 @@ Features, in the order the user asked for them:
 
 These follow the "super easy complicated animation" goal:
 
-- **Stagger:** give many riders or followers evenly spread Leads in one
-  click. A flower's petals would open one after another.
 - **Overshoot and settle:** an ease that goes past After and springs back.
   It has to fit within the driver limits, so it would be keys on the driver
   curve, like Speed.
 - **Loop or ping-pong** playback for Animate.
 - **Copy a move to other parts**, or save and load a move as a preset.
-- **Follower curl presets:** bend every joint of a chain by one slider, so
-  the user records only the first joint.
 - **A soft-body or jiggle follow-through** on followers, done as a delay
   plus overshoot per joint.
 - **A "reset to Play 0" button** before posing, which avoids the posed-drag
-  shear.
+  shear. Curl asks for rest, and a paused rig needs a Build to get there, so
+  this would help it too.
+- **Curl's factor on the panel**, and a Curl that also works from a posed rig.
 
 When adding a feature:
 - put it on the panel where the user's eye already is;

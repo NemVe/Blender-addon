@@ -2744,6 +2744,12 @@ class TestEndToEnd(CopyThatCase):
             expected = [place @ v.co for v in obj.data.vertices]
             self.assertLess(drift(obj, expected), TOLERANCE, "{:s} {:s}".format(obj.name, label))
 
+    def test_every_new_tool_is_one_undo_step(self):
+        for name in ("spread", "make_chain", "curl", "ring"):
+            operator = getattr(rigmoves, "RIGMOVES_OT_{:s}".format(name))
+            self.assertTrue({"REGISTER", "UNDO"} <= set(operator.bl_options), name)
+            self.assertEqual(operator.bl_idname, "rigmoves." + name)
+
     def test_a_fan_from_one_blade(self):
         # One blade that sweeps open about a hinge on its inner end. Ring it
         # eight times round the hub, the Leads spread out from it both ways

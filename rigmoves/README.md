@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.15.0
+# CopyThat (experiment) - v0.16.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -17,7 +17,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.15.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.16.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
 
 ## Use
@@ -138,7 +138,9 @@ follows behind: -25 sets off when the leader is half way, -50 only once the
 leader has finished. Above 0 it goes first, and at 50 it has finished before
 the leader starts. Either way it travels at the leader's speed, for as long
 as the leader does - only when changes. Petals at -8, -16, -24 and on round
-the flower open one after another, in a wave.
+the flower open one after another, in a wave. **Spread...** in the header of
+**Riding along** fills those in for you, and **Ring** makes the petals as
+well - see below.
 
 The move's control, and the **Play** slider, always cover the whole of it, so
 a rider sent ahead has somewhere to go: the leader simply starts later along
@@ -164,12 +166,98 @@ it takes effect at the next Build.
 Without this the panel simply went on showing the finished rig, with nothing
 on screen to say how to begin the next thing.
 
+### Four tools that cut the repetitive work
+
+A flower is eight petals, a finger is three joints, a row of dominoes is a
+dozen boxes. Recording the move is quick; what costs the time is making the
+copies, choosing **Follows** one dropdown at a time, and typing a Lead, a
+Delay or a bend for every part. Four buttons do that in one go. Each works
+whether or not the move is built, says in the panel what it did, refuses with
+the reason when it cannot, and is one Ctrl+Z.
+
+### Ring: one part becomes a ring of riders
+
+*When:* the same part goes round a centre - the petals of a flower, the
+blades of a fan, the teeth of a gear, a crown of spikes - and you would rather
+not model it eight times and select them all for Ride Along.
+
+*Recipe:* record the part's move, put the 3D cursor on the centre, select the
+part so it is the active object, press **Ring...** (in the move, under **Curve
+the Path**), set the **Count**, **OK**.
+
+- **Count** includes the original: 6 is the part and five copies.
+- The copies stand at the part's **Before** - not where it is standing now,
+  so it may be showing its After - turned round the centre a share of a full
+  turn each. **Round** is the 3D cursor or the world origin; **About** is the
+  cursor's own Z (tip the cursor and the ring tips with it) or the world's X,
+  Y or Z.
+- They are named "Petal 2" to "Petal 6" and put in the same collections.
+- **Linked copies** (the default) share the original's mesh, so editing one in
+  edit mode edits them all. They share it until Build: Blender keeps a mesh's
+  vertex groups with the mesh, and each part is bound by a group of its own,
+  so Build gives every one a mesh of its own. Untick it and the copies have
+  their own from the start.
+- Nothing that bound or hung the original comes with a copy: not its Armature
+  modifier, its bone's vertex group, its Follows mark, its parent, or keys on
+  its own transform.
+- The copies then ride along with the part, exactly as if you had pressed Ride
+  Along on them. On a built move that is a Build.
+- **First Lead** and **Last Lead**: set different, they are spread out from the
+  original both ways round the ring (see Spread, Around a ring, both ways), so
+  the blades open one after another, the two sides alike. Leave them equal
+  and every copy moves with the original.
+
+It asks before it makes anything: a part that is not in the move, a rider, a
+part that follows another, or a part dragged and not recorded on a built move
+are each turned down in words, and nothing is left behind.
+
+### Spread: Leads and Delays in one go
+
+*When:* a ring of riders should open one after another, a finger's joints
+should go one after the next, a row should topple in a wave - and you do not
+want to type a number into every row.
+
+*Recipe:* press **Spread...** in the header of **Riding along** (Leads) or of
+**Timing** (Delays), pick an **Order**, set the **First** and **Last** value,
+**OK**.
+
+Every part falls somewhere from 0 to 1 in the order you pick, and gets
+First + (Last - First) x that. Leads are whole numbers held to -50 to 50,
+Delays held to 0 to 0.99; if any were held, the report says how many.
+
+| Order | The part comes later the... |
+|---|---|
+| **Around a ring** | further round the ring it stands from the start, one way round. **Both ways** folds it in half, so the two sides of the ring match: the parts either side of the start go together |
+| **By distance** | further it is from the start: a ripple |
+| **Along an axis** | further along world X, Y or Z: dominoes, a wave across a grid |
+| **Down a chain** | further down a **Follows** chain it hangs: a finger or a tentacle (Delays only) |
+| **Random** | no order - the same every time for the same **Seed** |
+
+- Leads belong to riders. Each leader's riders are put in order among
+  themselves, so two rings with a leader each both get the whole range. The
+  start is the leader.
+- Delays belong to the parts in the **Timing** list. The start is the active
+  part, or the first one.
+- If some of them are selected, only those are spread. Select nothing among
+  them and it is all of them.
+- Parts are placed by their pivot at Before - a rider's is its leader's,
+  carried over to where it stands. Where every pivot is the same point, as with
+  the blades of a fan all turning about its hub, the middle of each part is
+  used instead.
+- Round a ring: the ring is wherever the parts lie - its plane is the best
+  fit through them, so a tipped ring works - and a start that sits on its
+  middle is measured from the first part instead. Fewer than three parts, or
+  all in a line, and it is the world's Z.
+- Written once for all of them, and a built move plays the new values at once.
+  No Build.
+
 ### Followers: parts that hang from parts
 
 A finger is three segments, each turning at its own knuckle, each carried by
 the one before. Put them in one move and open **Follows**: beside every part
 is a list of the move's other parts. Pick the first segment for the second,
-and the second for the third. A follower goes wherever the part it follows
+and the second for the third - or select the segments and press **Make
+Chain**, below. A follower goes wherever the part it follows
 takes it, and does its own move on top.
 
 Give each segment its knuckle as its **Pivot** (3D cursor on the joint,
@@ -198,6 +286,55 @@ are hung from their old parents again if the move is removed.
 A follower goes where it is carried, so its path is not curved: curve the
 part it follows instead, and a part with a curved path straightens it
 before it follows.
+
+### Make Chain: Follows down a line in one click
+
+*When:* a finger, a tentacle or a spine - parts end to end - and choosing
+each one's **Follows** by hand is the slow part.
+
+*Recipe:* select the parts, with the one the chain starts from the active
+object, and press **Make Chain** at the top of the **Follows** section.
+
+From the first, each next part is the one nearest it, by pivot at Before,
+that is not in the chain yet; each is set to follow the one before. It goes
+through the same choice as the dropdowns, so a rider, a part that leads
+riders, a curved part and a loop are turned down with their reason, and the
+chain stops there, keeping the links already made. Only the first may lead
+riders. The report names the order: "Chain: Seg1 > Seg2 > Seg3 > Seg4". On a
+loose move the objects hang from one another at once; on a built one the red
+note waits for Build, like any **Follows** change.
+
+### Curl: bend one joint and the whole chain bends
+
+*When:* every joint of a finger or tentacle bends the same way and you would
+rather pose one than all of them.
+
+*Recipe:* **Make Chain** if it is not a chain yet. Set the pivots on the
+joints. Turn the first segment about its joint by hand, then press **Curl**
+(beside **Make Chain**) with it active. **Record After**, or a Step, to keep
+it.
+
+The bend is the first segment's turn from its Before, about its own pivot, in
+its own axes; where its pivot went is not part of it. It is repeated on every
+part that follows it, directly or not, branches included, each about its own
+pivot in its own axes and carried by the part before it, so the joints stay
+together. The first part after the root repeats the root's bend; each part
+after that keeps **Each next joint x** of the one before. The default is 1:
+every joint bends as much as the first. At 0.5 a 20 degree bend runs 20, 20,
+10, 5, 2.5 down the root and four followers, so the tip curls least. The
+factor is in the Adjust Last Operation panel, bottom left of the viewport,
+right after pressing Curl.
+
+Curl works from rest. Joints already showing a pose have their own bend on top
+of where they stand, and Record would then not read what Curl made. So it
+refuses while any bone of the chain is showing one - the eye on After, or Play
+above 0 - and says to drag Play to 0 (and to Build first, if the sliders are
+paused). Record After or Step then reads exactly the curled pose, built or not.
+It also refuses when nothing follows the part, when the part rides along, and
+when the part has not been turned.
+
+Curl puts every part below the root where its bend says, replacing whatever
+bend it had.
 
 ### Several moves under one control
 
@@ -267,7 +404,8 @@ travel. Delay 0.2 means that part waits until the control is a fifth of the
 way across before it starts, and then runs to the end. That is what stops a
 machine reading as one rubber object: the parts leave in order, and overlap.
 A delay, like an ease or a speed, takes effect as soon as it is changed.
-Riders are not listed here; their **Lead** does the same job.
+Riders are not listed here; their **Lead** does the same job. **Spread...** in
+the header of this section fills all the Delays in at once - see Spread.
 
 A combined control has the same box per member.
 
@@ -409,6 +547,23 @@ undoes it.
 
 The path preview is read off the action, not played: no frame changes, nothing
 moves while it is drawn.
+
+Curl keeps each part's relation to the one it follows and adds its own bend.
+Part F, following Q, is put at
+
+    W_F = (W_Q B_Q^-1) D_F B_F
+
+where B is the part's Before, W_Q B_Q^-1 is how far Q has been carried, and
+D_F is the turn about F's pivot in the world at Before, about F's own axes -
+its Before frame without its scale, so a part stretched in one direction is
+turned rigidly and not sheared. The turn is the root's quaternion raised to
+the power factor^(k-1) for a part k below it, taken the short way round.
+
+Spread works out an angle round a ring from the best-fit plane of the parts'
+spots and writes the values with the drivers left alone, then refreshes them
+once. Ring copies the object, takes off what the original was bound by, sets
+the copy on the original's Before turned about the axis, and presses Ride
+Along on them.
 
 ## Tested on
 
@@ -695,6 +850,17 @@ and one lifted 1 m:
   so nothing was taken down and the first class refused to register again. The
   old copy is now asked for through its base type, which does find it.
 
+- **The ninth part of a move could be left with no leader.** Ride Along read the
+  leader's name after adding a part, and adding to the list can move all of it
+  in memory, leaving the leader a dead pointer. From the ninth part on, the last
+  rider rode with nobody: "rides with a part that is no longer in its move".
+  The name is read first now.
+- **Linked duplicates pulled each other apart.** Blender keeps vertex groups with
+  the mesh, so objects sharing a mesh share their groups. Two Alt+D copies
+  bound to a bone each were each pulled by both bones, and neither landed where
+  it was recorded. Binding now gives an object a mesh of its own, and takes off
+  the group named after the bone of the part it was copied from.
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -736,3 +902,13 @@ and one lifted 1 m:
   them out again afterwards.
 - Handles are always laid along the rig's up axis and placed above the parts.
   There is no way to move one somewhere better yet.
+- Curl puts every part below the root where the bend says, replacing the bend
+  it had. A joint whose new bend is none at all - a factor of 0, past the first
+  joint - is read by Record as only carried, and keeps the keys it had.
+- Curl works only from rest, and the factor is only in the Adjust Last Operation
+  panel, not on the button.
+- Ring's linked copies share one mesh only until Build, which gives every bound
+  part a mesh of its own; edit-mode changes after that are one part's alone.
+- Spread's ring takes the best-fit plane of the parts' spots. Parts that are not
+  roughly on one ring - a scatter - get an order that is the plane's, and is
+  seldom what was meant: use By distance or Along an axis instead.
