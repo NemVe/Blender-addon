@@ -1921,6 +1921,155 @@ class TestSpread(CopyThatCase):
             (("head:show_timing",), "Spread…", "rigmoves.spread")]))
 
 
+class TestMakeChain(CopyThatCase):
+    """Four segments end to end, made - and so listed - in no order at all."""
+
+    KNUCKLES = [Vector((float(n), 0.0, 0.0)) for n in range(4)]
+
+    def setUp(self):
+        super().setUp()
+        self.segments = {}
+        for number in (3, 1, 4, 2):
+            segment = cube("Seg{:d}".format(number), (number - 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments[number] = segment
+        bpy.context.view_layer.update()
+        self.homes = {n: s.matrix_world.copy() for n, s in self.segments.items()}
+        select(*self.segments.values())
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def everything(self, first=1):
+        """Every segment selected, this one active."""
+        select(self.segments[first], *[s for n, s in self.segments.items() if n != first])
+
+    def chain(self, first=1):
+        self.everything(first)
+        return bpy.ops.rigmoves.make_chain(index=0)
+
+    def follows(self):
+        return {p.name: p.follows for p in self.move.parts}
+
+    def bent(self, degrees):
+        out, carry = [], Matrix.Identity(4)
+        for number, knuckle in enumerate(self.KNUCKLES):
+            carry = (carry @ Matrix.Translation(knuckle)
+                     @ Matrix.Rotation(math.radians(degrees), 4, "Y")
+                     @ Matrix.Translation(-knuckle))
+            out.append(carry @ self.homes[number + 1])
+        return out
+
+    def check_curl(self, share, degrees):
+        drive(self.move, share)
+        for number, place in enumerate(self.bent(degrees)):
+            segment = self.segments[number + 1]
+            expected = [place @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def test_follows_come_out_in_spatial_order(self):
+        names = [p.name for p in self.move.parts]
+        self.assertNotEqual(names, ["Seg1", "Seg2", "Seg3", "Seg4"])
+        self.assertEqual(self.chain(), {"FINISHED"})
+        self.assertEqual(self.follows(),
+                         {"Seg1": "", "Seg2": "Seg1", "Seg3": "Seg2", "Seg4": "Seg3"})
+        self.assertEqual(rig().rigmoves.report, "Chain: Seg1 > Seg2 > Seg3 > Seg4")
+        # The objects hang from one another at once, as a Follows pick does.
+        self.assertEqual(self.segments[2].parent, self.segments[1])
+        self.assertEqual(self.segments[4].parent, self.segments[3])
+
+    def test_the_chain_runs_from_the_active_end(self):
+        # From the other end the same four parts chain the other way.
+        self.assertEqual(self.chain(first=4), {"FINISHED"})
+        self.assertEqual(self.follows(),
+                         {"Seg4": "", "Seg3": "Seg4", "Seg2": "Seg3", "Seg1": "Seg2"})
+
+    def test_a_chain_then_a_finger_that_curls(self):
+        for number, knuckle in enumerate(self.KNUCKLES):
+            bpy.context.scene.cursor.location = knuckle
+            select(self.segments[number + 1])
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        self.assertEqual(self.chain(), {"FINISHED"})
+        for number, place in enumerate(self.bent(30.0)):
+            self.segments[number + 1].matrix_world = place
+            bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        self.check_curl(0.0, 0.0)
+        self.check_curl(0.5, 15.0)
+        self.check_curl(1.0, 30.0)
+
+    def test_on_a_built_move_it_waits_for_build(self):
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.chain(), {"FINISHED"})
+        self.assertTrue(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        self.assertIn("Build to put it into effect", rig().rigmoves.report)
+        bpy.ops.rigmoves.build()
+        self.assertFalse(rigmoves.parent_pending(rig(), rig().rigmoves, self.move))
+        bones = rig().data.bones
+        for number in (2, 3, 4):
+            part, ahead = self.move.parts["Seg{:d}".format(number)], \
+                self.move.parts["Seg{:d}".format(number - 1)]
+            self.assertEqual(bones[part.bone_name].parent.name, ahead.bone_name)
+
+    def test_a_rider_in_the_selection_stops_the_chain_there(self):
+        # Seg1 leads a rider that stands between Seg3 and Seg4. The rider
+        # cannot follow, and the chain stops there, with the reason said.
+        rider = cube("Rider", (3.0, 0.0, 0.0))
+        select(self.segments[1], rider)
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg1",
+                                                     rig_name=rig().name), {"FINISHED"})
+        select(self.segments[1], self.segments[2], self.segments[3], rider,
+               self.segments[4])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.assertEqual(self.follows(), {"Seg1": "", "Seg2": "Seg1", "Seg3": "Seg2",
+                                          "Seg4": "", "Rider": ""})
+        said = rig().rigmoves.report
+        self.assertIn("Chain: Seg1 > Seg2 > Seg3", said)
+        self.assertIn("'Rider' cannot follow 'Seg3'", said)
+        self.assertIn("riders copy their leader instead", said)
+
+    def test_a_chain_refused_at_its_first_link_changes_nothing(self):
+        rider = cube("Rider", (1.0, 3.0, 0.0))
+        select(self.segments[1], rider)
+        bpy.ops.rigmoves.ride_along(index=0, leader="Seg1", rig_name=rig().name)
+        select(self.segments[1], rider)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"CANCELLED"})
+        self.assertEqual(set(self.follows().values()), {""})
+        self.assertIn("riders copy their leader instead", rig().rigmoves.report)
+
+    def test_it_asks_for_what_it_needs(self):
+        select(self.segments[1])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"CANCELLED"})
+        self.assertIn("two at least", rig().rigmoves.report)
+        # The active object has to be one of the selected parts.
+        outsider = cube("Outsider", (9.0, 9.0, 0.0))
+        select(outsider, self.segments[1], self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"CANCELLED"})
+        self.assertIn("starts from the active", rig().rigmoves.report)
+        self.assertEqual(set(self.follows().values()), {""})
+
+    def test_a_rider_cannot_start_a_chain(self):
+        rider = cube("Rider", (1.0, 3.0, 0.0))
+        select(self.segments[1], rider)
+        bpy.ops.rigmoves.ride_along(index=0, leader="Seg1", rig_name=rig().name)
+        select(rider, self.segments[1], self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"CANCELLED"})
+        self.assertIn("rides along", rig().rigmoves.report)
+
+    def test_a_chain_can_be_undone(self):
+        self.everything()
+        undo_push()
+        bpy.ops.rigmoves.make_chain(index=0)
+        undo_push()
+        undo_once()
+        self.assertEqual({p.follows for p in rig().rigmoves.moves[0].parts}, {""})
+
+    def test_the_button_is_in_the_follows_section(self):
+        found = [(where, text) for where, idname, text in drawn_buttons()
+                 if idname == "rigmoves.make_chain"]
+        self.assertEqual(found, [(("body:show_chain", "row"), "Make Chain")])
+
+
 class TestCombined(CopyThatCase):
 
     def test_combined_control_plays_members_in_order(self):

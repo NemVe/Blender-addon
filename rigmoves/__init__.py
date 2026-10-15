@@ -5061,6 +5061,84 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         return {"FINISHED"}
 
 
+# ---------------------------------------------------------------------------
+# chains: a finger, a tentacle, a spine - parts that hang from one another
+#
+# Picking Follows one dropdown at a time is the other slow part of a move
+# made of many joints, and each joint then wants its bend recorded too. Make
+# Chain sets the dropdowns down a line in one click.
+
+
+def chain_order(rig, parts, root):
+    """The parts in the order a chain runs through them: from the root, each
+    next one the nearest of those not yet in it, measured between pivots at
+    Before. Parts equally near keep the order they were listed in."""
+    spots = {p.name: where for p, where in zip(parts, spots_of(rig, parts))}
+    order = [root]
+    left = [p for p in parts if p.name != root.name]
+    while left:
+        here = spots[order[-1].name]
+        nearest = min(range(len(left)), key=lambda n: (spots[left[n].name] - here).length)
+        order.append(left.pop(nearest))
+    return order
+
+
+class RIGMOVES_OT_make_chain(bpy.types.Operator):
+    bl_idname = "rigmoves.make_chain"
+    bl_label = "Make Chain"
+    bl_description = ("Make the selected parts follow one another down a line, "
+                      "starting from the active one: each follows the nearest "
+                      "of those not in the chain yet")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty(options={"HIDDEN"})
+
+    def refuse(self, data, said):
+        data.report = said
+        self.report({"WARNING"}, said)
+        return {"CANCELLED"}
+
+    def execute(self, context):
+        rig, data, move = move_at(context, self.index)
+        if move is None:
+            return {"CANCELLED"}
+        chosen = {o.name for o in context.selected_objects}
+        parts = [p for p in move.parts if p.kind == "OBJECT" and p.name in chosen]
+        active = context.view_layer.objects.active
+        root = move.parts.get(active.name) if active is not None else None
+        if len(parts) < 2:
+            return self.refuse(data, "Select the parts that make the chain - two at "
+                                     "least - with the one it starts from active.")
+        if root is None or root.name not in {p.name for p in parts}:
+            return self.refuse(data, "Make the part the chain starts from the active "
+                                     "object, and keep it selected with the others.")
+        if root.leader:
+            return self.refuse(data, "'{:s}' rides along with '{:s}', so a chain cannot "
+                                     "start from it.".format(short(root.name, 18),
+                                                              short(root.leader, 18)))
+        order = chain_order(rig, parts, root)
+        # One link at a time, through the same choice the Follows list makes:
+        # a rider, a part that leads riders, a loop - each is turned down
+        # there, with its reason, and the chain stops at that point.
+        linked, stopped = [root], ""
+        for before, part in zip(order[:-1], order[1:]):
+            data.report = ""
+            part.follows = before.name
+            if part.follows != before.name:
+                stopped = data.report
+                break
+            linked.append(part)
+        if len(linked) < 2:
+            return self.refuse(data, stopped)
+        said = "Chain: " + " > ".join(short(p.name, 14) for p in linked)
+        if stopped:
+            said += ". Stopped there. " + stopped
+        elif move.built and parent_pending(rig, data, move):
+            said += ". Build to put it into effect."
+        data.report = said
+        self.report({"WARNING"} if stopped else {"INFO"}, said)
+        return {"FINISHED"}
+
+
 def control_channel(carrier):
     """(owner, data path, index) of what a control's keys go on: the handle's
     place along its rail, or the slider itself when there is no handle."""
@@ -5762,6 +5840,10 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 note = listed.row()
                 note.enabled = False
                 note.label(text="moves with the part it follows")
+                # The dropdowns set down a line in one click.
+                tools = listed.row(align=True)
+                tools.operator(RIGMOVES_OT_make_chain.bl_idname, text="Make Chain",
+                               icon="LINKED").index = index
                 for part in chain:
                     line = listed.split(factor=0.42, align=True)
                     line.label(text=short(part.name, 13), icon="OBJECT_DATA")
@@ -5955,6 +6037,7 @@ CLASSES = (
     RIGMOVES_OT_drop_curve,
     RIGMOVES_OT_show_paths,
     RIGMOVES_OT_spread,
+    RIGMOVES_OT_make_chain,
     RIGMOVES_OT_animate,
     RIGMOVES_OT_key_control,
     RIGMOVES_OT_pause,
