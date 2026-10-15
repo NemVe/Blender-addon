@@ -5066,7 +5066,8 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
 #
 # Picking Follows one dropdown at a time is the other slow part of a move
 # made of many joints, and each joint then wants its bend recorded too. Make
-# Chain sets the dropdowns down a line in one click.
+# Chain sets the dropdowns down a line in one click, and Curl takes the bend
+# of the first joint and repeats it down the rest.
 
 
 def chain_order(rig, parts, root):
@@ -5136,6 +5137,161 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
             said += ". Build to put it into effect."
         data.report = said
         self.report({"WARNING"} if stopped else {"INFO"}, said)
+        return {"FINISHED"}
+
+
+def chain_below(move, root):
+    """Every part that follows `root`, directly or not, as (part, how many
+    parts below it), parents first."""
+    out = []
+    for part in follow_order(move, chain_parts(move)):
+        if part.name == root.name:
+            continue
+        steps, name, seen = 1, part.follows, {part.name}
+        while name and name not in seen:
+            if name == root.name:
+                out.append((part, steps))
+                break
+            seen.add(name)
+            above_part = move.parts.get(name)
+            name = above_part.follows if above_part is not None else ""
+            steps += 1
+    return out
+
+
+def carried_by(part):
+    """How far a part has been moved from its Before, as a matrix in the
+    world: where it stands now, less where it started."""
+    obj = bpy.data.objects.get(part.name)
+    return obj.matrix_world @ as_matrix(part.before).inverted_safe()
+
+
+def bend_of(move, root):
+    """How far the root has been turned from its Before, as a quaternion in
+    its own axes - about its own pivot, the way a joint bends. Where the
+    root's pivot has gone is not part of it. A root that itself follows
+    something is measured from what carries it."""
+    moved = carried_by(root)
+    ahead = move.parts.get(root.follows) if root.follows else None
+    if ahead is not None:
+        moved = carried_by(ahead).inverted_safe() @ moved
+    turn = moved.decompose()[1].normalized()
+    frame = standing(as_matrix(root.before))[0].to_quaternion()
+    return frame.inverted() @ turn @ frame
+
+
+def turn_angle(turn):
+    """How far a turn goes, in radians, taking the short way round."""
+    size = math.sqrt(turn.x * turn.x + turn.y * turn.y + turn.z * turn.z)
+    return 2.0 * math.atan2(size, abs(turn.w))
+
+
+def quaternion_power(turn, power):
+    """A turn made `power` times as far, about the same axis, the short way
+    round: half of it, or twice, or none. Slerp only goes between 0 and 1."""
+    if turn.w < 0.0:
+        turn = -turn
+    size = math.sqrt(turn.x * turn.x + turn.y * turn.y + turn.z * turn.z)
+    if size < 1e-12:
+        return Quaternion()
+    return Quaternion((turn.x / size, turn.y / size, turn.z / size),
+                      turn_angle(turn) * power)
+
+
+def shows_a_pose(rig, parts):
+    """The bound parts of this list whose bone is not standing at rest on
+    screen - read the way Record reads it, as what the bone does to the
+    world as it is showing now."""
+    bent = []
+    for part in parts:
+        pose_bone = rig.pose.bones.get(part.bone_name) if is_bound(part) else None
+        if pose_bone is None:
+            continue
+        shown = pose_bone.matrix @ pose_bone.bone.matrix_local.inverted_safe()
+        if not same_matrix(shown, Matrix.Identity(4)):
+            bent.append(part)
+    return bent
+
+
+class RIGMOVES_OT_curl(bpy.types.Operator):
+    bl_idname = "rigmoves.curl"
+    bl_label = "Curl"
+    bl_description = ("Repeat the active part's bend down every part that "
+                      "follows it, each about its own pivot: pose the first "
+                      "joint of a finger or tentacle and the rest bend with "
+                      "it. Record After afterwards to keep it. The bend of "
+                      "each joint after the first can be scaled in the "
+                      "Adjust Last Operation panel")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty(options={"HIDDEN"})
+    factor: bpy.props.FloatProperty(
+        name="Each next joint ×", default=1.0, min=0.0, max=10.0, soft_max=2.0,
+        description="How much of the bend each joint after the first keeps from "
+                    "the one before: 1 bends every joint as much as the first, "
+                    "0.5 halves it at each joint, so the tip curls least")
+
+    def refuse(self, data, said):
+        data.report = said
+        self.report({"WARNING"}, said)
+        return {"CANCELLED"}
+
+    def execute(self, context):
+        rig, data, move = move_at(context, self.index)
+        if move is None:
+            return {"CANCELLED"}
+        active = context.view_layer.objects.active
+        root = move.parts.get(active.name) if active is not None else None
+        if root is None or root.kind != "OBJECT" or not root.has_before:
+            return self.refuse(data, "Make the first joint of the chain - an object "
+                                     "of this move - the active object, then Curl.")
+        if root.leader:
+            return self.refuse(data, "'{:s}' rides along with '{:s}', so it has no "
+                                     "bend of its own to repeat.".format(
+                                         short(root.name, 18), short(root.leader, 18)))
+        below = [(p, steps) for p, steps in chain_below(move, root) if p.has_before]
+        if not below:
+            return self.refuse(data, "Nothing follows '{:s}'. Set Follows first, or "
+                                     "select the parts and press Make Chain."
+                                     .format(short(root.name, 18)))
+        # A joint already showing a pose has its own bend on top of its rest
+        # position, and what Record would then read is not what Curl made.
+        context.view_layer.update()
+        if shows_a_pose(rig, [root] + [p for p, _steps in below]):
+            said = ("Curl works from rest: drag Play to 0 (or press To Before), "
+                    "pose the first joint, then Curl.")
+            # The eye, and a Record, leave the sliders paused with the pose
+            # still showing, and To Before does not clear that: a Build does.
+            if data.posing:
+                said += " The sliders are paused with a pose showing, so Build first."
+            return self.refuse(data, said)
+        turn = bend_of(move, root)
+        if turn_angle(turn) < 1e-4:
+            return self.refuse(data, "'{:s}' has not been turned. Turn it about its "
+                                     "pivot, then Curl.".format(short(root.name, 18)))
+        names = [(p.name, steps) for p, steps in below]
+        # Parents first, one at a time: each is placed from where the part it
+        # follows now stands, so a bend is carried down the chain and the
+        # joints stay together.
+        for name, steps in names:
+            part = move.parts[name]
+            obj = bpy.data.objects.get(name)
+            ahead = move.parts.get(part.follows)
+            if obj is None or ahead is None:
+                continue
+            before = as_matrix(part.before)
+            frame = standing(before)[0].to_3x3()
+            spin = (frame @ quaternion_power(turn, self.factor ** (steps - 1)).to_matrix()
+                    @ frame.inverted_safe()).to_4x4()
+            pivot = before @ Vector(part.pivot)
+            about = Matrix.Translation(pivot) @ spin @ Matrix.Translation(-pivot)
+            obj.matrix_world = carried_by(ahead) @ about @ before
+            context.view_layer.update()
+        said = "{:d} part(s) below '{:s}' now bend {:g} degrees like it".format(
+            len(names), short(root.name, 18), round(math.degrees(turn_angle(turn)), 1))
+        if abs(self.factor - 1.0) > 1e-9:
+            said += ", each joint after the first x{:g}".format(self.factor)
+        data.report = said + ". Record After, or a Step, to keep it."
+        self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -5840,10 +5996,13 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 note = listed.row()
                 note.enabled = False
                 note.label(text="moves with the part it follows")
-                # The dropdowns set down a line in one click.
+                # Two tools for the whole chain at once: the dropdowns set
+                # down a line, and the first joint's bend repeated down it.
                 tools = listed.row(align=True)
                 tools.operator(RIGMOVES_OT_make_chain.bl_idname, text="Make Chain",
                                icon="LINKED").index = index
+                tools.operator(RIGMOVES_OT_curl.bl_idname, text="Curl",
+                               icon="MOD_SIMPLEDEFORM").index = index
                 for part in chain:
                     line = listed.split(factor=0.42, align=True)
                     line.label(text=short(part.name, 13), icon="OBJECT_DATA")
@@ -6038,6 +6197,7 @@ CLASSES = (
     RIGMOVES_OT_show_paths,
     RIGMOVES_OT_spread,
     RIGMOVES_OT_make_chain,
+    RIGMOVES_OT_curl,
     RIGMOVES_OT_animate,
     RIGMOVES_OT_key_control,
     RIGMOVES_OT_pause,

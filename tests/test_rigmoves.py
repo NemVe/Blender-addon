@@ -132,6 +132,13 @@ def ring_places(centre, count, radius, start=0.0):
     return out
 
 
+def turn_about(point, axis, degrees):
+    """A turn of this many degrees about an axis through a point."""
+    return (Matrix.Translation(point)
+            @ Matrix.Rotation(math.radians(degrees), 4, axis)
+            @ Matrix.Translation(-Vector(point)))
+
+
 class Sketch:
     """A stand-in for a panel layout that notes what is drawn, and where.
 
@@ -2068,6 +2075,359 @@ class TestMakeChain(CopyThatCase):
         found = [(where, text) for where, idname, text in drawn_buttons()
                  if idname == "rigmoves.make_chain"]
         self.assertEqual(found, [(("body:show_chain", "row"), "Make Chain")])
+
+
+class TestCurl(CopyThatCase):
+    """A tentacle of five segments end to end, each hinged on its own joint
+    and hanging from the one before. Only the first is ever posed by hand."""
+
+    KNUCKLES = [Vector((float(n), 0.0, 0.0)) for n in range(5)]
+
+    def setUp(self):
+        super().setUp()
+        self.segments = []
+        for number in range(5):
+            segment = cube("Seg{:d}".format(number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+        bpy.context.view_layer.update()
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        for segment, knuckle in zip(self.segments, self.KNUCKLES):
+            bpy.context.scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        for number in range(1, 5):
+            self.move.parts["Seg{:d}".format(number + 1)].follows = "Seg{:d}".format(number)
+
+    def bent_by(self, angles):
+        """Each segment's place with each joint bent by its own angle, each
+        carried by the ones before it."""
+        out, carry = [], Matrix.Identity(4)
+        for knuckle, home, degrees in zip(self.KNUCKLES, self.homes, angles):
+            carry = carry @ turn_about(knuckle, "Y", degrees)
+            out.append(carry @ home)
+        return out
+
+    def check_places(self, places):
+        for segment, place in zip(self.segments, places):
+            expected = [place @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+    def check_joints(self):
+        """No gap where one segment meets the next: the middle of the far end
+        of each is the middle of the near end of the one after - the joint,
+        which they both turn about. (Bent, the corners open like a hinge.)"""
+        def middle(number, far):
+            segment, points = self.segments[number], world_points(self.segments[number])
+            ends = [p for v, p in zip(segment.data.vertices, points)
+                    if (v.co.x > 0) == far]
+            return sum(ends, Vector()) / len(ends)
+
+        for number in range(4):
+            self.assertLess((middle(number, True) - middle(number + 1, False)).length,
+                            TOLERANCE, number)
+
+    def pose_root(self, degrees):
+        """Turn the first segment about its own joint by hand."""
+        self.segments[0].matrix_world = turn_about(self.KNUCKLES[0], "Y", degrees) @ self.homes[0]
+        bpy.context.view_layer.update()
+
+    def curl(self, **kwargs):
+        select(self.segments[0])
+        return bpy.ops.rigmoves.curl(index=0, **kwargs)
+
+    def close(self, degrees):
+        """Every segment bent to this, recorded as After."""
+        for segment, place in zip(self.segments, self.bent_by((degrees,) * 5)):
+            segment.matrix_world = place
+            bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    def play(self, share, degrees):
+        drive(self.move, share)
+        self.check_places(self.bent_by((degrees,) * 5))
+
+    # -- loose --------------------------------------------------------------
+
+    def test_loose_every_joint_bends_like_the_first(self):
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+        self.check_places(self.bent_by((20.0,) * 5))
+        self.check_joints()
+        self.assertIn("4 part(s) below 'Seg1' now bend 20 degrees like it",
+                      rig().rigmoves.report)
+        # Kept: recorded, built, and played.
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        self.play(1.0, 20.0)
+        self.check_joints()
+        self.play(0.5, 10.0)
+        self.play(0.0, 0.0)
+        self.check_places(self.homes)
+
+    def test_loose_each_joint_after_the_first_keeps_a_share(self):
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(factor=0.5), {"FINISHED"})
+        # The first joint after the root repeats its bend, and each one past
+        # that keeps half of the one before: 20, 10, 5, 2.5 below the root.
+        self.check_places(self.bent_by((20.0, 20.0, 10.0, 5.0, 2.5)))
+        self.check_joints()
+        self.assertIn("each joint after the first x0.5", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_places(self.bent_by((20.0, 20.0, 10.0, 5.0, 2.5)))
+
+    def test_a_factor_above_one_bends_the_tip_most(self):
+        self.pose_root(10.0)
+        self.assertEqual(self.curl(factor=2.0), {"FINISHED"})
+        self.check_places(self.bent_by((10.0, 10.0, 20.0, 40.0, 80.0)))
+        self.check_joints()
+
+    def test_a_turn_about_the_pivot_is_all_that_is_repeated(self):
+        # The first segment turned and slid: only the turn is carried down.
+        self.segments[0].matrix_world = (Matrix.Translation((0.0, 0.0, 0.7))
+                                         @ turn_about(self.KNUCKLES[0], "Y", 20.0)
+                                         @ self.homes[0])
+        bpy.context.view_layer.update()
+        self.assertEqual(self.curl(), {"FINISHED"})
+        slide = Matrix.Translation((0.0, 0.0, 0.7))
+        places = self.bent_by((20.0,) * 5)
+        # The first stands where it was put; the rest are bent on their own
+        # joints and carried by it, slid with it.
+        self.check_places([slide @ p for p in places])
+
+    # -- built --------------------------------------------------------------
+
+    def test_built_from_play_zero_through_record_after(self):
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+        self.check_places(self.bent_by((20.0,) * 5))
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        # What Record keeps is exactly what Curl made.
+        self.check_places(self.bent_by((20.0,) * 5))
+        self.assertEqual(rigmoves.unrecorded(rig().rigmoves), [])
+        bpy.ops.rigmoves.build()
+        self.play(1.0, 20.0)
+        self.check_joints()
+        self.play(0.5, 10.0)
+        self.play(0.0, 0.0)
+        self.check_places(self.homes)
+
+    def test_a_second_curl_replaces_the_after_that_was_there(self):
+        self.close(30.0)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        self.play(1.0, 20.0)
+        self.play(0.5, 10.0)
+
+    def test_built_through_a_step(self):
+        self.close(30.0)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        bpy.ops.rigmoves.add_step(index=0)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="STEP", step=0),
+                         {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        self.play(0.5, 20.0)
+        self.play(1.0, 30.0)
+        self.play(0.0, 0.0)
+
+    def test_refused_while_the_eye_shows_after(self):
+        self.close(30.0)
+        bpy.ops.rigmoves.build()
+        bpy.ops.rigmoves.show(index=0, which="AFTER")
+        self.assertEqual(self.curl(), {"CANCELLED"})
+        said = rig().rigmoves.report
+        self.assertIn("Curl works from rest", said)
+        self.assertIn("Build first", said)
+        # Nothing was moved, and a Build puts the sliders back.
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+
+    def test_refused_with_play_above_zero(self):
+        self.close(30.0)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        self.assertEqual(self.curl(), {"CANCELLED"})
+        self.assertIn("Curl works from rest: drag Play to 0", rig().rigmoves.report)
+        self.assertNotIn("Build first", rig().rigmoves.report)
+        drive(self.move, 0.0)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+
+    # -- where it begins ----------------------------------------------------
+
+    def test_from_a_joint_in_the_middle_of_the_chain(self):
+        # Seg3 bent by hand, on its own joint: it and what follows it bend;
+        # what it hangs from is left as it was.
+        self.segments[2].matrix_world = turn_about(self.KNUCKLES[2], "Y", 20.0) @ self.homes[2]
+        bpy.context.view_layer.update()
+        select(self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"FINISHED"})
+        self.check_places(self.bent_by((0.0, 0.0, 20.0, 20.0, 20.0)))
+        self.check_joints()
+
+    def test_it_asks_for_what_it_needs(self):
+        outsider = cube("Outsider", (9.0, 9.0, 0.0))
+        select(outsider)
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"CANCELLED"})
+        self.assertIn("first joint", rig().rigmoves.report)
+        # Not turned yet.
+        self.assertEqual(self.curl(), {"CANCELLED"})
+        self.assertIn("has not been turned", rig().rigmoves.report)
+        # Nothing follows the last one.
+        select(self.segments[4])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"CANCELLED"})
+        self.assertIn("Nothing follows 'Seg5'", rig().rigmoves.report)
+        self.check_places(self.homes)
+
+    def test_a_rider_has_no_bend_to_repeat(self):
+        rider = cube("Rider", (0.5, 4.0, 0.0))
+        select(self.segments[0], rider)
+        # The leader may not follow anything, so first let it go.
+        self.move.parts["Seg2"].follows = ""
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg1",
+                                                     rig_name=rig().name), {"FINISHED"})
+        select(rider)
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"CANCELLED"})
+        self.assertIn("rides along", rig().rigmoves.report)
+
+    def test_a_curl_can_be_undone(self):
+        self.pose_root(20.0)
+        select(self.segments[0])
+        undo_push()
+        bpy.ops.rigmoves.curl(index=0)
+        undo_push()
+        self.assertEqual(rigmoves.same_matrix(
+            bpy.data.objects["Seg5"].matrix_world, self.bent_by((20.0,) * 5)[4], 1e-4), True)
+        undo_once()
+        # Back to the first segment bent by hand, the rest carried whole.
+        carry = turn_about(self.KNUCKLES[0], "Y", 20.0)
+        for number in range(5):
+            seat = bpy.data.objects["Seg{:d}".format(number + 1)].matrix_world
+            self.assertTrue(rigmoves.same_matrix(seat, carry @ self.homes[number], 1e-4),
+                            number)
+
+    def test_the_button_sits_beside_make_chain(self):
+        found = [(where, text) for where, idname, text in drawn_buttons()
+                 if idname == "rigmoves.curl"]
+        self.assertEqual(found, [(("body:show_chain", "row"), "Curl")])
+
+
+class TestCurlOwnAxes(CopyThatCase):
+    """A tentacle that curves as it goes: every segment faces a different way,
+    so its own axes are not the world's, and each bends about its own."""
+
+    def setUp(self):
+        super().setUp()
+        self.segments, self.frames, self.knuckles = [], [], []
+        end = Vector((0.0, 0.0, 0.0))
+        for number in range(4):
+            turn = Matrix.Rotation(math.radians(25.0 * number), 3, "Z")
+            segment = cube("Seg{:d}".format(number + 1), end + turn @ Vector((0.5, 0.0, 0.0)))
+            segment.rotation_euler.z = math.radians(25.0 * number)
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+            self.frames.append(turn)
+            self.knuckles.append(end.copy())
+            end = end + turn @ Vector((1.0, 0.0, 0.0))
+        bpy.context.view_layer.update()
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+        select(*self.segments)
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        for segment, knuckle in zip(self.segments, self.knuckles):
+            bpy.context.scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        for number in range(1, 4):
+            self.move.parts["Seg{:d}".format(number + 1)].follows = "Seg{:d}".format(number)
+
+    def bent_by(self, angles):
+        """Each bends about its own local Y, through its own knuckle."""
+        out, carry = [], Matrix.Identity(4)
+        for frame, knuckle, home, degrees in zip(self.frames, self.knuckles, self.homes, angles):
+            carry = carry @ turn_about(knuckle, frame @ Vector((0.0, 1.0, 0.0)), degrees)
+            out.append(carry @ home)
+        return out
+
+    def test_each_joint_bends_about_its_own_axes(self):
+        self.segments[0].matrix_world = self.bent_by((20.0,))[0]
+        bpy.context.view_layer.update()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=0.5), {"FINISHED"})
+        for segment, place in zip(self.segments, self.bent_by((20.0, 20.0, 10.0, 5.0))):
+            expected = [place @ v.co for v in segment.data.vertices]
+            self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
+
+
+class TestCurlBranches(CopyThatCase):
+    """A palm with two fingers of two joints each: the palm is bent by hand
+    and the bend runs down both."""
+
+    def setUp(self):
+        super().setUp()
+        spots = {"Palm": (0.0, 0.0, 0.0), "A1": (1.0, 0.3, 0.0), "A2": (2.0, 0.3, 0.0),
+                 "B1": (1.0, -0.3, 0.0), "B2": (2.0, -0.3, 0.0)}
+        self.knuckles = {"Palm": Vector((0.5, 0.0, 0.0)), "A1": Vector((0.5, 0.3, 0.0)),
+                         "A2": Vector((1.5, 0.3, 0.0)), "B1": Vector((0.5, -0.3, 0.0)),
+                         "B2": Vector((1.5, -0.3, 0.0))}
+        self.objects = {}
+        for name, where in spots.items():
+            obj = cube(name, where)
+            obj.scale = (1.0, 0.25, 0.25) if name != "Palm" else (1.0, 1.0, 0.25)
+            self.objects[name] = obj
+        bpy.context.view_layer.update()
+        self.homes = {n: o.matrix_world.copy() for n, o in self.objects.items()}
+        select(*self.objects.values())
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        for name, knuckle in self.knuckles.items():
+            bpy.context.scene.cursor.location = knuckle
+            select(self.objects[name])
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        for name, ahead in (("A1", "Palm"), ("A2", "A1"), ("B1", "Palm"), ("B2", "B1")):
+            self.move.parts[name].follows = ahead
+
+    def test_the_bend_runs_down_both_fingers(self):
+        palm = turn_about(self.knuckles["Palm"], "Y", 20.0)
+        self.objects["Palm"].matrix_world = palm @ self.homes["Palm"]
+        bpy.context.view_layer.update()
+        select(self.objects["Palm"])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"FINISHED"})
+        carried = {"Palm": palm}
+        for name, ahead in (("A1", "Palm"), ("B1", "Palm"), ("A2", "A1"), ("B2", "B1")):
+            carried[name] = carried[ahead] @ turn_about(self.knuckles[name], "Y", 20.0)
+        for name, obj in self.objects.items():
+            expected = [carried[name] @ self.homes[name] @ v.co for v in obj.data.vertices]
+            self.assertLess(drift(obj, expected), TOLERANCE, name)
+        self.assertIn("4 part(s) below 'Palm'", rig().rigmoves.report)
+        # And it plays: recorded, built, closed at 1 and home at 0.
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        for name, obj in self.objects.items():
+            expected = [carried[name] @ self.homes[name] @ v.co for v in obj.data.vertices]
+            self.assertLess(drift(obj, expected), TOLERANCE, name)
+        drive(self.move, 0.0)
+        for name, obj in self.objects.items():
+            expected = [self.homes[name] @ v.co for v in obj.data.vertices]
+            self.assertLess(drift(obj, expected), TOLERANCE, name)
 
 
 class TestCombined(CopyThatCase):
