@@ -1675,6 +1675,18 @@ class TestSpread(CopyThatCase):
                                      both_ways=True), {"FINISHED"})
         self.assertEqual(self.leads(), [9, 18, 27, 36, 36, 27, 18, 9])
 
+    def test_riders_are_placed_by_the_pivot_they_inherit(self):
+        # The leader hinged well off its middle. A rider turns about that
+        # hinge carried over to it, so the ring to measure is of those - not
+        # of the leader's hinge against the riders' middles, which is lopsided.
+        leader, _riders = self.ring_of_riders(count=5, leader_on_ring=True)
+        bpy.context.scene.cursor.location = leader.location + Vector((0.4, 0.2, 0.3))
+        select(leader)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        select(leader)
+        self.spread("LEAD", order="AROUND", first=0.0, last=30.0, both_ways=True)
+        self.assertEqual(self.leads(), [10, 20, 30, 20, 10])
+
     def test_leads_run_one_way_round_without_both_ways(self):
         # Counter-clockwise looking down the ring's normal, which is up.
         self.ring_of_riders(count=4)
@@ -2428,6 +2440,287 @@ class TestCurlBranches(CopyThatCase):
         for name, obj in self.objects.items():
             expected = [self.homes[name] @ v.co for v in obj.data.vertices]
             self.assertLess(drift(obj, expected), TOLERANCE, name)
+
+
+class TestRing(CopyThatCase):
+    """One blade on a hinge, made into a fan round a tilted 3D cursor."""
+
+    def setUp(self):
+        super().setUp()
+        scene = bpy.context.scene
+        self.centre = Vector((2.0, -1.0, 1.0))
+        scene.cursor.location = self.centre
+        scene.cursor.rotation_euler = (math.radians(30.0), math.radians(-20.0),
+                                       math.radians(15.0))
+        bpy.context.view_layer.update()
+        self.axis = (scene.cursor.matrix.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+        self.assertGreater(abs(self.axis.x) + abs(self.axis.y), 0.3)   # not the world's Z
+        self.blade = cube("Blade", self.centre + Vector((3.0, 0.0, 0.0)))
+        self.blade.scale = (0.2, 1.0, 0.05)
+        bpy.context.view_layer.update()
+        self.home = self.blade.matrix_world.copy()
+        # Hinged on its inner end, and flapped 50 degrees about it.
+        self.hinge = self.home @ Vector((0.0, -0.5, 0.0))
+        self.flap_axis = Vector((1.0, 0.0, 0.0))
+
+        def pose():
+            self.blade.matrix_world = self.flap(50.0) @ self.home
+
+        record_move([self.blade], pose)
+        scene.cursor.location = self.hinge
+        select(self.blade)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        scene.cursor.location = self.centre
+        self.move = rig().rigmoves.moves[0]
+
+    def flap(self, degrees):
+        return turn_about(self.hinge, self.flap_axis, degrees)
+
+    def turned(self, number, count=6):
+        """Where the part number `number` round a ring of `count` stands."""
+        return turn_about(self.centre, self.axis, 360.0 * number / count)
+
+    def ring(self, **kwargs):
+        select(self.blade)
+        return bpy.ops.rigmoves.ring(index=0, **kwargs)
+
+    def copies(self):
+        return [bpy.data.objects["Blade {:d}".format(n)] for n in range(2, 7)]
+
+    def check_ring_at(self, flap_degrees, count=6):
+        """Every blade in the ring, in the leader's pose of this much flap
+        turned round to its own place."""
+        for number in range(count):
+            blade = self.blade if not number else self.copies()[number - 1]
+            expected = [self.turned(number, count) @ self.flap(flap_degrees)
+                        @ self.home @ v.co for v in blade.data.vertices]
+            self.assertLess(drift(blade, expected), TOLERANCE, blade.name)
+
+    # -- what it makes ------------------------------------------------------
+
+    def test_copies_stand_round_the_cursor_at_the_rotated_before(self):
+        # The blade is standing at its After: the ring is made from its Before.
+        self.assertEqual(self.ring(count=6), {"FINISHED"})
+        for number, copy in enumerate(self.copies(), start=1):
+            expected = [self.turned(number) @ self.home @ v.co for v in copy.data.vertices]
+            self.assertLess(max((a - b).length for a, b in zip(rest_points(copy), expected)),
+                            TOLERANCE, copy.name)
+        self.assertEqual(rig().rigmoves.report,
+                         "5 copies of 'Blade' round the 3D cursor ride along with it.")
+
+    def test_copies_share_the_mesh_and_carry_nothing_of_the_rig(self):
+        self.ring(count=6)
+        for copy in self.copies():
+            self.assertIs(copy.data, self.blade.data)
+            self.assertEqual(list(copy.modifiers), [])
+            self.assertEqual(list(copy.vertex_groups), [])
+            self.assertIsNone(copy.parent)
+            self.assertIsNone(copy.get(rigmoves.FOLLOW_MARK))
+        self.assertEqual(self.blade.data.users, 6)
+
+    def test_copies_ride_along_with_it(self):
+        self.ring(count=6)
+        parts = rig().rigmoves.moves[0].parts
+        self.assertEqual([p.leader for p in parts if p.name != "Blade"], ["Blade"] * 5)
+        self.assertEqual([p.name for p in parts if p.leader],
+                         ["Blade {:d}".format(n) for n in range(2, 7)])
+
+    def test_the_blade_is_left_selected_and_active(self):
+        self.ring(count=6)
+        self.assertEqual(bpy.context.view_layer.objects.active, self.blade)
+        self.assertEqual({o.name for o in bpy.context.selected_objects},
+                         {"Blade"} | {"Blade {:d}".format(n) for n in range(2, 7)})
+
+    def test_each_copy_makes_the_move_from_its_own_place(self):
+        self.ring(count=6)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.check_ring_at(0.0)
+        drive(self.move, 0.5)
+        self.check_ring_at(25.0)
+        drive(self.move, 1.0)
+        self.check_ring_at(50.0)
+
+    def test_build_gives_each_part_a_mesh_and_a_group_of_its_own(self):
+        self.ring(count=6)
+        bpy.ops.rigmoves.build()
+        everyone = [self.blade] + self.copies()
+        self.assertEqual(len({o.data.name for o in everyone}), 6)
+        for blade in everyone:
+            self.assertEqual([g.name for g in blade.vertex_groups], [blade.name])
+            self.assertEqual([m.object for m in blade.modifiers if m.type == "ARMATURE"],
+                             [rig()])
+            self.assertEqual(blade.parent, rig())
+
+    def test_a_ring_on_a_built_move_builds_on_the_side(self):
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.ring(count=6), {"FINISHED"})
+        # No Build since: the copies are bound, and play at once.
+        for blade in self.copies():
+            self.assertEqual([g.name for g in blade.vertex_groups], [blade.name])
+            self.assertEqual(len([m for m in blade.modifiers if m.type == "ARMATURE"]), 1)
+        self.assertEqual([g.name for g in self.blade.vertex_groups], ["Blade"])
+        drive(self.move, 1.0)
+        self.check_ring_at(50.0)
+        drive(self.move, 0.0)
+        self.check_ring_at(0.0)
+
+    def test_unlinked_copies_have_meshes_of_their_own(self):
+        self.ring(count=4, linked=False)
+        for number in (2, 3, 4):
+            copy = bpy.data.objects["Blade {:d}".format(number)]
+            self.assertIsNot(copy.data, self.blade.data)
+            self.assertEqual(len(copy.data.vertices), len(self.blade.data.vertices))
+            self.assertEqual(copy.data.users, 1)
+
+    def test_a_ring_round_the_world_origin_about_an_axis(self):
+        self.assertEqual(self.ring(count=4, center="ORIGIN", axis="X"), {"FINISHED"})
+        for number in (1, 2, 3):
+            copy = bpy.data.objects["Blade {:d}".format(number + 1)]
+            expected = [Matrix.Rotation(math.radians(90.0 * number), 4, "X") @ self.home
+                        @ v.co for v in copy.data.vertices]
+            self.assertLess(max((a - b).length for a, b in zip(rest_points(copy), expected)),
+                            TOLERANCE, copy.name)
+        self.assertIn("round the world origin", rig().rigmoves.report)
+
+    def test_names_that_are_taken_are_made_unique(self):
+        cube("Blade 2", (9.0, 9.0, 9.0))
+        self.assertEqual(self.ring(count=3), {"FINISHED"})
+        parts = rig().rigmoves.moves[0].parts
+        riders = [p.name for p in parts if p.leader]
+        self.assertEqual(len(riders), 2)
+        self.assertNotIn("Blade 2", riders)
+
+    def test_leads_are_spread_out_from_the_blade_both_ways(self):
+        self.assertEqual(self.ring(count=6, lead_first=0, lead_last=-30), {"FINISHED"})
+        parts = rig().rigmoves.moves[0].parts
+        self.assertEqual({p.name: p.lead for p in parts if p.leader},
+                         {"Blade 2": -10, "Blade 3": -20, "Blade 4": -30,
+                          "Blade 5": -20, "Blade 6": -10})
+        self.assertIn("Leads 0 to -30", rig().rigmoves.report)
+
+    def test_no_spread_of_leads_when_first_and_last_agree(self):
+        self.ring(count=6, lead_first=5, lead_last=5)
+        parts = rig().rigmoves.moves[0].parts
+        self.assertEqual({p.lead for p in parts if p.leader}, {0})
+
+    # -- what it will not do, and leaves nothing behind ---------------------
+
+    def stock(self):
+        return (sorted(o.name for o in bpy.data.objects), sorted(m.name for m in bpy.data.meshes),
+                len(rig().rigmoves.moves[0].parts))
+
+    def test_an_unrecorded_drag_is_refused_and_nothing_is_made(self):
+        bpy.ops.rigmoves.build()
+        self.blade.location.z += 2.0
+        bpy.context.view_layer.update()
+        stock = self.stock()
+        self.assertEqual(self.ring(count=6), {"CANCELLED"})
+        self.assertIn("moved and not recorded", rig().rigmoves.report)
+        self.assertEqual(self.stock(), stock)
+
+    def test_only_a_part_that_can_lead_will_do(self):
+        outsider = cube("Outsider", (9.0, 9.0, 0.0))
+        stock = self.stock()
+        select(outsider)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0), {"CANCELLED"})
+        self.assertIn("Select the part", rig().rigmoves.report)
+        self.assertEqual(self.stock(), stock)
+        # A rider, and a part that follows, cannot lead copies.
+        other = cube("Other", (9.0, 5.0, 0.0))
+        select(other, self.blade)
+        bpy.ops.rigmoves.ride_along(index=0, leader="Blade", rig_name=rig().name)
+        stock = self.stock()
+        select(other)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0), {"CANCELLED"})
+        self.assertIn("rides along with 'Blade'", rig().rigmoves.report)
+        self.assertEqual(self.stock(), stock)
+
+    def test_a_follower_cannot_lead_copies(self):
+        rear = cube("Rear", (9.0, 5.0, 0.0))
+        select(rear, self.blade)
+        bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name)
+        self.move.parts["Rear"].follows = "Blade"
+        stock = self.stock()
+        select(rear)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0), {"CANCELLED"})
+        self.assertIn("follows 'Blade'", rig().rigmoves.report)
+        self.assertEqual(self.stock(), stock)
+
+    def test_a_ring_can_be_undone(self):
+        select(self.blade)
+        stock = self.stock()
+        undo_push()
+        bpy.ops.rigmoves.ring(index=0, count=6)
+        undo_push()
+        self.assertEqual(len(bpy.data.objects), len(stock[0]) + 5)
+        undo_once()
+        self.assertEqual(self.stock(), stock)
+        self.assertIsNone(bpy.data.objects.get("Blade 2"))
+
+    def test_a_ring_on_a_built_move_can_be_undone(self):
+        bpy.ops.rigmoves.build()
+        select(self.blade)
+        stock = self.stock()
+        undo_push()
+        bpy.ops.rigmoves.ring(index=0, count=6)
+        undo_push()
+        undo_once()
+        self.assertEqual(self.stock(), stock)
+        self.assertEqual([g.name for g in bpy.data.objects["Blade"].vertex_groups], ["Blade"])
+
+    def test_the_button_is_in_the_moves_body(self):
+        found = [(where, text) for where, idname, text in drawn_buttons()
+                 if idname == "rigmoves.ring"]
+        self.assertEqual(found, [(("body:expanded", "row"), "Ring…")])
+
+
+class TestLinkedParts(CopyThatCase):
+    """Two parts that are linked duplicates share one mesh, and so its groups."""
+
+    def test_linked_duplicates_each_land_on_their_own_after(self):
+        one = cube("One", (0.0, 0.0, 0.0))
+        two = one.copy()
+        bpy.context.collection.objects.link(two)
+        two.name = "Two"
+        two.location = (5.0, 0.0, 0.0)
+        bpy.context.view_layer.update()
+        self.assertIs(one.data, two.data)
+        select(one, two)
+        bpy.ops.rigmoves.new_move()
+        one.location.z += 1.0
+        two.location.z += 3.0
+        bpy.context.view_layer.update()
+        after = {o.name: rest_points(o) for o in (one, two)}
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        drive(rig().rigmoves.moves[0], 1.0)
+        self.assertLess(drift(one, after["One"]), TOLERANCE)
+        self.assertLess(drift(two, after["Two"]), TOLERANCE)
+        self.assertIsNot(one.data, two.data)
+
+    def test_a_copy_of_a_bound_part_does_not_keep_its_group(self):
+        one = cube("One", (0.0, 0.0, 0.0))
+        select(one)
+        bpy.ops.rigmoves.new_move()
+        one.location.z += 1.0
+        bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        # Duplicated by hand, as Alt+D would, bone group and modifier and all.
+        two = one.copy()
+        two.data = one.data.copy()
+        bpy.context.collection.objects.link(two)
+        two.name = "Two"
+        two.location = (5.0, 0.0, 0.0)
+        bpy.context.view_layer.update()
+        self.assertEqual([g.name for g in two.vertex_groups], ["One"])
+        select(two, one)
+        bpy.ops.rigmoves.ride_along(index=0, leader="One", rig_name=rig().name)
+        self.assertEqual([g.name for g in two.vertex_groups], ["Two"])
+        drive(rig().rigmoves.moves[0], 1.0)
+        self.assertAlmostEqual(centre(two).z, 1.0, places=4)
+        self.assertAlmostEqual(centre(two).x, 5.0, places=4)
 
 
 class TestCombined(CopyThatCase):

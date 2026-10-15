@@ -1865,6 +1865,18 @@ def bind_object(rig, obj, bone_name):
     second frame of reference to keep straight for no gain on a rigid part.
     One group, one modifier, and the object's own transform is left alone.
     """
+    # Vertex groups belong to the mesh, not to the object, so objects that
+    # share one mesh share its groups. Two linked duplicates bound each to a
+    # bone of its own were each pulled by both bones, and neither moved where
+    # it was recorded. A bound object has a mesh of its own.
+    if obj.type == "MESH" and obj.data.users - int(obj.data.use_fake_user) > 1:
+        obj.data = obj.data.copy()
+    # A copy of a bound part arrives holding the group named after the bone
+    # of the original; its modifier points at the same rig, so that group
+    # would drag it along with the original's bone as well as its own.
+    others = our_part_bones(rig.rigmoves) - {bone_name}
+    for stale in [g for g in obj.vertex_groups if g.name in others]:
+        obj.vertex_groups.remove(stale)
     group = obj.vertex_groups.get(bone_name) or obj.vertex_groups.new(name=bone_name)
     group.add(range(len(obj.data.vertices)), 1.0, "REPLACE")
     modifier = next((m for m in obj.modifiers
@@ -3424,13 +3436,29 @@ LEAD_LIMITS = (-50, 50)
 DELAY_LIMITS = (0.0, 0.99)
 
 
-def part_spot(rig, part, middle=False):
+def rider_spot(rig, leader, rider):
+    """Where a rider turns, in the world, standing where it stands at Before:
+    its leader's pivot carried over to it, the way its bone is stood on it -
+    through the frames the two stand in, and mirrored if it mirrors."""
+    own = frame_of(as_matrix(rider.before))
+    back = leader_frame(rig, leader)[0].inverted_safe()
+    local = rider_reflection(rig, leader, rider)
+    mirror = local.to_4x4() if local is not None else Matrix.Identity(4)
+    return own @ mirror @ back @ pivot_world(leader)
+
+
+def part_spot(rig, move, part, middle=False):
     """Where a part stands, in the world, for putting parts in order: its
     pivot at Before - where it turns, not where it happens to be drawn now -
-    or, with `middle`, the middle of it."""
+    or, with `middle`, the middle of it. A rider's pivot is its leader's,
+    carried over: measured from its own origin it would not be on the same
+    ring as the leader's."""
     if part.kind == "OBJECT" and part.has_before:
         before = as_matrix(part.before)
         if not middle:
+            leader = leader_of(move, part) if part.leader else None
+            if leader is not None and leader.kind == "OBJECT" and leader.has_before:
+                return rider_spot(rig, leader, part)
             return pivot_world(part)
         obj = bpy.data.objects.get(part.name)
         if obj is not None and obj.type == "MESH":
@@ -3443,16 +3471,16 @@ def part_spot(rig, part, middle=False):
     return obj.matrix_world.translation.copy() if obj is not None else Vector()
 
 
-def spots_of(rig, parts):
+def spots_of(rig, move, parts):
     """Where each of these parts stands.
 
     Their pivots - unless every one of them is the same point, as with the
     blades of a fan all turning about the hub. Then the pivots say nothing
     about who stands where, and the middle of each part is used instead.
     """
-    spots = [part_spot(rig, p) for p in parts]
+    spots = [part_spot(rig, move, p) for p in parts]
     if len(spots) > 1 and max((s - spots[0]).length for s in spots) < 1e-5:
-        return [part_spot(rig, p, middle=True) for p in parts]
+        return [part_spot(rig, move, p, middle=True) for p in parts]
     return spots
 
 
@@ -3546,7 +3574,7 @@ def spread_shares(rig, move, groups, order, axis, both_ways, seed):
             stands_in = reference is None or reference.name in names
             ahead = reference if reference is not None else parts[0]
             everyone = parts if stands_in else parts + [ahead]
-            spots = spots_of(rig, everyone)
+            spots = spots_of(rig, move, everyone)
             where = spots[:len(parts)]
             start = spots[names.index(ahead.name)] if stands_in else spots[-1]
             if order == "DISTANCE":
@@ -5070,11 +5098,11 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
 # of the first joint and repeats it down the rest.
 
 
-def chain_order(rig, parts, root):
+def chain_order(rig, move, parts, root):
     """The parts in the order a chain runs through them: from the root, each
     next one the nearest of those not yet in it, measured between pivots at
     Before. Parts equally near keep the order they were listed in."""
-    spots = {p.name: where for p, where in zip(parts, spots_of(rig, parts))}
+    spots = {p.name: where for p, where in zip(parts, spots_of(rig, move, parts))}
     order = [root]
     left = [p for p in parts if p.name != root.name]
     while left:
@@ -5116,7 +5144,7 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
             return self.refuse(data, "'{:s}' rides along with '{:s}', so a chain cannot "
                                      "start from it.".format(short(root.name, 18),
                                                               short(root.leader, 18)))
-        order = chain_order(rig, parts, root)
+        order = chain_order(rig, move, parts, root)
         # One link at a time, through the same choice the Follows list makes:
         # a rider, a part that leads riders, a loop - each is turned down
         # there, with its reason, and the chain stops at that point.
@@ -5292,6 +5320,220 @@ class RIGMOVES_OT_curl(bpy.types.Operator):
             said += ", each joint after the first x{:g}".format(self.factor)
         data.report = said + ". Record After, or a Step, to keep it."
         self.report({"INFO"}, data.report)
+        return {"FINISHED"}
+
+
+# ---------------------------------------------------------------------------
+# rings: a fan, a gear, a crown of spikes - one part, made many times round
+#
+# Modelling the same part eight times and selecting them for Ride Along is the
+# first slow part of a flower. Ring makes the copies, stands them round a
+# point, and sets them riding along with the part they came from.
+
+RING_CENTRES = [("CURSOR", "3D Cursor", "Round the point the 3D cursor is on"),
+                ("ORIGIN", "World Origin", "Round the world's origin")]
+RING_AXES = [("CURSOR_Z", "Cursor's Z", "About the 3D cursor's own Z axis, turned "
+                                       "however the cursor is"),
+             ("X", "X", "About the world's X axis"),
+             ("Y", "Y", "About the world's Y axis"),
+             ("Z", "Z", "About the world's Z axis")]
+
+
+def ring_centre(scene, which):
+    """The point a ring goes round."""
+    if which == "CURSOR":
+        return scene.cursor.location.copy()
+    return Vector((0.0, 0.0, 0.0))
+
+
+def ring_axis(scene, which):
+    """The direction a ring goes round."""
+    if which == "CURSOR_Z":
+        return (scene.cursor.matrix.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+    return Vector([1.0 if name == which else 0.0 for name in AXES])
+
+
+def copy_for_ring(source, name, linked):
+    """A copy of a part's object that has nothing of the rig about it.
+
+    Everything that bound or hung the original is taken off: the Armature
+    modifier of any rig of ours, the groups named after our bones, the mark
+    of a follower, the parent. Groups are on the mesh, so a copy that shares
+    the original's mesh cannot lose them without the original losing them
+    too; it is left with them, and Build gives it a mesh of its own when it
+    binds it.
+    """
+    copy = source.copy()
+    if not linked and source.data is not None:
+        copy.data = source.data.copy()
+    copy.name = name
+    for collection in source.users_collection:
+        collection.objects.link(copy)
+    rigs = [o for o in bpy.data.objects if o.type == "ARMATURE" and len(o.rigmoves.moves)]
+    ours = {o.name for o in rigs}
+    for modifier in list(copy.modifiers):
+        if (modifier.type == "ARMATURE" and modifier.object is not None
+                and modifier.object.name in ours):
+            copy.modifiers.remove(modifier)
+    if copy.data is not None and copy.data.users == 1:
+        bones = set()
+        for owner in rigs:
+            bones |= our_part_bones(owner.rigmoves) | our_bone_names(owner.rigmoves)
+        for group in [g for g in copy.vertex_groups if g.name in bones]:
+            copy.vertex_groups.remove(group)
+    if copy.get(FOLLOW_MARK):
+        del copy[FOLLOW_MARK]
+    copy.parent = None
+    copy.matrix_parent_inverse = Matrix.Identity(4)
+    # Keys on its own transform would send every copy back to the original's.
+    if own_transform_curves(copy):
+        copy.animation_data_clear()
+    return copy
+
+
+def discard_copies(copies):
+    """Take copies made for a ring away again, and their meshes."""
+    for copy in copies:
+        mesh = copy.data
+        bpy.data.objects.remove(copy, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+
+class RIGMOVES_OT_ring(bpy.types.Operator):
+    bl_idname = "rigmoves.ring"
+    bl_label = "Ring"
+    bl_description = ("Make copies of the active part round the 3D cursor and "
+                      "let them ride along with it, each doing its move from "
+                      "its own place: one blade becomes a fan. Select the part "
+                      "first")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty(options={"HIDDEN"})
+    count: bpy.props.IntProperty(
+        name="Count", default=6, min=2, max=200,
+        description="How many there are round the ring, the original included")
+    center: bpy.props.EnumProperty(name="Round", items=RING_CENTRES, default="CURSOR")
+    axis: bpy.props.EnumProperty(name="About", items=RING_AXES, default="CURSOR_Z")
+    linked: bpy.props.BoolProperty(
+        name="Linked copies", default=True,
+        description="Share the original's mesh, so editing one edits them all. "
+                    "Build gives each part a mesh of its own, because Blender "
+                    "keeps a mesh's vertex groups with the mesh")
+    lead_first: bpy.props.IntProperty(
+        name="First Lead", default=0, min=-50, max=50,
+        description="The Lead of the copies nearest the original round the ring")
+    lead_last: bpy.props.IntProperty(
+        name="Last Lead", default=0, min=-50, max=50,
+        description="The Lead of the copies furthest from the original. Different "
+                    "from the first, they open one after another, spread both "
+                    "ways round the ring")
+
+    def refuse(self, data, said):
+        data.report = said
+        self.report({"WARNING"}, said)
+        return None
+
+    def plan(self, context):
+        """(rig, data, move, part, object) - or None, with the reason said.
+        Everything that can be refused is asked here, before a thing is made."""
+        rig, data, move = move_at(context, self.index)
+        if move is None:
+            return None
+        active = context.view_layer.objects.active
+        part = move.parts.get(active.name) if active is not None else None
+        if part is None or part.kind != "OBJECT":
+            return self.refuse(data, "Select the part to make a ring from - an object "
+                                     "of '{:s}' - and make it the active one."
+                                     .format(move.name))
+        if part.leader:
+            return self.refuse(data, "'{:s}' rides along with '{:s}'. Make the ring from "
+                                     "that part instead.".format(
+                                         short(part.name, 18), short(part.leader, 18)))
+        if part.follows:
+            return self.refuse(data, "'{:s}' follows '{:s}' and goes where it is "
+                                     "carried, so copies could not ride along with it. "
+                                     "Make the ring from the part that starts the "
+                                     "chain.".format(short(part.name, 18),
+                                                     short(part.follows, 18)))
+        if not part.has_before or active.type != "MESH":
+            return self.refuse(data, "'{:s}' has no Before recorded yet.".format(
+                short(part.name, 18)))
+        # Riding along on a built move is a Build, and Build puts a dragged
+        # part back: refused now, with nothing made, rather than half way.
+        if move.built and not keeps_drags(self, data):
+            return None
+        return rig, data, move, part, active
+
+    def invoke(self, context, event):
+        if self.plan(context) is None:
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        layout.prop(self, "count")
+        layout.prop(self, "center")
+        layout.prop(self, "axis")
+        layout.prop(self, "linked")
+        column = layout.column(align=True)
+        column.prop(self, "lead_first")
+        column.prop(self, "lead_last")
+
+    def execute(self, context):
+        found = self.plan(context)
+        if found is None:
+            return {"CANCELLED"}
+        rig, data, move, part, source = found
+        # Read before anything is added: adding parts can move the list.
+        name = part.name
+        seat = as_matrix(part.before)
+        scene = context.scene
+        centre, axis = ring_centre(scene, self.center), ring_axis(scene, self.axis)
+        copies = []
+        for number in range(1, self.count):
+            copy = copy_for_ring(source, "{:s} {:d}".format(name, number + 1), self.linked)
+            copies.append(copy)
+            # From where the part was recorded, not where it stands now: it
+            # may be showing its After.
+            turn = Matrix.Rotation(math.radians(360.0 * number / self.count), 4, axis)
+            copy.matrix_world = (Matrix.Translation(centre) @ turn
+                                 @ Matrix.Translation(-centre) @ seat)
+        context.view_layer.update()
+
+        for other in context.selected_objects:
+            other.select_set(False)
+        for copy in copies:
+            copy.select_set(True)
+        source.select_set(True)
+        context.view_layer.objects.active = source
+        try:
+            done = bpy.ops.rigmoves.ride_along(index=self.index, leader=name,
+                                               rig_name=rig.name)
+        except RuntimeError:
+            done = {"CANCELLED"}
+        if done != {"FINISHED"}:
+            # Nothing is left behind by a ring that could not be finished.
+            discard_copies(copies)
+            return {"CANCELLED"}
+
+        data = rig.rigmoves
+        move = data.moves[self.index]
+        said = "{:d} copies of '{:s}' round {:s} ride along with it.".format(
+            len(copies), short(name, 18),
+            "the 3D cursor" if self.center == "CURSOR" else "the world origin")
+        if self.lead_first != self.lead_last:
+            # Out from the original both ways round: the two sides match.
+            riders = [p for p in move.parts if p.leader == name]
+            shares = spread_shares(rig, move, [(move.parts[name], riders)],
+                                   "AROUND", "Z", True, 0)
+            spread_values("LEAD", riders, shares, self.lead_first, self.lead_last)
+            refresh_drivers(rig, data, move)
+            said += " Leads {:d} to {:d} out from it, both ways round.".format(
+                self.lead_first, self.lead_last)
+        data.report = said
+        self.report({"INFO"}, said)
         return {"FINISHED"}
 
 
@@ -5948,6 +6190,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             said.label(text="+ adds a pose in between, for a path that bends")
         body.prop(move, "ease", text="")
         self._draw_path(body, context, move, index)
+        self._draw_ring(body, context, move, index)
 
         # Riders have no delay of their own: each is placed against its
         # leader instead, ahead or behind, and travels at the leader's speed.
@@ -6093,6 +6336,21 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             said.enabled = False
             said.label(text="select a part to set where it turns")
 
+    def _draw_ring(self, body, context, move, index):
+        """One button for making a ring of copies of the selected part, which
+        ride along with it. Dimmed until the active object is a part that can
+        lead them."""
+        if not any(p.kind == "OBJECT" and not p.leader and not p.follows
+                   for p in move.parts):
+            return
+        active = context.view_layer.objects.active
+        part = move.parts.get(active.name) if active is not None else None
+        row = body.row(align=True)
+        row.enabled = bool(part is not None and part.kind == "OBJECT"
+                           and not part.leader and not part.follows)
+        row.operator(RIGMOVES_OT_ring.bl_idname, text="Ring…",
+                     icon="MESH_CIRCLE").index = index
+
     def _draw_path(self, body, context, move, index):
         """Curving the path, and the line that shows where it goes."""
         row = body.row(align=True)
@@ -6198,6 +6456,7 @@ CLASSES = (
     RIGMOVES_OT_spread,
     RIGMOVES_OT_make_chain,
     RIGMOVES_OT_curl,
+    RIGMOVES_OT_ring,
     RIGMOVES_OT_animate,
     RIGMOVES_OT_key_control,
     RIGMOVES_OT_pause,
