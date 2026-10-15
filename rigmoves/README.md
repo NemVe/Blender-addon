@@ -17,8 +17,12 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.18.1.zip`,
-tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
+CopyThat is a Blender extension. First, if an older RigMoves or CopyThat is
+listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
+the two cannot be on at once. Then drag `CopyThat-0.18.1.zip` into Blender,
+or use Edit > Preferences > **Get Extensions** > the drop-down at the top
+right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
+**CopyThat**. Files made with older versions keep working.
 
 ## Use
 

@@ -14,8 +14,9 @@ By **NemVe3D** - <https://creators.sa/nemve>
 
     python tools/build_zip.py
 
-writes `dist/CopyThat-<version>.zip`. In Blender: Edit > Preferences > Add-ons >
-Install from Disk, pick the zip, tick it on. The panel is in the 3D view
+writes `dist/CopyThat-<version>.zip`. In Blender: drag the zip in, or Edit > Preferences >
+Get Extensions > Install from Disk (remove any older legacy RigMoves/CopyThat
+add-on first). The panel is in the 3D view
 sidebar (**N**), tab **CopyThat**.
 
 ## What is where
