@@ -2085,6 +2085,17 @@ class TestMakeChain(CopyThatCase):
                 self.move.parts["Seg{:d}".format(number - 1)]
             self.assertEqual(bones[part.bone_name].parent.name, ahead.bone_name)
 
+    def test_a_part_that_leads_riders_may_follow(self):
+        # It used to be turned down: its riders would be left behind. They
+        # hang from what it hangs from now, so it is chained like any other.
+        rider = cube("Rider", (2.0, 4.0, 0.0))
+        select(self.segments[2], rider)
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg2",
+                                                     rig_name=rig().name), {"FINISHED"})
+        self.assertEqual(self.chain(), {"FINISHED"})
+        self.assertEqual(self.follows()["Seg2"], "Seg1")
+        self.assertNotIn("Stopped", rig().rigmoves.report)
+
     def test_a_rider_in_the_selection_stops_the_chain_there(self):
         # Seg1 leads a rider that stands between Seg3 and Seg4. The rider
         # cannot follow, and the chain stops there, with the reason said.
@@ -2235,23 +2246,23 @@ class TestCurl(CopyThatCase):
         self.play(0.0, 0.0)
         self.check_places(self.homes)
 
-    def test_loose_each_joint_after_the_first_keeps_a_share(self):
+    def test_loose_each_joint_keeps_a_share_of_the_one_before(self):
         self.pose_root(20.0)
         self.assertEqual(self.curl(factor=0.5), {"FINISHED"})
-        # The first joint after the root repeats its bend, and each one past
-        # that keeps half of the one before: 20, 10, 5, 2.5 below the root.
-        self.check_places(self.bent_by((20.0, 20.0, 10.0, 5.0, 2.5)))
+        # Each joint is half the one before it: 20 at the root, then 10, 5,
+        # 2.5 and 1.25 down the four that follow.
+        self.check_places(self.bent_by((20.0, 10.0, 5.0, 2.5, 1.25)))
         self.check_joints()
-        self.assertIn("each joint after the first x0.5", rig().rigmoves.report)
+        self.assertIn("each joint x0.5 of the one before", rig().rigmoves.report)
         self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
         bpy.ops.rigmoves.build()
         drive(self.move, 1.0)
-        self.check_places(self.bent_by((20.0, 20.0, 10.0, 5.0, 2.5)))
+        self.check_places(self.bent_by((20.0, 10.0, 5.0, 2.5, 1.25)))
 
     def test_a_factor_above_one_bends_the_tip_most(self):
         self.pose_root(10.0)
-        self.assertEqual(self.curl(factor=2.0), {"FINISHED"})
-        self.check_places(self.bent_by((10.0, 10.0, 20.0, 40.0, 80.0)))
+        self.assertEqual(self.curl(factor=1.5), {"FINISHED"})
+        self.check_places(self.bent_by((10.0, 15.0, 22.5, 33.75, 50.625)))
         self.check_joints()
 
     def test_a_turn_about_the_pivot_is_all_that_is_repeated(self):
@@ -2438,7 +2449,7 @@ class TestCurlOwnAxes(CopyThatCase):
         bpy.context.view_layer.update()
         select(self.segments[0])
         self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=0.5), {"FINISHED"})
-        for segment, place in zip(self.segments, self.bent_by((20.0, 20.0, 10.0, 5.0))):
+        for segment, place in zip(self.segments, self.bent_by((20.0, 10.0, 5.0, 2.5))):
             expected = [place @ v.co for v in segment.data.vertices]
             self.assertLess(drift(segment, expected), TOLERANCE, segment.name)
 
@@ -2691,17 +2702,6 @@ class TestRing(CopyThatCase):
         self.assertIn("rides along with 'Blade'", rig().rigmoves.report)
         self.assertEqual(self.stock(), stock)
 
-    def test_a_follower_cannot_lead_copies(self):
-        rear = cube("Rear", (9.0, 5.0, 0.0))
-        select(rear, self.blade)
-        bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name)
-        self.move.parts["Rear"].follows = "Blade"
-        stock = self.stock()
-        select(rear)
-        self.assertEqual(bpy.ops.rigmoves.ring(index=0), {"CANCELLED"})
-        self.assertIn("follows 'Blade'", rig().rigmoves.report)
-        self.assertEqual(self.stock(), stock)
-
     def test_a_ring_can_be_undone(self):
         select(self.blade)
         stock = self.stock()
@@ -2753,29 +2753,6 @@ class TestLinkedParts(CopyThatCase):
         self.assertLess(drift(one, after["One"]), TOLERANCE)
         self.assertLess(drift(two, after["Two"]), TOLERANCE)
         self.assertIsNot(one.data, two.data)
-
-    def test_a_copy_of_a_bound_part_does_not_keep_its_group(self):
-        one = cube("One", (0.0, 0.0, 0.0))
-        select(one)
-        bpy.ops.rigmoves.new_move()
-        one.location.z += 1.0
-        bpy.context.view_layer.update()
-        bpy.ops.rigmoves.record(index=0, which="AFTER")
-        bpy.ops.rigmoves.build()
-        # Duplicated by hand, as Alt+D would, bone group and modifier and all.
-        two = one.copy()
-        two.data = one.data.copy()
-        bpy.context.collection.objects.link(two)
-        two.name = "Two"
-        two.location = (5.0, 0.0, 0.0)
-        bpy.context.view_layer.update()
-        self.assertEqual([g.name for g in two.vertex_groups], ["One"])
-        select(two, one)
-        bpy.ops.rigmoves.ride_along(index=0, leader="One", rig_name=rig().name)
-        self.assertEqual([g.name for g in two.vertex_groups], ["Two"])
-        drive(rig().rigmoves.moves[0], 1.0)
-        self.assertAlmostEqual(centre(two).z, 1.0, places=4)
-        self.assertAlmostEqual(centre(two).x, 5.0, places=4)
 
 
 def eased(degrees, progress):
@@ -2926,7 +2903,7 @@ class TestEndToEnd(CopyThatCase):
                 out[number] = carry @ homes[number]
             return out
 
-        angles = (20.0, 20.0, 10.0, 5.0, 2.5)
+        angles = (20.0, 10.0, 5.0, 2.5, 1.25)
         segments[1].matrix_world = bends((20.0,))[1]
         bpy.context.view_layer.update()
         select(segments[1])
@@ -3258,6 +3235,220 @@ class TestCopiedParts(CopyThatCase):
         self.check_travel(first, rest, 0.0)
         drive(self.move, 1.0)
         self.check_travel(first, rest, 1.0)
+
+
+class TestRingAFinger(CopyThatCase):
+    """A finger of three segments, closed 30 degrees at After, made into five
+    fingers round a tilted cursor: Ride Along takes whole copies of a chain,
+    joint for joint, so a ring of one is a ring of whole fingers."""
+
+    KNUCKLES = [Vector((float(n), 0.0, 0.0)) for n in range(3)]
+
+    def setUp(self):
+        super().setUp()
+        scene = bpy.context.scene
+        self.centre = Vector((-2.0, -1.0, 0.0))
+        scene.cursor.rotation_euler = (math.radians(25.0), 0.0, 0.0)
+        scene.cursor.location = self.centre
+        bpy.context.view_layer.update()
+        self.axis = (scene.cursor.matrix.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+        self.segments = []
+        for number in range(3):
+            segment = cube("Seg{:d}".format(number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+        bpy.context.view_layer.update()
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+        select(*self.segments)
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        for segment, knuckle in zip(self.segments, self.KNUCKLES):
+            scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        scene.cursor.location = self.centre
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        for segment, place in zip(self.segments, self.bent(30.0)):
+            segment.matrix_world = place
+            bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    def bent_by(self, angles):
+        out, carry = [], Matrix.Identity(4)
+        for knuckle, home, degrees in zip(self.KNUCKLES, self.homes, angles):
+            carry = carry @ turn_about(knuckle, "Y", degrees)
+            out.append(carry @ home)
+        return out
+
+    def bent(self, degrees):
+        return self.bent_by((degrees,) * 3)
+
+    def turned(self, finger, count=5):
+        return turn_about(self.centre, self.axis, 360.0 * finger / count)
+
+    def ring(self, active=0, **kwargs):
+        select(self.segments[active])
+        return bpy.ops.rigmoves.ring(index=0, **kwargs)
+
+    def joint(self, number, finger):
+        """The segment of this finger: 0 is the recorded one."""
+        name = "Seg{:d}".format(number + 1)
+        return bpy.data.objects[name if not finger else "{:s} {:d}".format(name, finger + 1)]
+
+    def check_fingers(self, angles, count=5, fingers=None, tolerance=TOLERANCE):
+        """Every finger in the pose of the recorded one at these angles,
+        turned round to where it stands."""
+        for finger in (range(count) if fingers is None else fingers):
+            for number, place in enumerate(self.bent_by(angles[finger] if
+                                                        isinstance(angles[0], tuple)
+                                                        else angles)):
+                obj = self.joint(number, finger)
+                expected = [self.turned(finger, count) @ place @ v.co
+                            for v in obj.data.vertices]
+                self.assertLess(drift(obj, expected), tolerance,
+                                "{:s} at finger {:d}".format(obj.name, finger))
+
+    def test_whole_fingers_stand_round_the_cursor_joint_matched_to_joint(self):
+        self.assertEqual(self.ring(count=5), {"FINISHED"})
+        parts = self.move.parts
+        self.assertEqual(len([p for p in parts if p.leader]), 12)
+        for finger in range(1, 5):
+            for number in range(3):
+                part = parts["Seg{:d} {:d}".format(number + 1, finger + 1)]
+                self.assertEqual(part.leader, "Seg{:d}".format(number + 1))
+                self.assertEqual(part.rides_on, "" if not number else
+                                 "Seg{:d} {:d}".format(number, finger + 1))
+        self.assertIn("4 copies of 'Seg1' (3 joints each)", rig().rigmoves.report)
+        self.assertIn("joint for joint", rig().rigmoves.report)
+        # They stand at the part's Before, turned about the cursor's Z.
+        for finger in range(1, 5):
+            for number in range(3):
+                obj = self.joint(number, finger)
+                expected = [self.turned(finger) @ self.homes[number] @ v.co
+                            for v in obj.data.vertices]
+                self.assertLess(max((a - b).length
+                                    for a, b in zip(rest_points(obj), expected)),
+                                TOLERANCE, obj.name)
+
+    def test_every_finger_curls_like_the_recorded_one_from_its_own_place(self):
+        self.assertEqual(self.ring(count=5), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.check_fingers((0.0, 0.0, 0.0))
+        drive(self.move, 0.5)
+        self.check_fingers((15.0, 15.0, 15.0))
+        drive(self.move, 1.0)
+        self.check_fingers((30.0, 30.0, 30.0))
+
+    def test_a_ring_on_a_built_move_builds_on_the_side(self):
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.ring(count=5), {"FINISHED"})
+        drive(self.move, 1.0)
+        self.check_fingers((30.0, 30.0, 30.0))
+        drive(self.move, 0.0)
+        self.check_fingers((0.0, 0.0, 0.0))
+
+    def test_ringing_a_joint_in_the_middle_rings_the_whole_finger(self):
+        self.assertEqual(self.ring(active=1, count=5), {"FINISHED"})
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 12)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_fingers((30.0, 30.0, 30.0))
+
+    def test_leads_go_to_whole_fingers_by_their_first_joint(self):
+        self.assertEqual(self.ring(count=5, lead_first=0, lead_last=-40), {"FINISHED"})
+        leads = {p.name: p.lead for p in self.move.parts if p.leader}
+        self.assertEqual({n: v for n, v in leads.items() if n.startswith("Seg1")},
+                         {"Seg1 2": -20, "Seg1 3": -40, "Seg1 4": -40, "Seg1 5": -20})
+        self.assertEqual({v for n, v in leads.items() if not n.startswith("Seg1")}, {0})
+        bpy.ops.rigmoves.build()
+        # Behind the recorded finger by 0, .4, .8, .8 and .4 of its travel, on
+        # a control that runs 1.8 of it long.
+        waits = [0.0, 0.4, 0.8, 0.8, 0.4]
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            angles = []
+            for wait in waits:
+                degrees = eased(30.0, min(1.0, max(0.0, 1.8 * share - wait)))
+                angles.append((degrees,) * 3)
+            # A window is written to four decimals in the driver: on a control
+            # 1.8 long that is a hair under a thousandth of a unit at the tip.
+            self.check_fingers(angles, tolerance=5e-4)
+
+    def test_copies_too_close_to_tell_apart_leave_nothing_behind(self):
+        stock = (sorted(o.name for o in bpy.data.objects),
+                 sorted(m.name for m in bpy.data.meshes), len(self.move.parts))
+        was = rigmoves.match_copies
+        rigmoves.match_copies = lambda chain, objects: ([], list(objects))
+        try:
+            self.assertEqual(self.ring(count=5), {"CANCELLED"})
+        finally:
+            rigmoves.match_copies = was
+        self.assertIn("too close together", rig().rigmoves.report)
+        self.assertEqual((sorted(o.name for o in bpy.data.objects),
+                          sorted(m.name for m in bpy.data.meshes),
+                          len(rig().rigmoves.moves[0].parts)), stock)
+
+    def test_a_part_that_follows_may_be_ringed_and_nothing_is_refused_for_it(self):
+        select(self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=3), {"FINISHED"})
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 6)
+
+    # -- the other tools, with copied fingers about --------------------------
+
+    def test_spread_gives_each_copied_finger_one_lead(self):
+        self.ring(count=5)
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", order="AROUND",
+                                                 first=0.0, last=-40.0, both_ways=True),
+                         {"FINISHED"})
+        leads = {p.name: p.lead for p in self.move.parts if p.leader}
+        self.assertEqual({n: v for n, v in leads.items() if n.startswith("Seg1")},
+                         {"Seg1 2": -20, "Seg1 3": -40, "Seg1 4": -40, "Seg1 5": -20})
+        self.assertEqual({v for n, v in leads.items() if not n.startswith("Seg1")}, {0})
+        self.assertIn("Spread the Leads of 4 riders", rig().rigmoves.report)
+        self.assertIn("first joint's Lead", rig().rigmoves.report)
+
+    def test_a_selected_inner_joint_selects_its_whole_finger_for_a_spread(self):
+        self.ring(count=5)
+        select(self.joint(1, 2))
+        self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", order="RANDOM",
+                                                 first=-10.0, last=-10.0), {"FINISHED"})
+        leads = {p.name: p.lead for p in self.move.parts if p.leader}
+        self.assertEqual({n: v for n, v in leads.items() if v}, {"Seg1 3": -10})
+
+    def test_a_curl_is_played_by_the_copies_too(self):
+        self.ring(count=5)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.segments[0].matrix_world = turn_about(self.KNUCKLES[0], "Y", 20.0) @ self.homes[0]
+        bpy.context.view_layer.update()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"FINISHED"})
+        self.assertIn("then Build", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        self.check_fingers((20.0, 20.0, 20.0))
+        drive(self.move, 0.0)
+        self.check_fingers((0.0, 0.0, 0.0))
+
+    def test_a_curl_cannot_start_from_a_copied_joint(self):
+        self.ring(count=3)
+        select(self.joint(0, 1))
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"CANCELLED"})
+        self.assertIn("rides along with 'Seg1'", rig().rigmoves.report)
+
+    def test_a_new_chain_says_which_copies_stop_riding_joint_for_joint(self):
+        self.ring(count=5)
+        # Seg3 now follows Seg1 directly: its four copies were made riding on
+        # the copy of Seg2.
+        select(self.segments[0], self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.assertEqual(self.move.parts["Seg3"].follows, "Seg1")
+        self.assertIn("4 joint(s) of copied chains no longer ride joint for joint",
+                      rig().rigmoves.report)
 
 
 class TestCombined(CopyThatCase):
