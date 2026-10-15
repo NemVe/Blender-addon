@@ -2233,18 +2233,48 @@ def reflection(axis):
     return Matrix.Diagonal([-1.0 if name == axis else 1.0 for name in AXES])
 
 
+def copy_mirror(rig, move, leader, root, axis):
+    """A copy's Mirror - a reflection across the plane square to one of the
+    first joint's own axes - as it reads in the own axes of `leader`, the part
+    one of its joints copies.
+
+    Every joint of a copied finger has to mirror across that one plane. Taken
+    across each joint's own axis, as a lone rider's is, a finger whose segments
+    do not all face the same way - a middle one rolled about its own length -
+    mirrors each joint across a different plane, and zigzags. So the plane is
+    the first joint's, carried into each joint's own axes. Where the axes
+    agree, which is nearly always, it is the plain reflection.
+    """
+    top = leader_of(move, root)
+    if top is None or top.name == leader.name:
+        return reflection(axis)
+    normal = (leader_frame(rig, top)[0].to_3x3()
+              @ Vector([1.0 if name == axis else 0.0 for name in AXES]))
+    here = leader_frame(rig, leader)[0].to_3x3().transposed() @ normal
+    if here.length < 1e-9:
+        return reflection(axis)
+    here.normalize()
+    for number, name in enumerate(AXES):
+        if abs(abs(here[number]) - 1.0) < 1e-5:
+            return reflection(name)
+    return Matrix.Identity(3) - 2.0 * Matrix(((here.x * here.x, here.x * here.y, here.x * here.z),
+                                              (here.y * here.x, here.y * here.y, here.y * here.z),
+                                              (here.z * here.x, here.z * here.y, here.z * here.z)))
+
+
 def rider_reflection(rig, move, leader, rider):
     """The mirror between a leader and a rider, in their own axes - None
     when there is none. Whether each is a mirror image is its own; the Mirror
-    setting is the copy's, so every joint of a copied finger mirrors alike."""
+    setting is the copy's, so every joint of a copied finger mirrors across
+    the same plane."""
     lead_mirrored = leader_frame(rig, leader)[1]
     mirrored = standing(as_matrix(rider.before))[1]
     local = Matrix.Identity(3)
     if mirrored != lead_mirrored:
         local = local @ reflection("X")
-    axis = (copy_root(move, rider) if rider.rides_on else rider).mirror
-    if axis in AXES:
-        local = local @ reflection(axis)
+    root = copy_root(move, rider) if rider.rides_on else rider
+    if root.mirror in AXES:
+        local = local @ copy_mirror(rig, move, leader, root, root.mirror)
     return None if local == Matrix.Identity(3) else local
 
 
@@ -5675,6 +5705,14 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
             for name, follows in old.items():
                 move.parts[name].follows = follows
             return self.refuse(data, stopped)
+        # A chain that stopped part way leaves the parts it did not reach as
+        # they were: their old links were only cleared to make room for new
+        # ones, and no new one came. Put back through the property, so a link
+        # that would now close a loop is still turned down.
+        reached = {p.name for p in linked}
+        for name, follows in old.items():
+            if name not in reached:
+                move.parts[name].follows = follows
         said = "Chain: " + " > ".join(short(p.name, 14) for p in linked)
         notes = []
         if stopped:
@@ -5690,7 +5728,9 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
         loosened = paired - {p.name for p in move.parts if p.leader and riding_on(move, p)}
         if loosened:
             notes.append("{:d} joint(s) of copied chains no longer ride joint for "
-                         "joint: Ride Along again to copy the new chain.".format(len(loosened)))
+                         "joint: take those copies out with their x under Riding "
+                         "along, then Ride Along again to copy the new chain."
+                         .format(len(loosened)))
         if notes:
             said += ". " + " ".join(notes)
         data.report = said

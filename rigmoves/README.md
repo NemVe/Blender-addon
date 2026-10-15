@@ -362,14 +362,17 @@ It replaces the links the chosen parts already have to one another, so a chain
 made from the wrong end is made again from the right one, and the report says
 which old links it replaced. A part the chain starts from may follow something
 that is not chosen - a finger on a palm - and keeps that. A chain refused at
-its first link changes nothing. The report names the order: "Chain: Seg1 > Seg2 >
-Seg3 > Seg4". On a loose move the objects hang from one another at once; on a
+its first link changes nothing; one that stops part way - at a rider in the
+selection - leaves the parts it did not reach with the links they had, and
+says it stopped. The report names the order: "Chain: Seg1 > Seg2 > Seg3 > Seg4". On a loose move the objects hang from one another at once; on a
 built one the red note waits for Build, like any **Follows** change.
 
 Copies of a whole finger ride joint for joint only while the finger they copy
 is the chain they were made against. A new chain that changes what a copied
-part follows says how many copied joints stop riding joint for joint; press
-Ride Along again on copies to take the new chain.
+part follows says how many copied joints stop riding joint for joint. Those
+copies are riders already, so Ride Along has nothing new to take: take them out
+with their **x** under **Riding along**, then press **Ride Along** on them again
+to take the new chain.
 
 ### Curl: bend one joint and the whole chain bends
 
@@ -1003,6 +1006,20 @@ and one lifted 1 m:
   Build in this version - the check for parts moved by another part's bone as well
   covers copies that share one mesh - and now tested from the state 0.15 left.
 
+- **Make Chain that stopped at a rider dropped the old links of the parts it had not
+  reached, and called them replaced.** Every link among the chosen parts is cleared
+  to make room for the new chain, and was put back only when the chain was refused at
+  its first link: stopped part way, the tip of a finger lost its Follows and played a
+  path of its own. The parts the chain did not reach keep their links.
+- **Make Chain's advice for copies that stop riding joint for joint did not work.**
+  It said to Ride Along again, but the copies are riders already, so Ride Along
+  turned them down. It says to take them out with their x first.
+- **Mirror on a copied finger zigzagged when a segment was rolled about its own
+  length.** Each joint mirrored across its own axis, and a cube rolled 90 degrees
+  looks the same with its axes turned: the rolled joint's curl was not mirrored while
+  the others' were. Every joint mirrors across the first joint's plane now, carried
+  into its own axes.
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -1027,10 +1044,12 @@ and one lifted 1 m:
   lengths, or bent at the knuckles - may be matched only in part, and what
   is left over rides along with the part you clicked. The **+** under Riding
   along says how many joints each copy got.
-- Mirror on a copied finger mirrors each joint across its own axis. Across
-  an axis along the finger the curl goes the other way, as meant; across the
-  finger's length it is no mirror image of the whole finger. For that, copy
-  it with Ctrl+M, which mirrors by itself.
+- Mirror on a copied finger mirrors every joint across one plane, the first
+  joint's, whichever way the other segments are rolled about their own length.
+  Across an axis along the finger the curl goes the other way, as meant; across
+  the finger's length it is no mirror image of the whole finger. For that, copy
+  it with Ctrl+M, which mirrors by itself. The copy's pieces stand where you put
+  them: Mirror turns how they move, not where they are.
 - An object parented to something outside the rig - a finger to a hand that
   is not in the move - is taken off that parent while it is bound, so moving
   the hand leaves it behind. Parent the rig to the hand instead.

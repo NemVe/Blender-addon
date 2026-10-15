@@ -2199,6 +2199,25 @@ class TestMakeChain(CopyThatCase):
         self.assertEqual(self.follows()["Seg1"], "Palm")
         self.assertEqual(self.follows()["Seg2"], "Seg1")
 
+    def test_a_chain_that_stops_leaves_the_parts_it_did_not_reach_as_they_were(self):
+        # A lone rider of Seg1 stands between the second and third segments, so
+        # the chain runs Seg1 > Seg2 and is turned down at the rider. Seg3 and
+        # Seg4 were only cleared to make room for links that never came: they
+        # keep theirs, and nothing is said to be replaced.
+        self.chain()
+        rider = cube("Rider", (2.0, 0.3, 0.0))
+        rider.scale = (0.2, 0.2, 0.2)
+        select(self.segments[1], rider)
+        bpy.ops.rigmoves.ride_along(index=0, leader="Seg1", rig_name=rig().name)
+        before = {n: f for n, f in self.follows().items() if n != "Rider"}
+        select(self.segments[1], self.segments[2], self.segments[3], self.segments[4], rider)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        said = rig().rigmoves.report
+        self.assertIn("Chain: Seg1 > Seg2. Stopped there.", said)
+        self.assertNotIn("Replaced", said)
+        self.assertEqual({n: f for n, f in self.follows().items() if n != "Rider"}, before)
+        self.assertEqual(self.segments[3].parent, self.segments[2])
+
     def test_a_chain_refused_at_its_first_link_puts_the_old_links_back(self):
         self.chain(first=4)
         before = self.follows()
@@ -3110,6 +3129,98 @@ class TestRingABladeOnAHub(CopyThatCase):
                                 "{:s} at {:g}".format(blade.name, share))
 
 
+class TestMirrorARolledFinger(CopyThatCase):
+    """A copied finger mirrors across one plane, the first joint's, whichever
+    way its segments are rolled about their own length: a cube looks the same
+    rolled, but its own axes are not the finger's."""
+
+    KNUCKLES = [Vector((float(n), 0.0, 0.0)) for n in range(3)]
+    BESIDE = Matrix.Translation((0.0, 3.0, 0.0))
+    ACROSS = Matrix.Diagonal((1.0, 1.0, -1.0, 1.0))
+
+    def finger(self, prefix, where, roll):
+        segments = []
+        for number in range(3):
+            segment = cube("{:s}{:d}".format(prefix, number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            segments.append(segment)
+        bpy.context.view_layer.update()
+        segments[1].matrix_world = (segments[1].matrix_world
+                                    @ Matrix.Rotation(math.radians(roll), 4, "X"))
+        bpy.context.view_layer.update()
+        for segment in segments:
+            segment.matrix_world = where @ segment.matrix_world
+        bpy.context.view_layer.update()
+        return segments
+
+    def bent(self, degrees):
+        out, carry = [], Matrix.Identity(4)
+        for knuckle, home in zip(self.KNUCKLES, self.homes):
+            carry = carry @ turn_about(knuckle, "Y", degrees)
+            out.append(carry @ home)
+        return out
+
+    def made(self, roll):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.segments = self.finger("Seg", Matrix.Identity(4), roll)
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+        select(*self.segments)
+        bpy.ops.rigmoves.new_move()
+        self.move = rig().rigmoves.moves[0]
+        for segment, knuckle in zip(self.segments, self.KNUCKLES):
+            bpy.context.scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        self.move.parts["Seg2"].follows = "Seg1"
+        self.move.parts["Seg3"].follows = "Seg2"
+        for segment, place in zip(self.segments, self.bent(30.0)):
+            segment.matrix_world = place
+            bpy.context.view_layer.update()
+        bpy.ops.rigmoves.record(index=0, which="AFTER")
+        bpy.ops.rigmoves.build()
+        self.copy = self.finger("Copy", self.BESIDE, roll)
+        select(self.segments[0], *self.copy)
+        bpy.context.view_layer.objects.active = self.segments[0]
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg1",
+                                                     rig_name=rig().name), {"FINISHED"})
+
+    def check_copy(self, mirrored, share, roll):
+        """The copy moves as the finger does, or as its reflection does: its
+        own deformation is the finger's reflected across the plane of the first
+        joint. Where a rolled cube looks the same reflected - 0 and 90 degrees -
+        its mesh is also the reflected finger's, as a set of points: the
+        vertices are numbered another way round."""
+        drive(self.move, share)
+        for number, obj in enumerate(self.copy):
+            moved = self.bent(30.0 * share)[number] @ self.homes[number].inverted()
+            if mirrored:
+                moved = self.ACROSS @ moved @ self.ACROSS
+            moved = self.BESIDE @ moved @ self.BESIDE.inverted()
+            stands = self.BESIDE @ self.homes[number]
+            expected = [moved @ stands @ v.co for v in obj.data.vertices]
+            label = "{:s} at {:g}, rolled {:g}".format(obj.name, share, roll)
+            self.assertLess(drift(obj, expected), TOLERANCE, label)
+            if mirrored and roll in (0.0, 90.0):
+                place = self.bent(30.0 * share)[number]
+                reflected = [self.BESIDE @ self.ACROSS @ place @ self.ACROSS @ v.co
+                             for v in obj.data.vertices]
+                actual = world_points(obj)
+                for point in reflected:
+                    self.assertLess(min((point - other).length for other in actual),
+                                    TOLERANCE, label)
+
+    def test_a_mirrored_copy_is_the_reflection_of_the_finger_however_its_segments_roll(self):
+        for roll in (0.0, 90.0, 35.0):
+            with self.subTest(roll=roll):
+                self.made(roll)
+                for share in (0.5, 1.0):
+                    self.check_copy(False, share, roll)
+                self.assertEqual(bpy.ops.rigmoves.set_mirror(
+                    index=0, part=self.move.parts.find("Copy1"), axis="Z"), {"FINISHED"})
+                for share in (0.0, 0.5, 1.0):
+                    self.check_copy(True, share, roll)
+
+
 class TestLinkedParts(CopyThatCase):
     """Two parts that are linked duplicates share one mesh, and so its groups."""
 
@@ -3901,6 +4012,28 @@ class TestRingAFinger(CopyThatCase):
         self.assertEqual({v for n, v in leads.items() if not n.startswith("Seg1")}, {0})
         self.assertIn("Spread the Leads of 4 riders", rig().rigmoves.report)
         self.assertIn("first joint's Lead", rig().rigmoves.report)
+
+    def test_copies_of_a_rechained_finger_are_taken_out_and_ridden_again(self):
+        self.ring(count=3)
+        select(self.segments[0], self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.assertIn("take those copies out", rig().rigmoves.report)
+        names = [p.name for p in self.move.parts if p.leader]
+        # What Ride Along would say to the advice as it used to read: the
+        # copies are riders already, so there is nothing new to ride along.
+        select(*[bpy.data.objects[n] for n in names], self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg1",
+                                                     rig_name=rig().name), {"CANCELLED"})
+        for name in names:
+            index = self.move.parts.find(name)
+            if index >= 0:
+                self.assertEqual(bpy.ops.rigmoves.drop_rider(index=0, part=index),
+                                 {"FINISHED"})
+        self.assertFalse([p for p in self.move.parts if p.leader])
+        select(*[bpy.data.objects[n] for n in names], self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg1",
+                                                     rig_name=rig().name), {"FINISHED"})
+        self.assertTrue([p for p in self.move.parts if p.leader])
 
     def test_a_selected_inner_joint_selects_its_whole_finger_for_a_spread(self):
         self.ring(count=5)

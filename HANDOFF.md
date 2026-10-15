@@ -47,7 +47,7 @@ promises to the user.
 |---|---|
 | `rigmoves/__init__.py` | the whole add-on, about 7,200 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 215 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 218 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
@@ -187,7 +187,13 @@ Features, in the order the user asked for them:
     part its leader follows (a second claw hangs from the arm), else Root.
     `bind_riders` re-hangs bones whose holder changed, so a leader may now
     be given a Follows.
-  - A copy plays by its first joint's (`copy_root`) Lead and Mirror. Lead
+  - A copy plays by its first joint's (`copy_root`) Lead and Mirror. Mirror is one
+    plane for the copy (`copy_mirror`): the first joint's own axis carried into
+    each joint's leader frame, so a segment rolled about its length does not
+    zigzag. `rider_turn`, the mirrored seat in `bind_riders` and `rider_spot` all
+    read it through `rider_reflection`. Test a mirrored copy's *motion* (its
+    deformation is the reflected one applied to where it stands): a cube rolled
+    35 degrees is not its own mirror image, so its mesh is not the reflected one. Lead
     shifts every joint by the same amount (`base_window`), so the joints
     stay in step. The panel lists copy roots only, with `+N`; `drop_rider`
     takes a rider and everything riding on it (`copy_of`).
@@ -249,8 +255,11 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
   A part that leads riders may be chained (0.16 allowed it). It first clears the
   links the chosen parts have to one another - kept, they refuse a chain made from
   the other end as a loop - and puts them back if the chain is refused at its first
-  link. It reports the old links it replaced, and how many copied joints
-  `riding_on` no longer pairs, since a changed Follows undoes the pairing.
+  link, and puts back the links of the parts it never reached when it stops part
+  way (only `linked` - the root included - counts as reached). It reports the old
+  links it replaced, and how many copied joints `riding_on` no longer pairs, since
+  a changed Follows undoes the pairing; those copies are riders already, so the
+  advice is to take them out (their x) before Ride Along again.
 - **Curl.** Part F following Q is put at `carried(Q) @ D_F @ B_F`, where
   `carried(Q) = W_Q B_Q^-1` and `D_F` is the root's bend (a quaternion in its own
   frame) raised to `factor**k`, applied about F's pivot in F's own frame
