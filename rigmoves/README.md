@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.18.0
+# CopyThat (experiment) - v0.18.1
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -17,7 +17,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.18.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.18.1.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
 
 ## Use
@@ -196,38 +196,78 @@ the Path**), pick **Use**, set the **Count**, **OK**.
 | **Use what's there** | takes up the objects already standing in the places, and makes nothing | every petal is modelled already, and you do not want one more object |
 | **Fill the gaps** (the default) | takes up what stands in a place, and copies the part only into the places where nothing does | most are modelled and a few are missing - or you are not sure. It never puts a copy on top of a petal that is there |
 
-How an object already there is told from one that is not:
+How an object already there is told from one that is not. Ring takes an object
+up, or stands it on a new frame, only when that is **provably safe**; anything
+else is left exactly as it is, and the report says why:
 
-- Only a mesh object that is in no move of this add-on, in view and free to
-  select, is looked at. Hidden ones, locked ones and ones a move plays already
-  are never taken.
-- It has to be a copy of the part's mesh: the same number of vertices, in the
-  same order, and every one within a fiftieth of how big the part is across of
-  where the part's own vertex would land in that place. So a petal modelled
-  twice, or Alt+D, or one with its transforms applied, is a copy; a mirror image
-  of the petal is not, and nor is a petal of another shape with as many
-  vertices.
-- For a finger or a leaf (the part with the parts that follow it), a place is
-  taken only when **every** joint of it is found. Found in part, the place is
-  left alone - nothing taken, and nothing copied on top of it - and the report
-  says so.
-- Where two objects stand on one place, the closer fit is taken and the other is
-  named in the report.
-- The report names what was left out and why, up to three: "'Leaf B1' is not a
-  copy of 'Leaf A1'", "'Stray' is a copy of 'Petal' that stands off the ring",
-  "'Twin' stands on the same place as 'Petal 3'". It looks at objects with as many
-  vertices as a joint of the part, because those are the ones you may have meant.
-  When nothing fits, **Use what's there** is turned down with those names and
-  nothing is changed.
-- **Re-framed.** A rider copies its leader's move from its own origin and axes,
-  so a petal modelled with its origin somewhere else, or its rotation or scale
-  applied, would swing about the wrong point. Such an object is stood on the
-  frame a copy would have - its origin and axes where the part's are, turned to
-  its place - and its mesh is moved the other way, so nothing is seen to move.
-  The report says how many. A mesh shared with other objects is given its own
-  first, so they stay as they were; whatever is parented to a re-framed object
-  stays where it is. An object already on its frame is not touched. It is all one
-  Ctrl+Z, and a ring that cannot be finished puts every object back as found.
+- **A copy of the part's mesh.** The same number of vertices, and every vertex of
+  one within a fiftieth of how big the part is across of a vertex of the other,
+  both ways round, once it stands in the place. Vertex numbering does not matter,
+  so a mirrored half made with Ctrl+M, or the teeth of a gear made with Shift+D and
+  G and never turned, are taken. A mirror image of a petal that is not the same on
+  both sides is another shape, and is not.
+- **Who may be taken.** A mesh object that is in view, free to select (Blender
+  is asked, so a collection with selection switched off counts), local and
+  editable, in no move of this add-on, and with no keys, drivers or NLA of its
+  own. Left alone, and named: "has keys or drivers of its own" (Build lifts a
+  part's own keys, and a re-framed object would jump when they play: use Lift
+  Their Own Keyframes first), "is linked from a library" or "cannot be edited"
+  (the change would be lost when the file is saved and opened), "is hidden",
+  "cannot be selected", "is already part of a move".
+- **Stood on a frame, only when plain.** A rider copies its leader's move from
+  its own origin and axes, so a petal modelled with its origin somewhere else, or
+  with its rotation or scale applied, would swing about the wrong point. Such an
+  object is stood on the frame a copy would have - its origin and axes where the
+  part's are, turned to its place - and its mesh is moved the other way. It
+  gets a mesh of its own, so what shares the old one stays as it was. It is
+  **not** re-framed if it has constraints, instances other objects, has
+  particles, hangs from a vertex or a bone, has another object depending on it
+  (a Child Of, a Shrinkwrap target, a modifier's target, a child hung from its
+  vertices - only a child hung by the object is held in place), has a modifier
+  that reads its frame (anything but Subdivision, Triangulate, Edge Split,
+  Weighted Normal or an Armature of another rig; Bevel and Solidify only at a
+  scale of 1, before and after), or is mirrored and has custom normals. Textures
+  that use the object's own or generated coordinates are not looked at: check
+  those.
+- **And then looked at.** After the change the evaluated result is compared with
+  what it was - where every vertex is in the world, and which way every face
+  faces as shown, a mirrored frame turned back - and the mesh's volume must wind
+  the way the leader's does. Anything that moved by more than a hundred-thousandth
+  of the part's size, or faces the other way, is put back exactly - frame, mesh and
+  children - and left out: "cannot be re-framed safely (re-framing it would change
+  how it looks): set its origin and rotation like the leader's, or use Make copies".
+  It is all one Ctrl+Z, and a ring that cannot be finished puts every object back
+  as found.
+- **A chain is taken whole or not at all.** For a finger or a leaf (the part with
+  the parts that follow it) a place is taken only when **every** joint of it is
+  found and every joint that needs it can be re-framed. Found in part, the place
+  is left alone and the report says so. When every place is like that, Ring is
+  turned down with that reason.
+- **Where two objects stand on one place**, the closer fit is taken and the other is
+  named.
+- **Nothing is ever copied on top of anything.** In **Fill the gaps** a place is
+  occupied, and no copy is made there, when any mesh object at all - hidden, in a
+  move, of any number of vertices, a near miss scaled or nudged or cut - has the
+  middle of the box round it within a quarter of the part's reach of where the
+  part would stand. The report says how many places "had something standing there
+  that is not a copy". **Use what's there** says how many places had nothing
+  standing in them, and that **Fill the gaps** would copy the part there.
+- **A wrong centre or Count is caught.** When copies of the part stand near the
+  ring - within a ring's radius and a half of its middle, at its height - and on
+  none of its places, the ring is round the wrong point or has the wrong Count, and
+  copying between them would double the flower. **Fill the gaps** is turned down:
+  "7 copies of 'Petal' stand near the ring but off its places: check the centre
+  (3D cursor) and Count. Nothing done." **Use what's there** takes what fits and
+  says the same as a note. **Make copies** is never turned down. Copies a move
+  plays already do not count.
+- **The report names what was left out**, up to three, the nearest to the ring's
+  places first: "'Leaf B1' is not a copy of 'Leaf A1'", "'Petal 4' stands in a place
+  and is not a copy of 'Petal'", "'Stray' is a copy of 'Petal' that is not turned to
+  its place", "'Far' is a copy of 'Petal' that stands off the ring" (only when it
+  does), "'Twin' stands on the same place as 'Petal 3'". It looks at objects with as
+  many vertices as a joint of the part, because those are the ones you may have
+  meant, and at any object standing in a place. When nothing can be taken or made,
+  Ring is turned down with those names and nothing is changed.
 
 What it makes, and the rest:
 
@@ -293,7 +333,13 @@ want to type a number into every row.
 
 - **Step** (the default): a **Start** and a **Step**. Every part takes a place in
   the order, and gets Start + Step x its place, counting from 0. The default is a
-  Start of 0 and a Step of **-10** for Leads, **0.1** for Delays. Below 0 each
+  Start of 0 and a Step of **-10** for Leads, **0.1** for Delays - sized down
+  when the last place would run past 40 of the 50 a Lead can be (or 0.9 of the
+  0.99 a Delay can be), because a wave that is held at the limit stops dead
+  there: twelve spikes one way round get -3, both ways -6, eight petals both ways
+  keep -10. For Leads **Around a ring** opens with **Both ways** on. A Step you
+  type is kept as you typed it, and what it holds at the limit is still counted.
+  Below 0 each
   rider waits more than the one before it, above 0 each goes earlier; for Delays
   each waits that much longer. It is a *step*, so adding a petal gives it the next
   value and leaves the rest as they were - **+10 each** is +10, +20, +30 whether
@@ -329,8 +375,11 @@ together, and the petal opposite it is the last.
   joint's, so that is what is spread and counted - one for a whole finger - and
   selecting any joint of a copy selects the copy. Down a chain is not offered for
   Leads: riders have no Follows chain of their own.
-- Delays belong to the parts in the **Timing** list. The start is the active
-  part, or the first one, which is place 0 and gets Start.
+- Delays belong to the parts in the **Timing** list. **Around a ring** and **By
+  distance** are measured from the active part (or the first one), which is place
+  0 and gets Start. **Along an axis** the part lowest along it is place 0; **down
+  a chain** the joints at the top are; at **random** no part is, because the places
+  are dealt out.
 - **All** of them, by default, whatever is selected: Ring leaves its own copies
   selected and Curl its first joint, and a spread that went only by that left the
   rest of a flower or a tentacle as it was. Tick **Only the selected** to spread
@@ -733,10 +782,14 @@ for a chain - takes off what the original was bound by, sets each copy on the
 original's Before turned about the axis, and presses Ride Along on them, told
 which copy is which joint. Use what's there looks instead at the meshes in the
 scene with as many vertices as a joint has: one stands in a place when every
-vertex, in order, is within a fiftieth of the part's size of the joint's own
-vertex put there. The best fit takes each place, a place is taken only with all
-its joints, and an object not on its frame is stood on it with its mesh moved
-the other way (`reframe`), before the same Ride Along.
+vertex of one is within a fiftieth of the part's size of a vertex of the other, both
+ways round (a k-d tree, after a vertex-by-vertex pass that most copies already
+satisfy), with the joint's own vertices put there. The best fit takes each place, a
+place is taken only with all its joints, and anything with a mesh whose middle is
+near a place stands in it. An object not on its frame is stood on it with its mesh
+moved the other way (`reframe`) only if nothing in it reads its frame
+(`reframe_blocker`), the evaluated look is compared before and after (`look_of`), and
+a difference puts it back by swapping the old mesh in again; then the same Ride Along.
 
 ## Tested on
 
@@ -1120,6 +1173,30 @@ and one lifted 1 m:
   ring, the last petal always got the Last, so a ninth petal moved the other eight.
   **By Step** gives a part the value of its place in the order, and nothing else moves.
 
+- **Ring took up animated, linked and unsafe objects, and copied onto near misses.**
+  0.18.0 adopted a petal with keys of its own (Build then lifted them, and a
+  re-framed one jumped on the next frame change), objects linked from a library (the
+  change was lost on save), objects that cannot be selected (Ride Along then
+  failed), and re-framed objects whose look depends on their frame - a bend, a
+  hook, a constraint, a Child Of - or whose children hang from vertices, saying
+  "nothing shifted". It also made a copy on top of a petal that was a hair off
+  (scaled 6%, a vertex nudged, an extra cut), hidden or already in a move. Now only
+  what is provably safe is taken up or re-framed, the result is checked and put
+  back exactly if it differs, and a place with anything standing in it is not
+  copied into.
+- **Fill the gaps stacked copies on mirrored halves and unturned cubes.** A Ctrl+M
+  half of a flower, or the teeth of a gear moved with G, have the very points of the
+  copy that belongs there with the vertices numbered another way, and were not
+  recognised. Objects are matched as sets of points now.
+- **Fill the gaps doubled a flower when the 3D cursor or the Count was off.** The
+  copies standing off the ring were reported and then copied between. Fill is turned
+  down when copies of the part stand near the ring and on none of its places.
+- **Spread's first run on a ring of more than five riders stopped the wave.** The
+  default step of -10 held the last riders at -50 together. The default is sized to
+  the number of places now, and Both ways opens on for Leads around a ring.
+- **Ring said "none were kept" when every place had only part of a chain.** It
+  names the real reason now, and lists what was left out, nearest first.
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -1133,10 +1210,12 @@ and one lifted 1 m:
   recorded from a half-posed start will be wrong at the ends.
 - Steps are only offered once a move has bones, so for objects that means
   after the first build.
-- Use what's there compares vertex by vertex, in vertex order. A petal whose vertices
-  were renumbered by editing it, or one sculpted a little off the part's shape, is not
-  a copy of it and is named as left out; a fiftieth of the part's size is the leeway.
-  A leaf with one joint different is left alone as a whole place, not copied on top.
+- Use what's there compares the points, not the numbering, with a fiftieth of the
+  part's size as leeway. A petal sculpted a little further off than that, or with a
+  vertex more or fewer, is not a copy of it: it is named as left out, and its place
+  is left alone rather than copied on top. A leaf with one joint different is left
+  alone as a whole place. Materials that use an object's own or generated texture
+  coordinates are not checked when an object is re-framed.
 - An object is bound whole, to one bone. Parts that bend need a rig of their
   own and the bone workflow.
 - Two moves sharing a part compose in the order they were made, which is not

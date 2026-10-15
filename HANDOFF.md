@@ -45,9 +45,9 @@ promises to the user.
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 7,700 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 8,100 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 278 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 325 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
@@ -103,6 +103,7 @@ Features, in the order the user asked for them:
 | 0.17.0 | Merge of the two lines of work: Spread and Ring work on 0.16's copy roots and chains; one binding fix (`own_binding`) and one leader read-back fix | see "The four tools of 0.17" |
 | 0.17.1 | Make Chain's order follows how joints are built (far end of the part before), not the nearest pivot, so a folded leaf chains right; plurals in the new tools' reports | `chain_order`, `touching_distance`, `counted` |
 | 0.18.0 | **Ring uses what is already modelled**: a Use choice (Make copies, Use what's there, Fill the gaps - the default); objects that are exact copies of the part's mesh are taken up, stood on their frame if they are not on it | `find_standing`, `standing_candidates`, `reframe`, `put_back`, `RING_USES`, `RIGMOVES_OT_ring` |
+| 0.18.1 | Review of 0.18.0, fourteen findings, mostly data safety: Ring takes up or re-frames an object only when provably safe (no keys/drivers, not linked, selectable, no frame-reading constraint/modifier/dependent, result compared and put back exactly); matching by point set (mirrored halves, unturned cubes); Fill never copies onto anything standing in a place, and is refused when copies stand near the ring on none of its places; Spread's default step sized to fit | `standing_pool`, `why_not_taken`, `Joint`/`Seen`/`Slot`, `fit_error`, `find_standing`, `reframe_blocker`, `look_of`, `looks_the_same`, `signed_volume`, `settle`, `sized_step` |
 | 0.18.0 | **Spread by Step**: Start and Step for each place in the order (default, -10 for Leads and 0.1 for Delays), ties share a place; Range is the old First and Last; Ring's Lead step is the same | `spread_keys`, `tied_ranks`, `spread_ranks`, `spread_put`, `SPREAD_BY`, `RIGMOVES_OT_spread` |
 
 ## The model underneath (read before changing any maths)
@@ -240,8 +241,11 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
   a Lead's leader is place 0 so its riders start at 1, a Delay's first part is 0;
   the value is Start + Step x place. Both end in `spread_put`, which rounds Leads,
   holds both to the property limits and says how many were held.
-  `step` has a registered default of 0, so `step_by` supplies -10 / 0.1 when a
-  script gave none; `invoke` sets it per Lead or Delay.
+  `step` has a registered default of 0; when it was not set (a script gave none,
+  or `invoke` is about to) the step is `sized_step`: -10 / 0.1, less if the top
+  place would pass 40 of 50 (Lead) or 0.9 of 0.99 (Delay). `invoke` also turns
+  Both ways on for Leads around a ring when it was not set; `execute` does not
+  (scripts keep the literal default). Ring's `lead_step` stays 0 unless typed.
   Writes set `WRITING["many"]` so `_timing_changed` skips, and the caller runs
   `refresh_drivers` once; a built move plays the new values with no Build.
   - Leads go to *copy roots* (`copy_root`): a copied finger has one Lead, its
@@ -318,25 +322,47 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     so an earlier ring keeps its own; `lead_step` is the Spread's Step with the
     same ranks, around both ways from the part. Never read a part held from
     before an `.add()` afterwards: `first_joint` is read first for that reason.
-  - **Use** (0.18, `RING_USES`, default `FILL`). `find_standing` reads, for each
-    place and joint, every candidate (`standing_candidates`: visible, selectable
-    meshes in no move of any rig, with a joint's vertex count - the rest of the
-    scene is not read) and keeps it when every vertex, in order, is within 2% of
-    the joint's bounding diagonal of `turn @ Before @ local vertex`. The middle of
-    the points is the cheap first test. Best fit first, one object per place (a
-    twin on the same place is named, not taken). A place is `placed` only when all
-    its joints were found; found in part (`partial`) it is left alone - no copies
-    on top, in Fill too - and said. What is not taken but has a joint's vertex
-    count is `left`, named against the joint it is nearest in size to (the
-    farthest-from-middle reach, not the bounding box, which turns with the
-    object) and then in place. `reframe` stands an object that is not on its
-    place on `E = turn @ Before`: the mesh takes `E^-1 @ M`, a shared mesh is
-    copied first, children are held in the world, a mirrored frame (negative
-    determinant) gets its faces turned over (`Mesh.transform` does not), and the
-    result goes in a list so `put_back` can undo it if Ride Along fails. The whole
-    thing is inside the operator, so Ctrl+Z restores meshes too. Taken objects and
-    copies share the `told` pairing. `bpy.data.objects.remove` leaves `None` in
-    `view_layer.objects` until an update: `standing_candidates` skips them.
+  - **Use** (0.18, `RING_USES`, default `FILL`; the safety rules are 0.18.1).
+    Principle: an object is taken up or re-framed ONLY when that is provably safe,
+    otherwise it is left as it is and named in "Left out". `standing_pool` lists
+    every mesh in the scene with `why_not_taken` (in a move; library or not
+    editable - object or mesh; keys, transform drivers or NLA of its own
+    (`has_own_motion`); not in the view layer; hidden; and the `select_set`
+    probe, because a collection's `hide_select` is not on the object). Those still
+    take part in the survey, they just cannot be taken.
+    `find_standing` fits each joint in each free place (`Slot`) against each
+    object with its vertex count (`Seen`, lazy points): `fit_error` is vertex
+    for vertex first (cheap, what copies satisfy), then as a point SET (two
+    `KDTree`s, nearest distance both ways within 2% of the joint's bounding
+    diagonal) - so Ctrl+M halves and unturned cubes fit and an asymmetric mirror
+    image does not. One object per place, best fit first, a place `placed` only
+    with every joint; `partial` places and any place with anything standing in it
+    (`occupied`: ANY mesh, hidden or not, in a move or not, any vertex count, whose
+    world box centre is within 0.25 x the joint's reach of the place's) are left
+    alone, in Fill too - nothing is copied onto anything. `off` lists copies of the
+    part (same local mesh in order AND same size, `Seen.like`; objects already in a
+    move excluded) standing on no place; the operator refuses Fill when any is within
+    1.5 x the ring's radius of the axis and the part's height (a wrong 3D cursor or
+    Count), and appends it as a note in Use what's there. `left` is sorted nearest
+    place first and only says "off the ring" when it is.
+    Before any change `reframe_blocker` refuses constraints, instancing, particles,
+    a vertex/bone parent, any dependent in `bpy.data.user_map` but an OBJECT-parented
+    child, modifiers except Subsurf/Triangulate/Edge Split/Weighted Normal/an
+    Armature of another rig (Bevel/Solidify only when both scales are 1), and a
+    mirrored frame with custom normals. Then `reframe` (a NEW mesh from `old.copy()`
+    is transformed - exact rollback by swapping `old` back, `put_back`; `settle`
+    names the new one after the old on success) and one `view_layer.update()`:
+    `look_of` (evaluated world vertices and winding as shown, i.e. times the sign of
+    the frame's determinant) must equal the look before to 1e-5 of the part's size,
+    and the signed volume of the new mesh must have the leader's sign; otherwise the
+    whole place is put back and left alone. A mirrored frame (negative determinant)
+    gets its faces turned over (`Mesh.transform` does not). Only OBJECT-parented
+    children are held in the world: `matrix_world` cannot be solved against a vertex
+    parent. The whole thing is inside the operator, so Ctrl+Z restores meshes too.
+    Taken objects and copies share the `told` pairing. `bpy.data.objects.remove`
+    leaves `None` in `view_layer.objects` (and in `scene.objects`) until an update:
+    `standing_pool` skips them. Not checked (rough edge): materials using Object or
+    Generated texture coordinates.
   - Vertex group names live on the mesh, so linked copies share groups with
     the leader. `own_binding` (0.16, called by `bind_object`) gives a bound
     object its own mesh and drops groups for other parts' bones; Build heals

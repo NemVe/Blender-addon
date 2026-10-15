@@ -18,12 +18,15 @@ import importlib
 import math
 import os
 import sys
+import tempfile
 import types
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import bpy  # noqa: E402
+import bmesh  # noqa: E402
 from mathutils import Matrix, Vector  # noqa: E402
 
 import rigmoves  # noqa: E402
@@ -2208,6 +2211,78 @@ class TestSpread(CopyThatCase):
             rigmoves.RIGMOVES_OT_spread.draw(stand_in, bpy.context)
             self.assertEqual(texts, shown)
 
+    # -- the step, sized to fit ---------------------------------------------
+
+    def test_sized_steps_for_the_places_there_are(self):
+        # Leads: -10, or less if the last place would pass 40 of the 50.
+        self.assertEqual([rigmoves.sized_step("LEAD", top) for top in (1, 4, 7, 11, 40, 99)],
+                         [-10.0, -10.0, -5.0, -3.0, -1.0, -1.0])
+        # Delays: 0.1, or less if the last place would pass 0.9 of the 0.99.
+        self.assertEqual([rigmoves.sized_step("DELAY", top) for top in (1, 4, 9, 13, 20, 500)],
+                         [0.1, 0.1, 0.1, 0.06, 0.04, 0.01])
+
+    def test_a_ring_of_twelve_spikes_gets_a_step_that_fits_not_a_wave_that_stops(self):
+        # Eleven riders one way round: ten each ran past 50 from the sixth.
+        self.ring_of_riders(count=11, leader_on_ring=True)
+        self.stepped("LEAD", order="AROUND")
+        self.assertEqual(self.leads(), [-3 * n for n in range(1, 12)])
+        self.assertNotIn("limit", rig().rigmoves.report)
+        self.assertIn("in steps of -3 from 0 (sized to fit)", rig().rigmoves.report)
+
+    def test_the_two_sides_of_the_crown_together_need_a_step_of_six(self):
+        self.ring_of_riders(count=11, leader_on_ring=True)
+        self.stepped("LEAD", order="AROUND", both_ways=True)
+        self.assertEqual(max(self.leads(), key=abs), -36)
+        self.assertEqual(self.leads()[:6], [-6, -12, -18, -24, -30, -36])
+        self.assertNotIn("limit", rig().rigmoves.report)
+
+    def test_eight_petals_both_ways_keep_the_step_of_ten_and_say_nothing_of_sizing(self):
+        self.ring_of_riders(count=7, leader_on_ring=True)
+        self.stepped("LEAD", order="AROUND", both_ways=True)
+        self.assertEqual(self.leads(), [-10, -20, -30, -40, -30, -20, -10])
+        self.assertNotIn("sized", rig().rigmoves.report)
+
+    def test_delays_for_fourteen_parts_are_sized_to_fit(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(14)])
+        select(*objects)
+        self.stepped("DELAY", order="AXIS", axis="X")
+        self.assertEqual(self.delays(), [round(0.06 * n, 4) for n in range(14)])
+        self.assertNotIn("limit", rig().rigmoves.report)
+        self.assertIn("(sized to fit)", rig().rigmoves.report)
+
+    def test_a_step_that_was_typed_is_kept_and_the_limit_still_reported(self):
+        self.ring_of_riders(count=11, leader_on_ring=True)
+        self.stepped("LEAD", order="AROUND", step=-10.0)
+        self.assertEqual(self.leads(), [-10, -20, -30, -40] + [-50] * 7)
+        self.assertIn("6 held at the limit", rig().rigmoves.report)
+        self.assertNotIn("sized", rig().rigmoves.report)
+
+    def test_the_dialog_opens_with_both_ways_on_for_leads_and_a_step_that_fits(self):
+        self.ring_of_riders(count=11, leader_on_ring=True)
+        stand_in = types.SimpleNamespace(
+            index=0, what="LEAD", order="AROUND", axis="X", seed=1, only_selected=False,
+            both_ways=False, start=0.0, step=0.0, first=0.0, last=0.0,
+            properties=types.SimpleNamespace(is_property_set=lambda name: False),
+            report=lambda *args: None)
+        stand_in.plan = lambda context: rigmoves.RIGMOVES_OT_spread.plan(stand_in, context)
+        stand_in.sized = lambda *args: rigmoves.RIGMOVES_OT_spread.sized(stand_in, *args)
+        dialog = types.SimpleNamespace(
+            window_manager=types.SimpleNamespace(invoke_props_dialog=lambda op: {"RUNNING_MODAL"}),
+            scene=bpy.context.scene, view_layer=bpy.context.view_layer,
+            selected_objects=bpy.context.selected_objects,
+            selected_pose_bones=None)
+        stand_in.plan = lambda context: rigmoves.RIGMOVES_OT_spread.plan(stand_in, bpy.context)
+        self.assertEqual(rigmoves.RIGMOVES_OT_spread.invoke(stand_in, dialog, None),
+                         {"RUNNING_MODAL"})
+        self.assertTrue(stand_in.both_ways)
+        self.assertEqual(stand_in.step, -6.0)
+        # Said already, the choice is the user's.
+        stand_in.properties = types.SimpleNamespace(is_property_set=lambda name: True)
+        stand_in.both_ways, stand_in.step = False, -7.0
+        rigmoves.RIGMOVES_OT_spread.invoke(stand_in, dialog, None)
+        self.assertFalse(stand_in.both_ways)
+        self.assertEqual(stand_in.step, -7.0)
+
     # -- the pieces ---------------------------------------------------------
 
     def test_a_rings_plane_is_found_and_a_line_falls_back_to_up(self):
@@ -4346,12 +4421,13 @@ class TestRingAFinger(CopyThatCase):
                       rig().rigmoves.report)
 
 
-def prism(name, sides, radius, length, twist=0.25):
+def prism(name, sides, radius, length, twist=0.25, radii=None):
     """A closed shape with no symmetry at all, so a copy of it can be told from
     a mirror image of it, or from another shape with as many vertices: the
     bottom ring's vertices are unevenly far out, and the top ring is smaller
-    and turned."""
-    radii = [1.0, 0.55, 0.9, 0.45, 1.1, 0.7]
+    and turned. With `radii` all alike and no twist it is the same on both
+    sides instead."""
+    radii = radii or [1.0, 0.55, 0.9, 0.45, 1.1, 0.7]
     verts = []
     for scale, turn, height in ((1.0, 0.0, 0.0), (0.6, twist, length)):
         for i in range(sides):
@@ -4523,9 +4599,11 @@ class TestRingWhatIsThere(CopyThatCase):
         self.rig_the_flower()
         self.ring(use="ADOPT")
         # The inner petals have as many vertices and are another shape.
-        self.assertIn("Left out: 'Inner 2' is not a copy of 'Outer Leader'; "
-                      "'Inner 3' is not a copy of 'Outer Leader'; 'Inner 4' is not a "
-                      "copy of 'Outer Leader'; and 3 more.", self.report())
+        report = self.report()
+        self.assertEqual(report.count("is not a copy of 'Outer Leader'"), 3, report)
+        for name in ("Inner 2", "Inner 4", "Inner Leader"):
+            self.assertIn("'{:s}' is not a copy of 'Outer Leader'".format(name), report)
+        self.assertIn("; and 3 more.", report)
 
     def test_adopted_petals_open_like_the_leader_turned_to_their_own_place(self):
         self.rig_the_flower()
@@ -4594,7 +4672,8 @@ class TestRingWhatIsThere(CopyThatCase):
             riders = {p.name for p in self.move.parts if p.leader}
             self.assertFalse(riders & {o.name for o in self.leaf_copies[3]}, use)
             self.assertEqual(len(riders), 12, use)
-            self.assertIn("'Leaf 2 copy 4' is not a copy of 'Leaf 2'", self.report())
+            self.assertIn("'Leaf 2 copy 4' stands in a place and is not a copy of 'Leaf 2'",
+                          self.report())
             self.assertIn("1 place had only part of a chain standing and was left alone",
                           self.report())
             break
@@ -4621,8 +4700,8 @@ class TestRingWhatIsThere(CopyThatCase):
         riders = {p.name for p in self.move.parts if p.leader}
         self.assertNotIn(mirror.name, riders)
         self.assertEqual(len(riders), 6)
-        self.assertIn("Left out: '{:s}' is not a copy of 'Outer Leader'".format(mirror.name),
-                      self.report())
+        self.assertIn("Left out: '{:s}' stands in a place and is not a copy of "
+                      "'Outer Leader'".format(mirror.name), self.report())
 
     def test_a_petal_that_is_a_copy_standing_off_the_ring_is_named_so(self):
         self.drop(self.inner)
@@ -4925,6 +5004,442 @@ class TestRingWhatIsThere(CopyThatCase):
         self.assertEqual(sorted(leads.values()), [-50, -50, -50, -40, -40, -20, -20])
         self.assertIn("3 held at the limit", self.report())
 
+    # -- 0.18.1: only what is safe to take, and nothing copied on top ---------
+
+    def new_names(self, before):
+        return {o.name for o in bpy.data.objects} - before
+
+    def key_a_sway(self, petal):
+        bpy.context.scene.frame_set(1)
+        petal.keyframe_insert("rotation_euler", frame=1)
+        petal.rotation_euler.x += 0.2
+        petal.keyframe_insert("rotation_euler", frame=20)
+        petal.rotation_euler.x -= 0.2
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+
+    def test_a_petal_with_keys_of_its_own_is_left_alone_and_keeps_them(self):
+        self.drop(self.inner)
+        petal = self.outer[3]
+        self.key_a_sway(petal)
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(), {"FINISHED"})
+        self.assertEqual(self.new_names(before), set())
+        self.assertNotIn(petal.name, {p.name for p in self.move.parts})
+        self.assertEqual(len(rigmoves.own_transform_curves(petal)), 3)
+        self.assertIn("'Outer 4' has keys or drivers of its own", self.report())
+        self.assertIn("1 place had something standing there that is not a copy",
+                      self.report())
+
+    def test_a_keyed_petal_on_a_built_move_keeps_its_keys_through_the_ring(self):
+        # Ride Along builds, and a build lifts the keys off every part.
+        self.drop(self.inner)
+        petal = self.outer[3]
+        self.key_a_sway(petal)
+        self.rig_the_flower()
+        bpy.ops.rigmoves.build()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertEqual(len(rigmoves.own_transform_curves(petal)), 3)
+        self.assertIsNotNone(petal.animation_data.action)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 6)
+
+    def test_a_petal_with_a_driver_of_its_own_is_left_alone(self):
+        self.drop(self.inner)
+        petal = self.outer[2]
+        curve = petal.driver_add("location", 2)
+        curve.driver.type = "SCRIPTED"
+        curve.driver.expression = "1.0"
+        bpy.context.view_layer.update()
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(), {"FINISHED"})
+        self.assertEqual(self.new_names(before), set())
+        self.assertNotIn(petal.name, {p.name for p in self.move.parts})
+        self.assertIn("'Outer 3' has keys or drivers of its own", self.report())
+
+    def link_from_a_library(self, names, local_objects=False):
+        """Save the named petals alone in a library file, start the scene
+        again with the leader, and link the petals in: what a flower looks
+        like when its petals come from a library."""
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "petals.blend")
+        keep = set(names)
+        self.drop([o for o in bpy.data.objects if o.name not in keep])
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.leader = stood("Outer Leader", prism("Outer Shape", 4, 0.15, 1.0), self.base)
+        with bpy.data.libraries.load(path, link=True) as (source, target):
+            target.objects = [n for n in source.objects if n in keep]
+        for obj in target.objects:
+            bpy.context.scene.collection.objects.link(obj)
+            if local_objects:
+                obj.make_local()
+        bpy.context.view_layer.update()
+        self.outer = [self.leader] + [bpy.data.objects[n] for n in sorted(names)]
+        select(self.leader)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        self.leader.matrix_world = self.base @ Matrix.Rotation(math.radians(self.OPEN), 4, "X")
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    def test_petals_linked_from_a_library_are_left_out_and_nothing_stacked(self):
+        names = ["Outer {:d}".format(k) for k in range(2, 9)]
+        self.link_from_a_library(names)
+        self.assertIsNotNone(bpy.data.objects["Outer 3"].library)
+        before = {o.name for o in bpy.data.objects}
+        for use in ("FILL", "ADOPT"):
+            self.assertEqual(self.ring(use=use), {"CANCELLED"}, use)
+            self.assertEqual(self.new_names(before), set(), use)
+            self.assertIn("is linked from a library", self.report(), use)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 0)
+
+    def test_local_petals_with_a_linked_mesh_are_left_out_too(self):
+        names = ["Outer {:d}".format(k) for k in range(2, 9)]
+        self.link_from_a_library(names, local_objects=True)
+        petal = bpy.data.objects["Outer 3"]
+        self.assertIsNone(petal.library)
+        self.assertIsNotNone(petal.data.library)
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(use="FILL"), {"CANCELLED"})
+        self.assertEqual(self.new_names(before), set())
+        self.assertIsNotNone(petal.data.library)
+        self.assertIn("is linked from a library", self.report())
+
+    def test_petals_in_a_collection_that_cannot_be_selected_are_left_out(self):
+        self.drop(self.inner)
+        locked = bpy.data.collections.new("Locked")
+        bpy.context.scene.collection.children.link(locked)
+        for petal in (self.outer[3], self.outer[4]):
+            for owner in list(petal.users_collection):
+                owner.objects.unlink(petal)
+            locked.objects.link(petal)
+        locked.hide_select = True
+        bpy.context.view_layer.update()
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        for use in ("FILL", "ADOPT"):
+            self.assertEqual(self.ring(use=use), {"FINISHED"}, use)
+            self.assertEqual(self.new_names(before), set(), use)
+            riders = {p.name for p in self.move.parts if p.leader}
+            self.assertEqual(len(riders), 5, use)
+            self.assertIn("'Outer 4' cannot be selected", self.report(), use)
+            break
+
+    def blocked_by(self, how, why):
+        """Bake the petals off their frames, give the third one something
+        that reads its frame, and ring: it is left exactly as it was."""
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        petal = self.outer[2]
+        if how == "constraint":
+            petal.constraints.new("COPY_LOCATION").influence = 0.0
+        elif how == "modifier":
+            petal.modifiers.new("Bend", "SIMPLE_DEFORM")
+        elif how == "instances":
+            petal.instance_type = "VERTS"
+        elif how == "follower":
+            follower = bpy.data.objects.new("Follower", None)
+            bpy.context.scene.collection.objects.link(follower)
+            follower.constraints.new("CHILD_OF").target = petal
+        elif how == "wrapped":
+            skin = stood("Skin", prism("Skin Shape", 3, 0.2, 0.2),
+                         Matrix.Translation((4.0, 4.0, 0.0)))
+            skin.modifiers.new("Wrap", "SHRINKWRAP").target = petal
+        elif how == "thick":
+            # Scaled by 2 with its mesh made half the size: the solidify
+            # thickness, in the object's units, would double.
+            petal.data.transform(Matrix.Scale(0.5, 4))
+            petal.matrix_world = Matrix.Scale(2.0, 4)
+            petal.modifiers.new("Skin Depth", "SOLIDIFY")
+        bpy.context.view_layer.update()
+        stood_at = (petal.matrix_world.copy(), petal.data, rest_points(petal))
+        meshes = len(bpy.data.meshes)
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(use="FILL"), {"FINISHED"}, how)
+        self.assertEqual(self.new_names(before), set(), how)
+        riders = {p.name for p in self.move.parts if p.leader}
+        self.assertEqual(riders, {"Outer {:d}".format(k) for k in (2, 4, 5, 6, 7, 8)}, how)
+        self.assertIs(petal.data, stood_at[1], how)
+        self.assertEqual(len(bpy.data.meshes), meshes, how)
+        self.assertTrue(same_matrix_of(petal.matrix_world, stood_at[0], 1e-9), how)
+        self.assertLess(max((a - b).length for a, b in zip(rest_points(petal), stood_at[2])),
+                        1e-9, how)
+        self.assertIn("'Outer 3' cannot be re-framed safely ({:s})".format(why), self.report())
+
+    def test_a_petal_with_a_constraint_is_left_where_it_stands(self):
+        self.blocked_by("constraint", "it has constraints")
+
+    def test_a_petal_with_a_modifier_that_reads_its_frame_is_left_where_it_stands(self):
+        self.blocked_by("modifier", "its Bend modifier depends on its frame")
+
+    def test_a_petal_that_instances_is_left_where_it_stands(self):
+        self.blocked_by("instances", "it instances other objects")
+
+    def test_a_petal_another_object_is_constrained_to_is_left_where_it_stands(self):
+        self.blocked_by("follower", "'Follower' depends on it")
+
+    def test_a_petal_another_object_wraps_onto_is_left_where_it_stands(self):
+        self.blocked_by("wrapped", "'Skin' depends on it")
+
+    def test_a_thickened_petal_at_another_scale_is_left_where_it_stands(self):
+        self.blocked_by("thick", "its Skin Depth modifier depends on its frame")
+
+    def test_the_rest_of_the_petals_are_still_re_framed_beside_the_ones_left_out(self):
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        self.outer[2].modifiers.new("Bend", "SIMPLE_DEFORM")
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        riders = {p.name for p in self.move.parts if p.leader}
+        self.assertEqual(riders, {"Outer {:d}".format(k) for k in (2, 4, 5, 6, 7, 8)})
+        self.assertIn("6 objects re-framed", self.report())
+        self.assertIn("'Outer 3' cannot be re-framed safely (its Bend modifier depends on "
+                      "its frame)", self.report())
+
+    def test_what_looks_the_same_when_re_framed_is_taken(self):
+        # Subdivision, a bevel at a scale of 1, an armature of another rig, a
+        # child hung by its object: none of them reads the object's frame.
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        petal = self.outer[2]
+        petal.modifiers.new("Smooth", "SUBSURF")
+        petal.modifiers.new("Round", "BEVEL")
+        other = bpy.data.objects.new("Other Rig", bpy.data.armatures.new("Other"))
+        bpy.context.scene.collection.objects.link(other)
+        petal.modifiers.new("Pose", "ARMATURE").object = other
+        dew = stood("Dew", prism("Dew Shape", 3, 0.03, 0.05), Matrix.Translation((0.3, 0.2, 1.2)))
+        dew.parent = petal
+        dew.matrix_parent_inverse = petal.matrix_world.inverted()
+        bpy.context.view_layer.update()
+        looked = rigmoves.look_of(petal)
+        where = dew.matrix_world.copy()
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertIn("Outer 3", {p.name for p in self.move.parts if p.leader})
+        self.assertTrue(rigmoves.looks_the_same(looked, rigmoves.look_of(petal), 1e-5))
+        self.assertTrue(same_matrix_of(dew.matrix_world, where, 1e-6))
+        self.assertTrue(same_matrix_of(petal.matrix_world, self.turn(2) @ self.base))
+
+    def test_a_re_frame_that_changes_the_look_is_put_back_exactly(self):
+        # Past the checks made beforehand, the result is looked at: this
+        # modifier bends about the object's own origin.
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        petal = self.outer[2]
+        petal.modifiers.new("Bend", "SIMPLE_DEFORM")
+        stood_at = (petal.matrix_world.copy(), petal.data, rest_points(petal))
+        meshes = len(bpy.data.meshes)
+        self.rig_the_flower()
+        with mock.patch.object(rigmoves, "reframe_blocker", lambda *args: ""):
+            self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertNotIn("Outer 3", {p.name for p in self.move.parts})
+        self.assertIs(petal.data, stood_at[1])
+        self.assertTrue(same_matrix_of(petal.matrix_world, stood_at[0], 1e-9))
+        self.assertLess(max((a - b).length for a, b in zip(rest_points(petal), stood_at[2])),
+                        1e-9)
+        self.assertEqual(len(bpy.data.meshes), meshes)
+        self.assertIn("'Outer 3' cannot be re-framed safely (re-framing it would change "
+                      "how it looks)", self.report())
+
+    def test_a_petal_wound_the_other_way_to_the_leader_is_left_out(self):
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        rigmoves.turn_faces_over(self.outer[2].data)
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertNotIn("Outer 3", {p.name for p in self.move.parts})
+        self.assertIn("its faces point the other way to the leader's", self.report())
+
+    def test_a_petal_with_a_child_hung_from_its_vertices_is_left_where_it_stands(self):
+        # The child follows the vertices, which re-framing keeps in place; but
+        # solving a vertex parent against a mesh that has just changed is
+        # unreliable, and it jumped. Only a child hung by the object is held.
+        self.drop(self.inner)
+        self.bake(self.outer[1:])
+        petal = self.outer[2]
+        kids = {}
+        for kind, vertices in (("VERTEX", (3, 0, 0)), ("VERTEX_3", (3, 2, 1))):
+            kid = bpy.data.objects.new("Dew " + kind, None)
+            bpy.context.scene.collection.objects.link(kid)
+            kid.parent = petal
+            kid.parent_type = kind
+            kid.parent_vertices = vertices
+            kid.location = (0.0, 0.0, 0.05)
+            kids[kind] = kid
+        bpy.context.view_layer.update()
+        where = {kind: kid.matrix_world.copy() for kind, kid in kids.items()}
+        stood_at = petal.matrix_world.copy()
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertNotIn("Outer 3", {p.name for p in self.move.parts if p.leader})
+        bpy.context.view_layer.update()
+        self.assertTrue(same_matrix_of(petal.matrix_world, stood_at, 1e-9))
+        for kind, kid in kids.items():
+            self.assertTrue(same_matrix_of(kid.matrix_world, where[kind], 1e-5), kind)
+        self.assertIn("depends on it", self.report())
+
+    def test_a_mirrored_petal_with_custom_normals_is_left_out(self):
+        self.drop(self.inner)
+        flip = Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0)))
+        petal = self.outer[2]
+        petal.data.transform(flip)
+        rigmoves.turn_faces_over(petal.data)
+        petal.matrix_world = self.turn(2) @ self.base @ flip
+        petal.data.normals_split_custom_set_from_vertices(
+            [Vector((0.0, 0.0, 1.0)) for _v in petal.data.vertices])
+        self.assertTrue(petal.data.has_custom_normals)
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertNotIn("Outer 3", {p.name for p in self.move.parts})
+        self.assertIn("'Outer 3' cannot be re-framed safely (it is mirrored and has custom "
+                      "normals)", self.report())
+
+    def near_miss(self, how):
+        """Make the fourth petal a near miss of the leader, rig the flower and
+        fill the gaps: nothing may be copied onto the place it stands in."""
+        self.drop(self.inner)
+        petal = self.outer[3]
+        if how == "scaled":
+            petal.data.transform(Matrix.Scale(1.06, 4))
+        elif how == "nudged":
+            petal.data.vertices[3].co.x += 0.08
+        elif how == "cut":
+            editing = bmesh.new()
+            editing.from_mesh(petal.data)
+            editing.edges.ensure_lookup_table()
+            bmesh.ops.bisect_edges(editing, edges=[editing.edges[0]], cuts=1)
+            editing.to_mesh(petal.data)
+            editing.free()
+        elif how == "hidden":
+            petal.hide_set(True)
+        self.rig_the_flower()
+        if how == "in a move":
+            select(petal)
+            self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0), {"FINISHED"})
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(use="FILL"), {"FINISHED"})
+        self.assertEqual(self.new_names(before), set(), how)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 6, how)
+        self.assertIn("1 place had something standing there that is not a copy",
+                      self.report(), how)
+
+    def test_a_petal_scaled_a_little_occupies_its_place(self):
+        self.near_miss("scaled")
+
+    def test_a_petal_with_a_vertex_nudged_occupies_its_place(self):
+        self.near_miss("nudged")
+
+    def test_a_petal_with_an_extra_cut_occupies_its_place(self):
+        self.near_miss("cut")
+
+    def test_a_hidden_petal_occupies_its_place(self):
+        self.near_miss("hidden")
+
+    def test_a_petal_a_move_already_plays_occupies_its_place(self):
+        self.near_miss("in a move")
+
+    def test_fill_is_refused_when_the_ring_is_round_the_wrong_point(self):
+        self.drop(self.inner)
+        self.rig_the_flower()
+        bpy.context.scene.cursor.location = (0.27, 0.0, 0.0)
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(use="FILL"), {"CANCELLED"})
+        self.assertEqual(self.new_names(before), set())
+        self.assertIn("7 copies of 'Outer Leader' stand near the ring but off its places: "
+                      "check the centre (3D cursor) and Count. Nothing done.", self.report())
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 0)
+
+    def test_fill_is_refused_when_the_count_is_wrong(self):
+        self.drop(self.inner)
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(use="FILL", count=6), {"CANCELLED"})
+        self.assertEqual(self.new_names(before), set())
+        self.assertIn("copies of 'Outer Leader' stand near the ring but off its places",
+                      self.report())
+
+    def test_use_what_is_there_says_the_same_as_a_note_only(self):
+        self.drop(self.inner)
+        self.rig_the_flower()
+        bpy.context.scene.cursor.location = (0.27, 0.0, 0.0)
+        self.assertEqual(self.ring(use="ADOPT"), {"CANCELLED"})
+        self.assertIn("stand near the ring but off its places: check the centre (3D cursor) "
+                      "and Count.", self.report())
+        self.assertNotIn("Nothing done", self.report())
+        self.assertIn("Nothing standing in the places", self.report())
+
+    def test_use_what_is_there_with_a_wrong_count_takes_what_fits_and_notes_the_rest(self):
+        self.drop(self.inner)
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT", count=6), {"FINISHED"})
+        self.assertEqual({p.name for p in self.move.parts if p.leader}, {"Outer 5"})
+        self.assertIn("stand near the ring but off its places", self.report())
+
+    def test_making_copies_is_never_refused_for_standing_copies(self):
+        self.drop(self.inner)
+        self.rig_the_flower()
+        bpy.context.scene.cursor.location = (0.27, 0.0, 0.0)
+        self.assertEqual(self.ring(use="COPY"), {"FINISHED"})
+
+    def test_a_ring_where_every_place_has_only_part_of_a_chain_is_refused(self):
+        self.drop([self.leaf_copies[k][2] for k in range(1, 6)])
+        self.rig_the_flower()
+        before = {o.name for o in bpy.data.objects}
+        for use in ("FILL", "ADOPT"):
+            self.assertEqual(self.ring(active=self.leaf[0], use=use, count=6),
+                             {"CANCELLED"}, use)
+            self.assertEqual(self.new_names(before), set(), use)
+            self.assertIn("Every place round that ring has only part of a chain of 'Leaf 1' "
+                          "standing, so nothing was taken up or made.", self.report(), use)
+            self.assertIn("fits a place where the rest of the chain is missing",
+                          self.report(), use)
+
+    def test_the_nearest_to_the_ring_are_named_first(self):
+        # The inner petals, with as many vertices, come first by name.
+        mirror = self.outer[3]
+        mirror.data.transform(Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0))))
+        self.rig_the_flower()
+        self.ring(use="ADOPT")
+        words = self.report()
+        self.assertIn("'Outer 4' ", words)
+        self.assertLess(words.index("'Outer 4' "), words.index("'Inner"))
+
+    def test_a_copy_standing_on_a_place_is_not_said_to_be_off_the_ring(self):
+        self.drop(self.inner)
+        self.drop([self.outer[3]])
+        # On the place, with the leader's own turn: not turned to it.
+        stood("Unturned", self.leader.data.copy(),
+              Matrix.Translation((self.turn(3) @ self.base).translation) @ self.base.to_4x4()
+              .to_3x3().to_4x4())
+        # Well away from the ring.
+        stood("Far Off", self.leader.data.copy(), Matrix.Translation((9.0, 9.0, 1.0)) @ self.base)
+        bpy.context.view_layer.update()
+        self.rig_the_flower()
+        self.ring(use="ADOPT")
+        words = self.report()
+        self.assertIn("'Unturned' is a copy of 'Outer Leader' that is not turned to its place",
+                      words)
+        self.assertIn("'Far Off' is a copy of 'Outer Leader' that stands off the ring", words)
+        self.assertNotIn("'Unturned' is a copy of 'Outer Leader' that stands off", words)
+
+    def test_use_what_is_there_says_how_many_places_were_empty(self):
+        self.drop(self.inner)
+        self.drop([self.outer[3], self.outer[5]])
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="ADOPT"), {"FINISHED"})
+        self.assertIn("2 places had nothing standing in them: Fill the gaps would copy the "
+                      "part there.", self.report())
+
+    def test_fill_the_gaps_does_not_say_places_were_empty_for_the_ones_it_filled(self):
+        self.drop(self.inner)
+        self.drop([self.outer[3]])
+        self.rig_the_flower()
+        self.assertEqual(self.ring(use="FILL"), {"FINISHED"})
+        self.assertNotIn("had nothing standing", self.report())
+
     def test_the_dialog_shows_the_three_ways_to_use_and_a_lead_step(self):
         shown = []
 
@@ -4950,6 +5465,165 @@ def same_matrix_of(a, b, tolerance=1e-4):
 
 def rigmoves_part(move, obj):
     return move.parts[obj.name]
+
+
+class TestRingTurnedAndMirrored(CopyThatCase):
+    """Petals that are the right shape on the right place with their vertices
+    numbered in another order: the far half of a flower made with Ctrl+M, the
+    teeth of a gear made with Shift+D and G and never turned. The same points,
+    so the same copy."""
+
+    OPEN = 50.0
+
+    def setUp(self):
+        super().setUp()
+        azimuth = math.radians(-90.0)
+        self.base = (Matrix.Translation((0.4 * math.cos(azimuth), 0.4 * math.sin(azimuth), 1.0))
+                     @ Matrix.Rotation(azimuth, 4, "Z"))
+
+    @staticmethod
+    def turn(number, count=8):
+        return Matrix.Rotation(math.radians(360.0 * number / count), 4, "Z")
+
+    def flower_with_a_mirrored_half(self):
+        """A leader and seven petals the same on both sides; petals 6, 7 and 8
+        are the mirror images, across the world's X, of petals 4, 3 and 2."""
+        shape = prism("Even Shape", 4, 0.15, 1.0, twist=0.0, radii=[1.0])
+        self.leader = stood("Outer Leader", shape, self.base)
+        self.outer = [self.leader]
+        flip = Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0)))
+        for k in range(1, 8):
+            if k <= 4:
+                matrix = self.turn(k) @ self.base
+            else:
+                matrix = flip @ self.turn(8 - k) @ self.base
+            self.outer.append(stood("Outer {:d}".format(k + 1), shape.copy(), matrix))
+        bpy.context.view_layer.update()
+
+    def rig_the_leader(self):
+        select(self.leader)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        self.leader.matrix_world = self.base @ Matrix.Rotation(math.radians(self.OPEN), 4, "X")
+        bpy.context.view_layer.update()
+        self.after = rest_points(self.leader)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    def same_points(self, one, other, tolerance=1e-4):
+        """Whether two objects' points are the same set, in any order."""
+        a, b = world_points(one), other
+        return (all(min((p - q).length for q in b) <= tolerance for p in a)
+                and all(min((p - q).length for q in a) <= tolerance for p in b))
+
+    def check_opening(self, share):
+        for number in range(1, 8):
+            petal = self.outer[number]
+            if share == 0.0:
+                expected = [self.turn(number) @ self.base @ v.co
+                            for v in self.leader.data.vertices]
+            else:
+                expected = [self.turn(number) @ p for p in self.after]
+            self.assertTrue(self.same_points(petal, expected), petal.name)
+
+    def test_a_mirrored_half_made_with_ctrl_m_is_taken_up_in_either_mode(self):
+        for use in ("ADOPT", "FILL"):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            self.flower_with_a_mirrored_half()
+            self.rig_the_leader()
+            before = {o.name for o in bpy.data.objects}
+            self.assertEqual(self.ring_it(use), {"FINISHED"}, use)
+            self.assertEqual({o.name for o in bpy.data.objects}, before, use)
+            self.assertEqual({p.name for p in self.move.parts if p.leader},
+                             {"Outer {:d}".format(k) for k in range(2, 9)}, use)
+            self.assertIn("3 objects re-framed", rig().rigmoves.report, use)
+
+    def ring_it(self, use, **kwargs):
+        select(self.leader)
+        return bpy.ops.rigmoves.ring(index=0, count=8, use=use, **kwargs)
+
+    def test_a_mirrored_half_is_stood_on_a_plain_frame_with_its_faces_out(self):
+        self.flower_with_a_mirrored_half()
+        self.rig_the_leader()
+        mirrored = self.outer[5]
+        self.assertLess(mirrored.matrix_world.determinant(), 0.0)
+        volume = rigmoves.signed_volume(self.leader.data)
+        self.assertNotEqual(volume, 0.0)
+        self.assertEqual(self.ring_it("ADOPT"), {"FINISHED"})
+        for number in (5, 6, 7):
+            petal = self.outer[number]
+            self.assertGreater(petal.matrix_world.determinant(), 0.0, petal.name)
+            self.assertTrue(same_matrix_of(petal.matrix_world,
+                                           self.turn(number) @ self.base), petal.name)
+            self.assertAlmostEqual(rigmoves.signed_volume(petal.data), volume, places=6,
+                                   msg=petal.name)
+
+    def test_a_mirrored_half_opens_like_the_leader_from_its_own_place(self):
+        self.flower_with_a_mirrored_half()
+        self.rig_the_leader()
+        self.ring_it("ADOPT")
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.0)
+        self.check_opening(0.0)
+        drive(self.move, 1.0)
+        self.check_opening(1.0)
+
+    def test_fill_the_gaps_stacks_nothing_on_a_mirrored_half(self):
+        self.flower_with_a_mirrored_half()
+        self.rig_the_leader()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring_it("FILL"), {"FINISHED"})
+        self.assertEqual({o.name for o in bpy.data.objects} - before, set())
+
+    def gear(self):
+        """Four cube teeth made with Shift+D and G, never turned."""
+        self.leader = cube("Tooth", (3.0, 0.0, 0.0))
+        self.teeth = [self.leader] + [
+            cube("Tooth.00{:d}".format(k), where)
+            for k, where in enumerate([(0.0, 3.0, 0.0), (-3.0, 0.0, 0.0), (0.0, -3.0, 0.0)],
+                                      start=1)]
+        select(self.leader)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        self.leader.matrix_world = Matrix.Translation((3.0, 0.0, 0.0)) @ Matrix.Rotation(
+            math.radians(40.0), 4, "Y")
+        bpy.context.view_layer.update()
+        self.after = rest_points(self.leader)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    def test_cubes_moved_without_being_turned_are_taken_up_as_a_gear(self):
+        self.gear()
+        before = {o.name for o in bpy.data.objects}
+        select(self.leader)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4, use="ADOPT", center="ORIGIN"),
+                         {"FINISHED"})
+        self.assertEqual({o.name for o in bpy.data.objects}, before)
+        self.assertEqual(len([p for p in self.move.parts if p.leader]), 3)
+        self.assertIn("3 objects re-framed", rig().rigmoves.report)
+        bpy.ops.rigmoves.build()
+        drive(self.move, 1.0)
+        for number, tooth in enumerate(self.teeth[1:], start=1):
+            expected = [Matrix.Rotation(math.radians(90.0 * number), 4, "Z") @ p
+                        for p in self.after]
+            self.assertTrue(self.same_points(tooth, expected), tooth.name)
+
+    def test_fill_the_gaps_makes_no_tooth_on_top_of_a_tooth(self):
+        self.gear()
+        before = {o.name for o in bpy.data.objects}
+        select(self.leader)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4, center="ORIGIN"),
+                         {"FINISHED"})
+        self.assertEqual({o.name for o in bpy.data.objects} - before, set())
+
+    def test_an_asymmetric_petal_mirrored_is_still_never_taken(self):
+        shape = prism("Odd Shape", 4, 0.15, 1.0)
+        self.leader = stood("Outer Leader", shape, self.base)
+        flip = Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0)))
+        stood("Outer 2", shape.copy(), flip @ self.turn(7) @ self.base)
+        bpy.context.view_layer.update()
+        self.rig_the_leader()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring_it("ADOPT"), {"CANCELLED"})
+        self.assertEqual({o.name for o in bpy.data.objects}, before)
 
 
 class TestCombined(CopyThatCase):

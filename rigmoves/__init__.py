@@ -33,12 +33,13 @@ import bpy
 import bmesh  # after bpy: as a module, bpy is what makes bmesh importable
 from mathutils import Euler, Matrix, Quaternion, Vector
 from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 from mathutils.geometry import interpolate_bezier
 
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 18, 0),
+    "version": (0, 18, 1),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -4073,6 +4074,18 @@ def spread_ranks(rig, move, groups, what, order, axis, both_ways, seed):
     return ranks
 
 
+def sized_step(what, top):
+    """The step a spread takes when none was asked for: -10 for Leads and 0.1
+    for Delays, made smaller if the last place - `top` steps on - would run
+    past 40 of the 50 a Lead can be, or 0.9 of the 0.99 a Delay can be. A
+    ring of twelve spikes one way round has eleven places; ten each would
+    leave six of them held at the limit and the wave stopped dead there."""
+    top = max(top, 1)
+    if what == "LEAD":
+        return -float(min(10, max(1, 40 // top)))
+    return max(0.01, min(0.1, math.floor(0.9 / top * 100.0 + 1e-9) / 100.0))
+
+
 def spread_put(what, parts, values):
     """Write these values - one for each part - into the Leads or Delays of
     the parts, rounded and held to the limits, and say how many were held.
@@ -5625,12 +5638,11 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
     axis: bpy.props.EnumProperty(name="Axis", items=AXIS_ITEMS, default="X")
     seed: bpy.props.IntProperty(name="Seed", default=1, min=0, max=100000)
 
-    def step_by(self):
-        """The step to use: the one given, or - for a script that gave none -
-        the one a Lead or a Delay is usually spread by."""
-        if self.properties.is_property_set("step"):
-            return self.step
-        return -10.0 if self.what == "LEAD" else 0.1
+    def sized(self, rig, move, groups):
+        """The step to use when none was given: see sized_step."""
+        ranks = spread_ranks(rig, move, groups, self.what, self.order, self.axis,
+                             self.both_ways, self.seed)
+        return sized_step(self.what, max(ranks.values()))
 
     def plan(self, context):
         """(rig, data, move, groups) - or None, with the reason said."""
@@ -5657,7 +5669,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         found = self.plan(context)
         if found is None:
             return {"CANCELLED"}
-        _rig, _data, move, _groups = found
+        rig, _data, move, groups = found
         props = self.properties
         if self.what == "LEAD":
             wanted = ("AROUND", 0.0, -40.0)
@@ -5672,8 +5684,12 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
             self.last = wanted[2]
         if not props.is_property_set("start"):
             self.start = 0.0
+        # The two sides of a ring open together unless said otherwise: a wave
+        # that runs once round has twice the places, and the last runs out.
+        if self.what == "LEAD" and not props.is_property_set("both_ways"):
+            self.both_ways = self.order == "AROUND"
         if not props.is_property_set("step"):
-            self.step = self.step_by()
+            self.step = self.sized(rig, move, groups)
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
@@ -5710,12 +5726,17 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
             return {"CANCELLED"}
         parts = [part for _ahead, group in groups for part in group]
         if self.by == "STEP":
-            step = self.step_by()
             ranks = spread_ranks(rig, move, groups, self.what, self.order,
                                  self.axis, self.both_ways, self.seed)
+            if self.properties.is_property_set("step"):
+                step, sized = self.step, ""
+            else:
+                step = sized_step(self.what, max(ranks.values()))
+                base = 10.0 if self.what == "LEAD" else 0.1
+                sized = " (sized to fit)" if abs(step) < base - 1e-9 else ""
             limited = spread_put(self.what, parts,
                                  [self.start + step * ranks[p.name] for p in parts])
-            given = "in steps of {:g} from {:g}".format(step, self.start)
+            given = "in steps of {:g} from {:g}{:s}".format(step, self.start, sized)
         else:
             shares = spread_shares(rig, move, groups, self.order, self.axis,
                                    self.both_ways, self.seed)
@@ -6132,8 +6153,9 @@ RING_USES = [
      "already stands there"),
     ("ADOPT", "Use what's there",
      "Take up the objects already modelled in the places round the ring, and "
-     "make nothing. Only an exact copy of the part, standing where a copy "
-     "would, is taken"),
+     "make nothing. Only a copy of the part's mesh, standing where a copy "
+     "would, and safe to take, is taken; anything else is left as it is and "
+     "named"),
     ("FILL", "Fill the gaps",
      "Take up what is already modelled in a place, and copy the part only "
      "into the places where nothing stands: never a copy on top of a petal "
@@ -6249,18 +6271,83 @@ def parts_of_ours():
     return known
 
 
-def standing_candidates(context, rig):
-    """The meshes an already modelled copy could be: in this view layer, in
-    sight and free to select, and not part of any move of ours - an object a
-    move already plays is somebody's already, and is never taken."""
+def world_stats(obj, matrix):
+    """(average, low, high) of an object's vertices carried by `matrix`: where
+    the middle of them is, and the corners of the box round them, in the
+    world."""
+    values = [0.0] * (3 * len(obj.data.vertices))
+    obj.data.vertices.foreach_get("co", values)
+    try:
+        import numpy
+    except ImportError:
+        numpy = None
+    if numpy is not None:
+        world = (numpy.array(values).reshape(-1, 3) @ numpy.array(matrix.to_3x3()).T
+                 + numpy.array(matrix.translation))
+        return (Vector(world.mean(axis=0).tolist()), Vector(world.min(axis=0).tolist()),
+                Vector(world.max(axis=0).tolist()))
+    points = [matrix @ Vector(values[i:i + 3]) for i in range(0, len(values), 3)]
+    return (sum(points, Vector()) / len(points),
+            Vector([min(p[a] for p in points) for a in range(3)]),
+            Vector([max(p[a] for p in points) for a in range(3)]))
+
+
+def has_own_motion(obj):
+    """Whether an object moves itself: keys on its transform, a driver on it,
+    or an animation in the NLA. Binding it would lift them, or the rig would
+    play against them."""
+    if obj.animation_data is None:
+        return False
+    return bool(own_transform_curves(obj)
+                or any(d.data_path in TRANSFORM_PATHS for d in obj.animation_data.drivers)
+                or len(obj.animation_data.nla_tracks))
+
+
+def why_not_taken(obj, known, layer):
+    """Why a ring may not take an object up, in a few words - or "" when it
+    may. Taking one up binds it, and may stand it on a new frame: only an
+    object this add-on can change for good, and the user can select, is safe
+    to take unasked."""
+    if obj.name in known:
+        return "is already part of a move"
+    if obj.library is not None or obj.data.library is not None:
+        return "is linked from a library"
+    if not obj.is_editable or not obj.data.is_editable:
+        return "cannot be edited"
+    if has_own_motion(obj):
+        return "has keys or drivers of its own"
+    if layer.objects.get(obj.name) is None:
+        return "is not in this view layer"
+    if not obj.visible_get():
+        return "is hidden"
+    # Whether it can be selected is asked of Blender: a collection with
+    # selection switched off says nothing on the object itself, and Ride Along
+    # works on what is selected.
+    was = obj.select_get()
+    try:
+        obj.select_set(True)
+        selectable = obj.select_get()
+        obj.select_set(was)
+    except RuntimeError:
+        return "cannot be selected"
+    return "" if selectable else "cannot be selected"
+
+
+def standing_pool(context, rig, sources):
+    """Every mesh object in the scene that could stand in a place of a ring,
+    as (object, why it may not be taken up - "" if it may). The parts being
+    ringed are not among them, and nor are meshes with no vertices."""
     known = parts_of_ours()
-    # An object deleted from a script can leave a None in the layer's list
-    # until the next update.
-    return [obj for obj in context.view_layer.objects
-            if obj is not None and obj.type == "MESH" and obj is not rig
-            and obj.name not in known
-            and obj.data is not None and len(obj.data.vertices)
-            and obj.visible_get() and not obj.hide_select]
+    layer = context.view_layer
+    out = []
+    for obj in context.scene.objects:
+        # An object deleted from a script can leave a None in the layer's list
+        # until the next update.
+        if (obj is None or obj.type != "MESH" or obj is rig or obj.name in sources
+                or obj.data is None or not len(obj.data.vertices)):
+            continue
+        out.append((obj, why_not_taken(obj, known, layer)))
+    return out
 
 
 def same_shape(mine, wanted, tolerance):
@@ -6269,106 +6356,319 @@ def same_shape(mine, wanted, tolerance):
                                             for a, b in zip(mine, wanted))
 
 
-def find_standing(candidates, joints, turns):
+def reach_signature(points):
+    """How far each point is from the middle of them all, shortest first: the
+    same for a shape standing anywhere, turned any way (or mirrored), and not
+    for another shape or another size."""
+    if not points:
+        return []
+    middle = sum(points, Vector()) / len(points)
+    return sorted((p - middle).length for p in points)
+
+
+def alike_in_reach(one, other, tolerance):
+    """Whether two signatures (see reach_signature) agree to within `tolerance`."""
+    return len(one) == len(other) and all(abs(a - b) <= tolerance for a, b in zip(one, other))
+
+
+def tree_of(points):
+    """A tree to ask for the nearest of these points."""
+    tree = KDTree(len(points))
+    for number, point in enumerate(points):
+        tree.insert(point, number)
+    tree.balance()
+    return tree
+
+
+class Joint:
+    """One joint of the part being ringed: where it stood at Before, its mesh,
+    and how close a copy has to be."""
+
+    def __init__(self, name, seat, source):
+        self.name, self.seat = name, seat
+        self.local = mesh_points(source)
+        self.middle = sum(self.local, Vector()) / len(self.local) if self.local else Vector()
+        world = [seat @ p for p in self.local]
+        self.across = diagonal(world)
+        # A fiftieth of how big it is across: what a vertex may be out by.
+        self.tolerance = max(0.02 * self.across, 1e-6)
+        # How far out it reaches from its middle, the same whichever way round
+        # it stands, which a box round it is not.
+        centre = seat @ self.middle
+        self.reach = max(((w - centre).length for w in world), default=0.0)
+        self.signature = reach_signature(world)
+
+
+class Seen:
+    """An object in the scene as a ring sees it: what it is made of, where it
+    stands, and why it may not be taken up. Its points are read when wanted."""
+
+    def __init__(self, obj, why):
+        self.obj, self.why, self.name = obj, why, obj.name
+        self.count = len(obj.data.vertices)
+        self.matrix = obj.matrix_world.copy()
+        self.mean, low, high = world_stats(obj, self.matrix)
+        self.box = (low + high) * 0.5
+        self.half = (high - low).length * 0.5
+        self.local = self.world = self.tree = self.signature = None
+
+    def like(self, joint):
+        """Whether it is a copy of the joint wherever it stands: the same
+        mesh, vertex for vertex - a duplicate, not a lookalike - and the same
+        size in the world, which the mesh alone does not say."""
+        if self.count != len(joint.local):
+            return False
+        if not same_shape(self.local_points(), joint.local, joint.tolerance):
+            return False
+        if self.signature is None:
+            self.signature = reach_signature(self.world_points())
+        return alike_in_reach(self.signature, joint.signature, joint.tolerance)
+
+    def local_points(self):
+        if self.local is None:
+            self.local = mesh_points(self.obj)
+        return self.local
+
+    def world_points(self):
+        if self.world is None:
+            self.world = [self.matrix @ p for p in self.local_points()]
+        return self.world
+
+    def nearest(self):
+        if self.tree is None:
+            self.tree = tree_of(self.world_points())
+        return self.tree
+
+
+class Slot:
+    """Where a joint would stand in one place of the ring."""
+
+    def __init__(self, joint, turn):
+        self.joint = joint
+        self.there = turn @ joint.seat
+        self.mean = self.there @ joint.middle
+        self.points = self.tree = self.centre = None
+
+    def world_points(self):
+        if self.points is None:
+            self.points = [self.there @ p for p in self.joint.local]
+        return self.points
+
+    def box(self):
+        """The middle of the box round it, in the world."""
+        if self.centre is None:
+            points = self.world_points()
+            self.centre = Vector([(min(p[a] for p in points) + max(p[a] for p in points)) / 2.0
+                                  for a in range(3)])
+        return self.centre
+
+    def nearest(self):
+        if self.tree is None:
+            self.tree = tree_of(self.world_points())
+        return self.tree
+
+    def release(self):
+        """Forget the points, which a ring of two hundred joints cannot all
+        keep; the middle of the box, once worked out, is kept."""
+        self.points = self.tree = None
+
+
+def fit_error(one, slot):
+    """How far an object is from being the joint, standing in a place: None if
+    it is not a copy of it, else the greatest distance from any of its vertices
+    to the nearest of the joint's, or the other way round.
+
+    Vertex for vertex first - the cheap way, for a copy made by copying. Then
+    as a set of points, because a mirrored half, or a cube moved without being
+    turned, has the very same points with its vertices numbered in another
+    order. A mirror image of a shape that is not the same on both sides has
+    other points, and never fits.
+    """
+    joint = slot.joint
+    if one.count != len(joint.local):
+        return None
+    if (one.box - slot.box()).length > 2.0 * joint.tolerance:
+        return None
+    worst = 0.0
+    for have, wanted in zip(one.world_points(), slot.world_points()):
+        worst = max(worst, (have - wanted).length)
+        if worst > joint.tolerance:
+            break
+    else:
+        return worst
+    worst, tree = 0.0, slot.nearest()
+    for have in one.world_points():
+        worst = max(worst, tree.find(have)[2])
+        if worst > joint.tolerance:
+            return None
+    tree = one.nearest()
+    for wanted in slot.world_points():
+        worst = max(worst, tree.find(wanted)[2])
+        if worst > joint.tolerance:
+            return None
+    return worst
+
+
+class Standing:
+    """What a look round a ring found.
+
+    placed: {place: {joint name: (object, where it should stand)}} for the
+    places whose every joint was found; partial: the places found in part;
+    occupied: {place: names} for the places, of those not placed, with
+    something standing in them; left: (distance, words) for each object that
+    was looked at and is not taken up; off: (name, middle) for each copy of
+    the part standing on none of the places; first: (middle, reach) of the
+    part; empty: the places with nothing in them.
+    """
+
+    def __init__(self):
+        self.placed, self.partial, self.occupied = {}, [], {}
+        self.left, self.off, self.empty = [], [], []
+        self.first = (Vector(), 0.0)
+        self.joints = []
+
+
+def find_standing(pool, joints, turns, free, ours=()):
     """Which of these objects already stand in the places of a ring.
 
     `joints` are the (name, Before, object) of the part being ringed, one for
-    each joint of its chain, and `turns` the turn that takes the part to each
-    place. A joint's place is the turn after its Before, and an object stands
-    in it when it is a copy of that joint's mesh: the same number of vertices,
-    and every one - in the same order - within a fiftieth of how big the joint
-    is across of where the joint's own vertex would land there. Nothing is
-    guessed about a mirror image or a different shape: it does not fit.
+    each joint of its chain, `turns` the turn that takes the part to each
+    place of the ring, `free` the numbers of those that are to be filled (the
+    rest hold a rider already) and `ours` the names of the riders there are.
 
-    The best fit takes each place, and an object fits one place only. A place
-    is taken up only when every joint of it is found; one found in part is
-    left, and so are the objects that fitted it.
+    An object that may be taken up stands in a place when it is a copy of the
+    joint there (see fit_error). The best fit takes each place, and an object
+    fits one place only. A place is taken only when every joint of it is
+    found; one found in part is left alone, with whatever else is there.
 
-    Returns (placed, partial, left): placed is {place number: {joint name:
-    (object, where it should stand)}}; partial the numbers of the places found
-    in part; left the objects with the vertex count of a joint that were taken
-    nowhere, each as the words saying why.
+    Nothing else may be copied on top of, taken or not: a place is occupied
+    when any mesh object at all - hidden, in a move, of any number of
+    vertices - has the middle of the box round it within a quarter of the
+    joint's reach of where the joint would be. And the copies of the part that
+    stand on none of the places are listed in `off`, for a ring that has been
+    made round the wrong centre.
     """
-    shapes = []
-    for name, seat, source in joints:
-        mine = mesh_points(source)
-        middle = sum(mine, Vector()) / len(mine) if mine else Vector()
-        across = diagonal([seat @ p for p in mine])
-        # How far out it reaches from its middle: the same whichever way round
-        # it stands, which a box round it is not.
-        reaches = max(((seat @ p) - (seat @ middle)).length for p in mine) if mine else 0.0
-        shapes.append((name, seat, mine, middle, max(0.02 * across, 1e-6), reaches))
-    # Only objects with a joint's number of vertices can be a copy of it; the
-    # rest of the scene is not even read.
-    counts = {len(shape[2]) for shape in shapes}
-    seen = []
-    for obj in candidates:
-        if len(obj.data.vertices) not in counts:
-            continue
-        mine = mesh_points(obj)
-        where = obj.matrix_world.copy()
-        world = [where @ p for p in mine]
-        seen.append((obj, mine, world, sum(world, Vector()) / len(world)))
-    hits = []
-    for number, turn in enumerate(turns):
-        for index, (_name, seat, mine, middle, reach, _across) in enumerate(shapes):
-            there = turn @ seat
-            wanted = there @ middle
-            for obj, theirs, world, centre in seen:
-                # The middle of the points is the cheap way to say no.
-                if len(theirs) != len(mine) or (centre - wanted).length > reach:
-                    continue
-                worst = 0.0
-                for have, own in zip(world, mine):
-                    worst = max(worst, (have - there @ own).length)
-                    if worst > reach:
-                        break
-                else:
-                    hits.append((worst, number, index, obj.name))
+    found = Standing()
+    shapes = [Joint(name, seat, source) for name, seat, source in joints]
+    found.first = (shapes[0].seat @ shapes[0].middle, shapes[0].reach)
+    found.joints = shapes
+    seen = [Seen(obj, why) for obj, why in pool]
+    slots = {}
+
+    def slot(number, index):
+        if (number, index) not in slots:
+            slots[(number, index)] = Slot(shapes[index], turns[number])
+        return slots[(number, index)]
+
+    hits, others = [], []
+    for number in free:
+        for index, shape in enumerate(shapes):
+            there = slot(number, index)
+            for one in seen:
+                error = fit_error(one, there)
+                if error is not None:
+                    (others if one.why else hits).append((error, number, index, one.name))
+            there.release()
     hits.sort()
     owner, holder = {}, {}
-    for _worst, number, index, name in hits:
+    for _error, number, index, name in hits:
         if name not in owner and (number, index) not in holder:
             owner[name] = (number, index)
             holder[(number, index)] = name
-    by_name = {obj.name: obj for obj, _theirs, _world, _centre in seen}
-    placed, partial = {}, []
-    for number, turn in enumerate(turns):
-        found = [index for index in range(len(shapes)) if (number, index) in holder]
-        if len(found) == len(shapes):
-            placed[number] = {shapes[index][0]: (by_name[holder[(number, index)]],
-                                                 turn @ shapes[index][1])
-                              for index in found}
-        elif found:
-            partial.append(number)
-    used = {obj.name for got in placed.values() for obj, _where in got.values()}
-    left = []
-    for obj, theirs, world, centre in sorted(seen, key=lambda row: row[0].name):
-        # Said against the joint it is most like, of those with its number of
-        # vertices: the one it is nearest in size to, in tenths, and of those
-        # the one it stands nearest. A second leaf's third segment is not a
-        # copy of the first leaf's third, whatever the first leaf's first
-        # looks like.
-        likes = [shape for shape in shapes if len(shape[2]) == len(theirs)]
-        if obj.name in used or not likes:
+    by_name = {one.name: one for one in seen}
+    for number in free:
+        got = [index for index in range(len(shapes)) if (number, index) in holder]
+        if len(got) == len(shapes):
+            found.placed[number] = {shapes[index].name: (by_name[holder[(number, index)]].obj,
+                                                         slot(number, index).there)
+                                    for index in got}
+        elif got:
+            found.partial.append(number)
+    used = {obj.name for got in found.placed.values() for obj, _where in got.values()}
+
+    # Standing in a place without being a copy of it.
+    standing_in = set()
+    for number in free:
+        if number in found.placed:
             continue
-        size = max((w - centre).length for w in world)
-        like = min(likes, key=lambda shape: (
-            int(abs(size - shape[5]) / max(shape[5], 1e-6) / 0.1),
-            min((centre - turn @ shape[1] @ shape[3]).length
-                for turn in [Matrix.Identity(4)] + list(turns))))
-        rival = next((holder[(number, index)] for _worst, number, index, name in hits
-                      if name == obj.name and holder[(number, index)] in used), None)
-        if rival is not None:
-            why = "stands on the same place as '{:s}'".format(short(rival, 18))
-        elif any(name == obj.name for _worst, _number, _index, name in hits):
-            why = "fits a place where the rest of the chain is missing"
-        elif same_shape(theirs, like[2], like[4]):
-            why = "is a copy of '{:s}' that stands off the ring".format(short(like[0], 18))
+        names = set()
+        for index, shape in enumerate(shapes):
+            there = slot(number, index)
+            for one in seen:
+                if one.name in used:
+                    continue
+                # Cheap first: the box round it cannot be near unless its
+                # average is.
+                if (one.mean - there.mean).length > one.half + 2.0 * shape.reach:
+                    continue
+                if (one.box - there.box()).length <= 0.25 * shape.reach:
+                    names.add(one.name)
+            there.release()
+        if names or number in found.partial:
+            found.occupied[number] = sorted(names)
+            standing_in |= names
         else:
-            why = "is not a copy of '{:s}'".format(short(like[0], 18))
-        left.append("'{:s}' {:s}".format(short(obj.name, 18), why))
-    return placed, partial, left
+            found.empty.append(number)
+
+    # Copies of the part, standing on no place at all.
+    first = shapes[0]
+    for one in seen:
+        # What a move plays already is not a stray copy.
+        if (one.name in used or one.why == "is already part of a move"
+                or not one.like(first)):
+            continue
+        def on_a_place(number):
+            there = slot(number, 0)
+            close = (one.box - there.box()).length <= 0.25 * first.reach
+            there.release()
+            return close
+
+        if not any(on_a_place(number) for number in range(len(turns))):
+            found.off.append((one.name, one.mean))
+
+    # What was left out, and why: those most like a copy, or standing in a
+    # place, and those nearest the ring's places first.
+    rival = {}
+    for _error, number, index, name in hits + others:
+        if holder.get((number, index), name) != name:
+            rival.setdefault(name, holder[(number, index)])
+    for one in seen:
+        if one.name in used or one.name in ours:
+            continue
+        likes = [shape for shape in shapes if len(shape.local) == one.count]
+        near = min((((one.mean - slot(number, index).mean).length, shape)
+                    for number in range(len(turns)) for index, shape in enumerate(shapes)),
+                   key=lambda pair: pair[0])
+        fits = one.name in owner or any(name == one.name for _e, _n, _i, name in others)
+        in_a_place = one.name in standing_in or near[0] <= 0.25 * near[1].reach
+        # Something that is not a copy and is not by the ring is not news, and
+        # nor is something already part of a move that does not fit or stand
+        # in a place.
+        if not (fits or in_a_place or (likes and not one.why)):
+            continue
+        like = (min(likes, key=lambda shape: (
+            int(abs(max((w - one.mean).length for w in one.world_points()) - shape.reach)
+                / max(shape.reach, 1e-6) / 0.1),
+            min((one.mean - slot(number, shapes.index(shape)).mean).length
+                for number in range(len(turns))))) if likes else near[1])
+        copy = one.like(like)
+        if one.why:
+            why = one.why
+        elif one.name in rival:
+            why = "stands on the same place as '{:s}'".format(short(rival[one.name], 18))
+        elif one.name in owner:
+            why = "fits a place where the rest of the chain is missing"
+        elif in_a_place:
+            why = ("is a copy of '{:s}' that is not turned to its place" if copy else
+                   "stands in a place and is not a copy of '{:s}'").format(
+                short(like.name, 18))
+        elif copy:
+            why = "is a copy of '{:s}' that stands off the ring".format(short(like.name, 18))
+        else:
+            why = "is not a copy of '{:s}'".format(short(like.name, 18))
+        found.left.append((near[0], one.name, "'{:s}' {:s}".format(short(one.name, 18), why)))
+    found.left.sort()
+    return found
 
 
 def turn_faces_over(mesh):
@@ -6381,21 +6681,115 @@ def turn_faces_over(mesh):
     editing.free()
 
 
+def signed_volume(mesh):
+    """The volume a mesh's faces enclose, counted from its own origin: positive
+    when they face outwards, negative inside out. For a shell that is open
+    it is no volume, but the same shape wound the other way gives the
+    opposite sign all the same."""
+    values = [0.0] * (3 * len(mesh.vertices))
+    mesh.vertices.foreach_get("co", values)
+    points = [Vector(values[i:i + 3]) for i in range(0, len(values), 3)]
+    total = 0.0
+    for poly in mesh.polygons:
+        ring = [points[i] for i in poly.vertices]
+        for a, b in zip(ring[1:], ring[2:]):
+            total += ring[0].dot(a.cross(b)) / 6.0
+    return total
+
+
+def look_of(obj):
+    """How an object looks now, from what Blender evaluates: where its
+    vertices are in the world, and which way each face faces as it is shown -
+    the way it winds, turned back by a mirrored frame."""
+    graph = bpy.context.evaluated_depsgraph_get()
+    shown = obj.evaluated_get(graph)
+    mesh = shown.to_mesh()
+    try:
+        matrix = shown.matrix_world.copy()
+        sign = -1.0 if matrix.determinant() < 0.0 else 1.0
+        points = [matrix @ v.co for v in mesh.vertices]
+        facing = []
+        for poly in mesh.polygons:
+            ring = [points[i] for i in poly.vertices]
+            normal = Vector()
+            for a, b in zip(ring, ring[1:] + ring[:1]):
+                normal += a.cross(b)
+            facing.append(normal.normalized() * sign if normal.length > 1e-12 else normal)
+    finally:
+        shown.to_mesh_clear()
+    return points, facing
+
+
+def looks_the_same(before, now, tolerance):
+    """Whether two looks (see look_of) are the same, to within `tolerance`."""
+    if len(before[0]) != len(now[0]) or len(before[1]) != len(now[1]):
+        return False
+    if any((a - b).length > tolerance for a, b in zip(before[0], now[0])):
+        return False
+    return all(a.length < 0.5 or b.length < 0.5 or a.dot(b) > 0.99
+               for a, b in zip(before[1], now[1]))
+
+
+SAFE_MODIFIERS = ("SUBSURF", "TRIANGULATE", "EDGE_SPLIT", "WEIGHTED_NORMAL")
+
+# What is said of an object that is not on its frame and cannot be put there.
+REFRAME_ADVICE = ("cannot be re-framed safely ({:s}): set its origin and rotation like "
+                  "the leader's, or use Make copies")
+
+
+def reframe_blocker(obj, where, rig, users):
+    """Why an object cannot safely be stood on a new frame, in a few words - or
+    "" if nothing in it depends on the frame it stands in.
+
+    Its look is worked out from the mesh and the frame alone only if nothing
+    else reads the frame: not a constraint, a modifier that measures from the
+    object, an instance, a particle system, a hook, another object that follows
+    it. What is left is also checked on the evaluated result, after.
+    """
+    if obj.constraints:
+        return "it has constraints"
+    if obj.instance_type != "NONE":
+        return "it instances other objects"
+    if len(obj.particle_systems):
+        return "it has particles"
+    if obj.parent is not None and obj.parent_type != "OBJECT":
+        return "it hangs from a vertex or a bone"
+    for user in users.get(obj, ()):
+        if not (isinstance(user, bpy.types.Object) and user.parent is obj
+                and user.parent_type == "OBJECT"):
+            return "'{:s}' depends on it".format(short(user.name, 14))
+    plain = all(abs(abs(s) - 1.0) < 1e-4
+                for s in list(obj.matrix_world.to_scale()) + list(where.to_scale()))
+    for modifier in obj.modifiers:
+        if modifier.type in SAFE_MODIFIERS:
+            continue
+        if modifier.type == "ARMATURE" and modifier.object is not None and modifier.object is not rig:
+            continue
+        # These measure in the object's own units, so only a scale of 1 is the
+        # same before and after.
+        if modifier.type in ("BEVEL", "SOLIDIFY") and plain:
+            continue
+        return "its {:s} modifier depends on its frame".format(modifier.name)
+    if (where.inverted_safe() @ obj.matrix_world).determinant() < 0.0 and obj.data.has_custom_normals:
+        return "it is mirrored and has custom normals"
+    return ""
+
+
 def reframe(obj, matrix):
     """Stand an object on `matrix`, and move its mesh the other way, so that
     nothing is seen to move: its origin and axes become the ones a copy would
     have, with its vertices where they are in the world.
 
-    A mesh the object shares is given to it as a copy first, as the others
-    would otherwise move too. What hangs from the object is held where it is.
+    Its mesh is a new one, and the old one is kept until the ring is settled:
+    anything else that shares the old one stays as it was, and putting it back
+    is exact. Whatever hangs from the object by its object is held where it
+    is; what hangs from a vertex follows the vertices, which have not moved.
     Returns what put_back needs to undo it.
     """
     was = obj.matrix_world.copy()
-    mesh, shared = obj.data, None
-    if mesh.users - int(mesh.use_fake_user) > 1:
-        shared = mesh
-        mesh = mesh.copy()
-        obj.data = mesh
+    old = obj.data
+    mesh = old.copy()
+    obj.data = mesh
     inside = matrix.inverted_safe() @ was
     mesh.transform(inside, shape_keys=True)
     # A mirrored object (negative scale) shows its faces turned back the
@@ -6403,29 +6797,34 @@ def reframe(obj, matrix):
     if inside.determinant() < 0.0:
         turn_faces_over(mesh)
     mesh.update()
-    kept = [(kid, kid.matrix_world.copy()) for kid in obj.children]
+    kept = [(kid, kid.matrix_world.copy()) for kid in obj.children
+            if kid.parent_type == "OBJECT"]
     obj.matrix_world = matrix
     for kid, world in kept:
         kid.matrix_world = world
-    return obj, was, shared, inside, kept
+    return obj, was, old, kept
 
 
 def put_back(framed):
-    """Undo reframe, last first."""
-    for obj, was, shared, inside, kept in reversed(framed):
-        if shared is not None:
-            fresh = obj.data
-            obj.data = shared
-            if fresh.users == 0:
-                bpy.data.meshes.remove(fresh)
-        else:
-            obj.data.transform(inside.inverted_safe(), shape_keys=True)
-            if inside.determinant() < 0.0:
-                turn_faces_over(obj.data)
-            obj.data.update()
+    """Undo reframe, last first: the old mesh, the old frame, the children."""
+    for obj, was, old, kept in reversed(framed):
+        fresh = obj.data
+        obj.data = old
+        if fresh.users == 0:
+            bpy.data.meshes.remove(fresh)
         obj.matrix_world = was
         for kid, world in kept:
             kid.matrix_world = world
+
+
+def settle(framed):
+    """Let a re-frame stand: the old meshes nobody uses any more go, and the
+    new ones take their names."""
+    for obj, _was, old, _kept in framed:
+        if old.users == 0:
+            name = old.name
+            bpy.data.meshes.remove(old)
+            obj.data.name = name
 
 
 class RIGMOVES_OT_ring(bpy.types.Operator):
@@ -6542,53 +6941,126 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         # top of a copy. A copy that has been deleted holds nothing.
         held = [as_matrix(p.before) for p in move.parts
                 if p.leader == name and bpy.data.objects.get(p.name) is not None]
-        places, skipped = [], 0
+        turns, free, skipped = [], [], 0
         for number in range(1, self.count):
             turn = (Matrix.Translation(centre)
                     @ Matrix.Rotation(math.radians(360.0 * number / self.count), 4, axis)
                     @ Matrix.Translation(-centre))
+            turns.append(turn)
             where = turn @ seat
             slack = 1e-4 * (1.0 + max(abs(c) for c in where.translation))
             if any(same_matrix(have, where, slack) for have in held):
                 skipped += 1
             else:
-                places.append(turn)
-        if not places:
+                free.append(len(turns) - 1)
+        if not free:
             self.refuse(data, "Every place round that ring already has a copy of '{:s}': "
                               "there is nothing to add.".format(short(name, 18)))
             return {"CANCELLED"}
 
         # What already stands in those places, when it is to be used.
-        placed, partial, left = {}, [], []
+        standing, notes = Standing(), ""
         if self.use != "COPY":
             context.view_layer.update()
-            placed, partial, left = find_standing(
-                standing_candidates(context, rig), joints, places)
+            ours = {p.name for p in move.parts if p.leader == name}
+            standing = find_standing(standing_pool(context, rig, {j[0] for j in joints}),
+                                     joints, turns, free, ours)
+            # Copies of the part standing near the ring and on none of its
+            # places mean the ring is round the wrong point, or has the wrong
+            # count: copying into the places between them doubles the flower.
+            middle, reach = standing.first
+            along = middle - centre
+            radius = max((along - axis * along.dot(axis)).length, reach)
+
+            def in_the_ring(spot):
+                """Within the disc of the ring, and not above or below it: a
+                second ring at another height is another ring."""
+                off = spot - centre
+                return ((off - axis * off.dot(axis)).length <= 1.5 * radius
+                        and abs(off.dot(axis) - along.dot(axis)) <= 1.5 * radius)
+
+            near = [n for n, spot in standing.off if in_the_ring(spot)]
+            if near:
+                notes = "{:s} of '{:s}' {:s} near the ring but off its places: check the centre (3D cursor) and Count.".format(
+                    counted(len(near), "copy", "copies"), short(name, 18),
+                    "stands" if len(near) == 1 else "stand")
+                if self.use == "FILL":
+                    self.refuse(data, notes + " Nothing done.")
+                    return {"CANCELLED"}
+
+        # Objects to be taken up that are not on the frame a copy would have
+        # are stood on it - but only those where that is provably safe: the
+        # result is looked at, and anything that looks different is put back.
+        placed = dict(standing.placed)
+        gave_up, framed, far = {}, [], 0.0
+        sizes = {joint.name: joint.across for joint in standing.joints}
+        volumes = {joint_name: signed_volume(source.data) for joint_name, _seat, source in joints}
+        if placed:
+            users = bpy.data.user_map(
+                subset={obj for got in placed.values() for obj, _where in got.values()},
+                value_types={"OBJECT"})
+            jobs = {}
+            for number in list(placed):
+                work = []
+                for joint_name, (obj, where) in placed[number].items():
+                    slack = 1e-4 * (1.0 + max(abs(c) for c in where.translation))
+                    if same_matrix(obj.matrix_world, where, slack):
+                        continue
+                    why = reframe_blocker(obj, where, rig, users)
+                    if why:
+                        gave_up[number] = (obj.name, REFRAME_ADVICE.format(why))
+                        break
+                    work.append((joint_name, obj, where))
+                else:
+                    jobs[number] = work
+            if any(jobs.values()):
+                context.view_layer.update()
+                before = {obj.name: look_of(obj)
+                          for work in jobs.values() for _joint, obj, _where in work}
+                done = {number: [reframe(obj, where) for _joint, obj, where in work]
+                        for number, work in jobs.items() if work}
+                context.view_layer.update()
+                for number, records in done.items():
+                    problem = ""
+                    for (joint_name, obj, _where), _record in zip(jobs[number], records):
+                        points = before[obj.name][0]
+                        far = max([abs(c) for p in points for c in p] or [0.0])
+                        tolerance = 1e-5 * sizes[joint_name] + 1e-6 * far
+                        now = signed_volume(obj.data)
+                        if not looks_the_same(before[obj.name], look_of(obj), tolerance):
+                            problem = "re-framing it would change how it looks"
+                        elif (min(abs(now), abs(volumes[joint_name])) > 1e-9 * sizes[joint_name] ** 3
+                              and (now > 0.0) != (volumes[joint_name] > 0.0)):
+                            problem = "its faces point the other way to the leader's"
+                        if problem:
+                            gave_up[number] = (obj.name, REFRAME_ADVICE.format(problem))
+                            break
+                    if number in gave_up:
+                        put_back(records)
+                    else:
+                        framed.extend(records)
+            for number in gave_up:
+                placed.pop(number, None)
+        left = standing.left + [(0.0, object_name, "'{:s}' {:s}".format(short(object_name, 18), why))
+                                for object_name, why in gave_up.values()]
+        left.sort()
         outs = ""
         if left:
             outs = " Left out: {:s}{:s}.".format(
-                "; ".join(left[:3]),
+                "; ".join(words for _distance, _object, words in left[:3]),
                 "; and {:d} more".format(len(left) - 3) if len(left) > 3 else "")
-        if self.use == "ADOPT" and not placed:
-            self.refuse(data, "Nothing standing in the places round that ring is an "
-                              "exact copy of '{:s}', so nothing was taken up.{:s}".format(
-                                  short(name, 18), outs))
-            return {"CANCELLED"}
+        elsewhere = [n for n in standing.occupied if n not in standing.partial]
+        empty = standing.empty if self.use == "ADOPT" else []
 
         taken = names_in_use()
-        copies, riders, told, framed = [], [], [], []
-        for number, turn in enumerate(places):
+        copies, riders, told = [], [], []
+        for number in free:
             whole = {}
             if number in placed:
-                # Taken as it stands, stood on the place a copy would have if
-                # it is not already there, so its move radiates from it.
-                for joint_name, (obj, where) in placed[number].items():
-                    slack = 1e-4 * (1.0 + max(abs(c) for c in where.translation))
-                    if not same_matrix(obj.matrix_world, where, slack):
-                        framed.append(reframe(obj, where))
+                for joint_name, (obj, _where) in placed[number].items():
                     riders.append((obj, joint_name))
                     whole[joint_name] = obj.name
-            elif self.use == "ADOPT" or number in partial:
+            elif (self.use == "ADOPT" or number in standing.occupied or number in gave_up):
                 # Something stands here, or this is no place to make copies.
                 continue
             else:
@@ -6601,8 +7073,24 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                     copies.append(copy)
                     riders.append((copy, joint_name))
                     whole[joint_name] = copy.name
-                    copy.matrix_world = turn @ joint_seat
+                    copy.matrix_world = turns[number] @ joint_seat
             told.append(whole)
+        if not riders:
+            put_back(framed)
+            if standing.partial and len(standing.partial) == len(free):
+                said = ("Every place round that ring has only part of a chain of '{:s}' "
+                        "standing, so nothing was taken up or made.".format(short(name, 18)))
+            elif self.use == "ADOPT":
+                said = ("Nothing standing in the places round that ring is an exact copy "
+                        "of '{:s}', so nothing was taken up.".format(short(name, 18)))
+            else:
+                said = ("Every place round that ring already holds something, so nothing was "
+                        "taken up or made.")
+            if empty:
+                said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
+                    counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
+            self.refuse(data, said + outs + (" " + notes if notes else ""))
+            return {"CANCELLED"}
         context.view_layer.update()
         objects = [obj for obj, _joint in riders]
         # Read before the riders are added: they are not the same afterwards.
@@ -6644,6 +7132,7 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             self.refuse(data, "Not every copy of '{:s}' could be made to ride along, so "
                               "none were kept.".format(short(name, 18)))
             return {"CANCELLED"}
+        settle(framed)
 
         said = self.first_sentence(name, joints, len(placed), made_whole)
         if framed:
@@ -6651,11 +7140,23 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                      "other way so nothing shifted.".format(
                          counted(len(framed), "object"),
                          "its" if len(framed) == 1 else "their"))
-        if outs:
-            said += outs
-        if partial:
+        said += outs
+        if standing.partial:
             said += " {:s} had only part of a chain standing and {:s} left alone.".format(
-                counted(len(partial), "place"), "was" if len(partial) == 1 else "were")
+                counted(len(standing.partial), "place"),
+                "was" if len(standing.partial) == 1 else "were")
+        if elsewhere:
+            said += " {:s} had something standing there that is not a copy and {:s} left alone.".format(
+                counted(len(elsewhere), "place"), "was" if len(elsewhere) == 1 else "were")
+        if gave_up:
+            said += " {:s} hold{:s} a copy that could not safely be re-framed and {:s} left alone.".format(
+                counted(len(gave_up), "place"), "s" if len(gave_up) == 1 else "",
+                "was" if len(gave_up) == 1 else "were")
+        if empty:
+            said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
+                counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
+        if notes:
+            said += " " + notes
         if skipped:
             said += " {:s} already held a copy and {:s} skipped.".format(
                 counted(skipped, "place"), "was" if skipped == 1 else "were")
@@ -7595,7 +8096,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             return
         note = layout.box().column(align=True)
         note.enabled = False
-        for line in wrapped(data.report):
+        # Room for the names of what a ring left out.
+        for line in wrapped(data.report, most=9):
             note.label(text=line)
 
 
