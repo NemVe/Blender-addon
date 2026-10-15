@@ -25,6 +25,9 @@ so whatever constraints the bone already carries still run afterwards, and a
 hand-built rig can be given a slider without being taken apart first.
 """
 
+import math
+import random
+
 import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
 from mathutils.geometry import interpolate_bezier
@@ -699,10 +702,17 @@ def group_of(data, move):
 # the data, stored on the armature so it travels with the rig
 
 
+# Set while a tool writes many Leads or Delays in one go. Each write would
+# otherwise rewrite every driver of the move; once at the end is enough.
+WRITING = {"many": False}
+
+
 def _timing_changed(self, context):
     """Put a timing change into effect at once - a delay, a lead, an ease, a
     speed - so it can be judged by scrubbing the control rather than by
     pressing Build after every nudge."""
+    if WRITING["many"]:
+        return
     rig = self.id_data
     if hasattr(self, "steps"):
         move = self
@@ -3385,6 +3395,226 @@ def refresh_drivers(rig, data, move):
 
 
 # ---------------------------------------------------------------------------
+# spreading: one gesture instead of a number for every part
+#
+# A flower's eight petals each want a Lead of their own, a finger's joints a
+# Delay each, a row of dominoes a start each. Typing them is the slowest part
+# of a move that was recorded once, so Spread works them out from where the
+# parts stand and writes them all together.
+
+SPREAD_WHAT = [("LEAD", "Leads", "Fill in the Lead of every rider"),
+               ("DELAY", "Delays", "Fill in the Delay of every part")]
+SPREAD_ORDERS = [
+    ("AROUND", "Around a ring",
+     "By angle round the ring the parts stand on, measured from the leader "
+     "(for Delays, from the active part)"),
+    ("DISTANCE", "By distance",
+     "By how far each part is from the leader (for Delays, from the active "
+     "part): a ripple"),
+    ("AXIS", "Along an axis",
+     "By position along the world X, Y or Z: dominoes, a wave across a grid"),
+    ("CHAIN", "Down a chain",
+     "By how far down a Follows chain each part hangs: a finger, a tentacle"),
+    ("RANDOM", "Random", "In no order, the same every time for the same seed")]
+AXIS_ITEMS = [(name, name, "World " + name) for name in AXES]
+
+# The same limits the Lead and Delay properties have, which a spread has to
+# keep to however wide the First and Last it was given.
+LEAD_LIMITS = (-50, 50)
+DELAY_LIMITS = (0.0, 0.99)
+
+
+def part_spot(rig, part, middle=False):
+    """Where a part stands, in the world, for putting parts in order: its
+    pivot at Before - where it turns, not where it happens to be drawn now -
+    or, with `middle`, the middle of it."""
+    if part.kind == "OBJECT" and part.has_before:
+        before = as_matrix(part.before)
+        if not middle:
+            return pivot_world(part)
+        obj = bpy.data.objects.get(part.name)
+        if obj is not None and obj.type == "MESH":
+            return before @ (sum(corners_of(obj), Vector()) / 8.0)
+        return before.translation.copy()
+    bone = rig.data.bones.get(part_bone(part))
+    if bone is not None:
+        return rig.matrix_world @ bone.head_local
+    obj = bpy.data.objects.get(part.name)
+    return obj.matrix_world.translation.copy() if obj is not None else Vector()
+
+
+def spots_of(rig, parts):
+    """Where each of these parts stands.
+
+    Their pivots - unless every one of them is the same point, as with the
+    blades of a fan all turning about the hub. Then the pivots say nothing
+    about who stands where, and the middle of each part is used instead.
+    """
+    spots = [part_spot(rig, p) for p in parts]
+    if len(spots) > 1 and max((s - spots[0]).length for s in spots) < 1e-5:
+        return [part_spot(rig, p, middle=True) for p in parts]
+    return spots
+
+
+def ring_normal(points):
+    """The direction square to the plane that fits these points best: the
+    way they vary least. Straight up when there are too few to say - under
+    three - or they all lie on a line."""
+    up = Vector((0.0, 0.0, 1.0))
+    if len(points) < 3:
+        return up
+    try:
+        import numpy
+    except ImportError:
+        return up
+    array = numpy.array([tuple(p) for p in points], dtype=float)
+    _left, sizes, rows = numpy.linalg.svd(array - array.mean(axis=0),
+                                          full_matrices=False)
+    if sizes[0] < 1e-9 or sizes[1] < 1e-4 * sizes[0]:
+        return up
+    normal = Vector(tuple(float(x) for x in rows[-1])).normalized()
+    # The same line is its own reverse, and which way round the angle runs
+    # depends on it: always the one that points up, or along Y or X for a
+    # ring on its side, so the answer does not change from run to run.
+    for axis in (2, 1, 0):
+        if abs(normal[axis]) > 1e-6:
+            return normal if normal[axis] > 0.0 else -normal
+    return up
+
+
+def ring_angles(spots, reference, reference_stands_in, both_ways):
+    """How far round a ring each spot is from the reference, in radians.
+
+    The ring is where the spots (and the reference, unless it is one of
+    them) lie: its middle is their average and its plane the best fit through
+    them. The angle runs one way round, 0 to a full turn - or, `both_ways`,
+    is folded to 0 to a half turn, so the two sides of the ring match.
+    A reference that sits on the middle has no direction to measure from, so
+    the first spot gives it, as it does for parts all in one place.
+    """
+    points = list(spots) + ([] if reference_stands_in else [reference])
+    middle = sum(points, Vector()) / len(points)
+    axis = ring_normal(points)
+
+    def in_plane(where):
+        offset = where - middle
+        return offset - axis * offset.dot(axis)
+
+    start = in_plane(reference)
+    if start.length < 1e-6:
+        start = in_plane(spots[0])
+    if start.length < 1e-6:
+        return [0.0] * len(spots)
+    across = axis.cross(start.normalized())
+    out = []
+    for where in spots:
+        offset = in_plane(where)
+        angle = math.atan2(offset.dot(across), offset.dot(start.normalized()))
+        angle %= 2.0 * math.pi
+        # A part exactly on the reference can land a hair below a full turn.
+        if angle > 2.0 * math.pi - 1e-5:
+            angle = 0.0
+        if both_ways:
+            angle = min(angle, 2.0 * math.pi - angle)
+        out.append(angle)
+    return out
+
+
+def scaled_to_one(values):
+    """Each value as a share of the biggest, or all 0 when none is above 0."""
+    top = max(values)
+    return [v / top if top > 1e-9 else 0.0 for v in values]
+
+
+def spread_shares(rig, move, groups, order, axis, both_ways, seed):
+    """Where in the spread each part falls, 0 to 1, as {part name: share}.
+
+    `groups` is a list of (reference part or None, parts): each group is put
+    in order among itself, so two rings with a leader each both get the whole
+    range. The reference is the part the others are measured from; None means
+    the first of the group.
+    """
+    chance = random.Random(seed)
+    shares = {}
+    for reference, parts in groups:
+        names = [p.name for p in parts]
+        if order == "CHAIN":
+            values = scaled_to_one([float(follow_depth(move, p)) for p in parts])
+        elif order == "RANDOM":
+            values = [chance.random() for _part in parts]
+        else:
+            stands_in = reference is None or reference.name in names
+            ahead = reference if reference is not None else parts[0]
+            everyone = parts if stands_in else parts + [ahead]
+            spots = spots_of(rig, everyone)
+            where = spots[:len(parts)]
+            start = spots[names.index(ahead.name)] if stands_in else spots[-1]
+            if order == "DISTANCE":
+                values = scaled_to_one([(w - start).length for w in where])
+            elif order == "AXIS":
+                along = [w[AXES.index(axis)] for w in where]
+                low, high = min(along), max(along)
+                values = [(a - low) / (high - low) if high - low > 1e-9 else 0.0
+                          for a in along]
+            else:
+                values = scaled_to_one(ring_angles(where, start, stands_in,
+                                                   both_ways))
+        shares.update(zip(names, values))
+    return shares
+
+
+def spread_values(what, parts, shares, first, last):
+    """Write the spread - `first` to `last` by each part's share - into the
+    Leads or Delays of these parts, and say how many were held to the limit.
+
+    Every value goes in with the drivers left alone, and the caller refreshes
+    them once at the end: a ring of twelve riders was twelve full rewrites.
+    """
+    limited = 0
+    WRITING["many"] = True
+    try:
+        for part in parts:
+            value = first + (last - first) * shares[part.name]
+            if what == "LEAD":
+                # Half a step goes outwards either way, so two sides of a ring
+                # round alike.
+                whole = int(math.copysign(math.floor(abs(value) + 0.5), value))
+                put = max(LEAD_LIMITS[0], min(LEAD_LIMITS[1], whole))
+                limited += put != whole
+                part.lead = put
+            else:
+                put = max(DELAY_LIMITS[0], min(DELAY_LIMITS[1], round(value, 4)))
+                limited += abs(put - round(value, 4)) > 1e-9
+                part.start = put
+    finally:
+        WRITING["many"] = False
+    return limited
+
+
+def spread_groups(context, move, what):
+    """What a spread acts on, as [(reference part or None, parts)].
+
+    Leads belong to riders, and each leader's riders are spread among
+    themselves; if some riders are selected, only those. Delays belong to the
+    parts that have one - the Timing list - or the selected ones among them,
+    measured from the active part.
+    """
+    chosen = held(context, move)
+    if what == "LEAD":
+        riders = [p for p in move.parts if p.leader and leader_of(move, p) is not None]
+        use = [p for p in riders if p.name in chosen] or riders
+        grouped = {}
+        for part in use:
+            grouped.setdefault(part.leader, []).append(part)
+        return [(move.parts[name], parts) for name, parts in grouped.items()]
+    own = [p for p in move.parts if not p.leader]
+    use = [p for p in own if p.name in chosen] or own
+    active = context.view_layer.objects.active
+    ahead = next((p for p in own if active is not None and p.name == active.name), None)
+    return [(ahead, use)] if use else []
+
+
+# ---------------------------------------------------------------------------
 # operators
 
 
@@ -3656,11 +3886,17 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             context.scene.rigmoves_rig = rig
         # Where each stands now is the place it copies the move from. That is
         # all there is to record: the path itself is the leader's.
+        #
+        # The leader's name is read before any part is added. Adding to the
+        # list can move all of it in memory, and a part held from before is
+        # then a dead pointer: from the ninth part of a move on, the last
+        # rider was left riding with nobody.
+        leader_name = leader.name
         for obj in fresh:
             part = move.parts.add()
             part.name = obj.name
             part.kind = "OBJECT"
-            part.leader = leader.name
+            part.leader = leader_name
             part.before = flat(obj.matrix_world)
             part.has_before = True
         said = ("'{:s}'".format(short(fresh[0].name, 18)) if len(fresh) == 1
@@ -3669,10 +3905,10 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             bpy.ops.rigmoves.build()
             data.report = ("{:s} ride along with '{:s}'. Set each one's Lead "
                            "under Riding along to send it ahead or behind."
-                           .format(said, short(leader.name, 18)))
+                           .format(said, short(leader_name, 18)))
         else:
             data.report = ("{:s} will ride along with '{:s}'. Record its After, "
-                           "then Build.".format(said, short(leader.name, 18)))
+                           "then Build.".format(said, short(leader_name, 18)))
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -4696,6 +4932,135 @@ class RIGMOVES_OT_show_paths(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def spread_words(what, order, groups, axis, both_ways, seed):
+    """How a spread was ordered, in plain words, for the report."""
+    several = len(groups) > 1
+    ahead = groups[0][0] or groups[0][1][0]
+    who = "each leader" if several else "'{:s}'".format(short(ahead.name, 18))
+    if order == "AROUND":
+        return "round the ring from {:s}{:s}".format(
+            who, ", both ways" if both_ways else "")
+    if order == "DISTANCE":
+        return "by distance from {:s}".format(who)
+    if order == "AXIS":
+        return "along {:s}".format(axis)
+    if order == "CHAIN":
+        return "down the chain"
+    return "at random (seed {:d})".format(seed)
+
+
+class RIGMOVES_OT_spread(bpy.types.Operator):
+    bl_idname = "rigmoves.spread"
+    bl_label = "Spread"
+    bl_description = ("Fill in every rider's Lead - or every part's Delay - in "
+                      "one go, in order round a ring, by distance, along an "
+                      "axis, down a chain or at random. Only the selected ones, "
+                      "if some are")
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty(options={"HIDDEN"})
+    what: bpy.props.EnumProperty(items=SPREAD_WHAT, default="LEAD",
+                                 options={"HIDDEN"})
+    # Not remembered from one use to the next: what is sensible for a Lead is
+    # not for a Delay, and invoke picks the right ones.
+    order: bpy.props.EnumProperty(name="Order", items=SPREAD_ORDERS,
+                                  default="AROUND", options={"SKIP_SAVE"})
+    first: bpy.props.FloatProperty(
+        name="First", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
+        soft_max=50.0, precision=2, options={"SKIP_SAVE"},
+        description="The value for the part that comes first in the order")
+    last: bpy.props.FloatProperty(
+        name="Last", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
+        soft_max=50.0, precision=2, options={"SKIP_SAVE"},
+        description="The value for the part that comes last in the order")
+    both_ways: bpy.props.BoolProperty(
+        name="Both ways", default=False,
+        description="Fold the ring in half, so the two sides of it match: "
+                    "the parts either side of the start go together")
+    axis: bpy.props.EnumProperty(name="Axis", items=AXIS_ITEMS, default="X")
+    seed: bpy.props.IntProperty(name="Seed", default=1, min=0, max=100000)
+
+    def plan(self, context):
+        """(rig, data, move, groups) - or None, with the reason said."""
+        rig, data, move = move_at(context, self.index)
+        if move is None:
+            return None
+        groups = spread_groups(context, move, self.what)
+        if not groups:
+            data.report = ("'{:s}' has no riders to spread Leads over. Select the "
+                           "objects to ride along, then the part they copy, and "
+                           "press Ride Along first.".format(move.name)
+                           if self.what == "LEAD" else
+                           "'{:s}' has no parts to give a Delay.".format(move.name))
+            self.report({"WARNING"}, data.report)
+            return None
+        return rig, data, move, groups
+
+    def invoke(self, context, event):
+        found = self.plan(context)
+        if found is None:
+            return {"CANCELLED"}
+        _rig, _data, move, _groups = found
+        props = self.properties
+        if self.what == "LEAD":
+            wanted = ("AROUND", 0.0, -40.0)
+        else:
+            wanted = ("CHAIN" if any(p.follows for p in move.parts) else "AXIS",
+                      0.0, 0.5)
+        if not props.is_property_set("order"):
+            self.order = wanted[0]
+        if not props.is_property_set("first"):
+            self.first = wanted[1]
+        if not props.is_property_set("last"):
+            self.last = wanted[2]
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        layout.prop(self, "order")
+        if self.order == "AROUND":
+            layout.prop(self, "both_ways")
+        elif self.order == "AXIS":
+            layout.prop(self, "axis", expand=True)
+        elif self.order == "RANDOM":
+            layout.prop(self, "seed")
+        noun = "Lead" if self.what == "LEAD" else "Delay"
+        column = layout.column(align=True)
+        column.prop(self, "first", text="First " + noun)
+        column.prop(self, "last", text="Last " + noun)
+
+    def execute(self, context):
+        found = self.plan(context)
+        if found is None:
+            return {"CANCELLED"}
+        rig, data, move, groups = found
+        if self.what == "LEAD" and self.order == "CHAIN":
+            data.report = ("Riders do not hang from one another, so there is no "
+                           "chain to spread down. Pick another order.")
+            self.report({"WARNING"}, data.report)
+            return {"CANCELLED"}
+        shares = spread_shares(rig, move, groups, self.order, self.axis,
+                               self.both_ways, self.seed)
+        parts = [part for _ahead, group in groups for part in group]
+        limited = spread_values(self.what, parts, shares, self.first, self.last)
+        # Once, for all of them: a built move plays the new values at once.
+        data.report = ""
+        refresh_drivers(rig, data, move)
+        cramped = data.report
+        data.report = "Spread the {:s} of {:d} {:s} from {:g} to {:g}, {:s}.".format(
+            "Leads" if self.what == "LEAD" else "Delays", len(parts),
+            "riders" if self.what == "LEAD" else "parts", self.first, self.last,
+            spread_words(self.what, self.order, groups, self.axis,
+                         self.both_ways, self.seed))
+        if limited:
+            data.report += " {:d} held at the limit.".format(limited)
+        if cramped:
+            data.report += " " + cramped
+        self.report({"WARNING"} if cramped else {"INFO"}, data.report)
+        return {"FINISHED"}
+
+
 def control_channel(carrier):
     """(owner, data path, index) of what a control's keys go on: the handle's
     place along its rail, or the slider itself when there is no handle."""
@@ -5356,6 +5721,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         if riders:
             head, listed = layout.panel_prop(move, "show_riders")
             head.label(text="Riding along ({:d})".format(len(riders)), icon="LINKED")
+            spreading = head.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
+            spreading.index, spreading.what = index, "LEAD"
             if listed is not None:
                 note = listed.row()
                 note.enabled = False
@@ -5409,6 +5776,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         # animated: the parts do not all leave at once.
         head, timing = layout.panel_prop(move, "show_timing")
         head.label(text="Timing", icon="TIME")
+        spreading = head.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
+        spreading.index, spreading.what = index, "DELAY"
         if timing is not None:
             note = timing.row()
             note.enabled = False
@@ -5585,6 +5954,7 @@ CLASSES = (
     RIGMOVES_OT_edit_curve,
     RIGMOVES_OT_drop_curve,
     RIGMOVES_OT_show_paths,
+    RIGMOVES_OT_spread,
     RIGMOVES_OT_animate,
     RIGMOVES_OT_key_control,
     RIGMOVES_OT_pause,

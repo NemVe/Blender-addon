@@ -18,6 +18,7 @@ import importlib
 import math
 import os
 import sys
+import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -88,6 +89,21 @@ def drive(carrier, share):
     bpy.context.view_layer.update()
 
 
+def undo_push():
+    """A step to undo back to. Headless Blender keeps no undo history unless
+    asked to, and does not push a step of its own for an operator."""
+    window = bpy.context.window_manager.windows[0]
+    with bpy.context.temp_override(window=window, screen=window.screen):
+        assert bpy.ops.ed.undo_push(message="test") == {"FINISHED"}
+
+
+def undo_once():
+    """Ctrl+Z. Everything held from before it - objects, parts - is stale."""
+    window = bpy.context.window_manager.windows[0]
+    with bpy.context.temp_override(window=window, screen=window.screen):
+        assert bpy.ops.ed.undo() == {"FINISHED"}
+
+
 def record_move(objects, pose):
     """New Move on these objects, pose them by hand, Record After."""
     select(*objects)
@@ -99,6 +115,68 @@ def record_move(objects, pose):
     index = len(rig().rigmoves.moves) - 1
     assert bpy.ops.rigmoves.record(index=index, which="AFTER") == {"FINISHED"}
     return before, after
+
+
+def ring_places(centre, count, radius, start=0.0):
+    """Places on a ring round `centre`, on a plane tipped off the world's:
+    tilted 30 degrees about X and then turned 20 about Z, so that a ring read
+    as flat on the ground - the world's Z for an axis - gives itself away."""
+    turn = Matrix.Rotation(math.radians(20.0), 3, "Z") @ Matrix.Rotation(
+        math.radians(30.0), 3, "X")
+    along, across = turn @ Vector((1.0, 0.0, 0.0)), turn @ Vector((0.0, 1.0, 0.0))
+    out = []
+    for number in range(count):
+        angle = math.radians(start + 360.0 * number / count)
+        out.append(Vector(centre) + radius * (math.cos(angle) * along
+                                              + math.sin(angle) * across))
+    return out
+
+
+class Sketch:
+    """A stand-in for a panel layout that notes what is drawn, and where.
+
+    The panel cannot be drawn without a window, but its code can run against
+    this: every row, column and sub-panel is another sketch, and every button
+    is logged with the path of sub-panels it was put in.
+    """
+
+    def __init__(self, log, where=()):
+        self.log, self.where = log, where
+
+    def child(self, name):
+        return Sketch(self.log, self.where + (name,))
+
+    def row(self, **_kwargs):
+        return self.child("row")
+
+    column = split = box = row
+
+    def panel_prop(self, _data, prop):
+        return self.child("head:" + prop), self.child("body:" + prop)
+
+    def operator(self, idname, text="", **_kwargs):
+        self.log.append((self.where, idname, text))
+        return types.SimpleNamespace()
+
+    def __getattr__(self, name):
+        # label, prop, separator and the rest: nothing to note.
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *args, **kwargs: None
+
+
+def drawn_buttons():
+    """Every button the panel draws now, as (path, operator id, text)."""
+    log = []
+
+    class Drawing:
+        layout = Sketch(log)
+
+    for name in dir(rigmoves.RIGMOVES_PT_panel):
+        if name == "draw" or name.startswith("_draw"):
+            setattr(Drawing, name, getattr(rigmoves.RIGMOVES_PT_panel, name))
+    Drawing().draw(bpy.context)
+    return log
 
 
 class CopyThatCase(unittest.TestCase):
@@ -467,6 +545,22 @@ class TestRiders(CopyThatCase):
         bpy.ops.rigmoves.build()
         self.assertEqual(self.ride(), {"FINISHED"})
         self.check_rides()
+
+    def test_the_ninth_part_of_a_move_keeps_its_leader(self):
+        # A move's parts can move in memory when one is added, from the ninth
+        # on: the leader, read after that, was a dead pointer, and the last
+        # rider was left riding with nobody.
+        for number in range(8):
+            extra = cube("Extra{:d}".format(number), (float(number), 5.0, 0.0))
+            select(self.petal, extra)
+            self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Petal",
+                                                         rig_name=rig().name),
+                             {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual([p.leader for p in move.parts if p.name != "Petal"],
+                         ["Petal"] * 8)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotIn("no longer in its move", rig().rigmoves.report)
 
     def test_rider_added_before_the_first_build(self):
         self.assertEqual(self.ride(), {"FINISHED"})
@@ -1513,6 +1607,318 @@ class TestFollowersAdded(CopyThatCase):
         self.assertTrue(rigmoves.recorded(self.move, "AFTER"))
         bpy.ops.rigmoves.build()
         self.assertNotIn("After not recorded", rig().rigmoves.report)
+
+
+class TestSpread(CopyThatCase):
+    """Leads and Delays filled in from where the parts stand."""
+
+    def lifted(self, objects):
+        """A move over these objects, each raised a metre and recorded."""
+        select(*objects)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj in objects:
+            obj.location.z += 1.0
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        return self.move
+
+    def ride(self, leader, where, name):
+        obj = cube(name, where)
+        select(leader, obj)
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader=leader.name,
+                                                     rig_name=rig().name), {"FINISHED"})
+        return obj
+
+    def leads(self, leader=None):
+        return [p.lead for p in self.move.parts
+                if p.leader and (leader is None or p.leader == leader)]
+
+    def delays(self):
+        return [round(p.start, 4) for p in self.move.parts if not p.leader]
+
+    def spread(self, what, **kwargs):
+        return bpy.ops.rigmoves.spread(index=0, what=what, **kwargs)
+
+    def ring_of_riders(self, count=8, start=0.0, leader_on_ring=False):
+        """A leader and a ring of riders round it, on the tilted plane."""
+        centre = (2.0, 1.0, 3.0)
+        places = ring_places(centre, count + (1 if leader_on_ring else 0), 3.0, start)
+        leader = cube("Leader", places.pop(0) if leader_on_ring else centre)
+        self.lifted([leader])
+        riders = [self.ride(leader, where, "R{:d}".format(number))
+                  for number, where in enumerate(places)]
+        select(leader)
+        return leader, riders
+
+    # -- Leads --------------------------------------------------------------
+
+    def test_leads_round_a_tilted_ring_both_ways(self):
+        self.ring_of_riders()
+        self.assertEqual(self.spread("LEAD", order="AROUND", first=0.0, last=36.0,
+                                     both_ways=True), {"FINISHED"})
+        self.assertEqual(self.leads(), [0, 9, 18, 27, 36, 27, 18, 9])
+        self.assertIn("Spread the Leads of 8 riders from 0 to 36", rig().rigmoves.report)
+
+    def test_leads_with_the_leader_on_the_ring_itself(self):
+        # Nine places, the leader on one: its neighbours are a ninth of the
+        # way round, so nobody shares its value, and the far two share theirs.
+        self.ring_of_riders(count=8, leader_on_ring=True)
+        self.assertEqual(self.spread("LEAD", order="AROUND", first=0.0, last=36.0,
+                                     both_ways=True), {"FINISHED"})
+        self.assertEqual(self.leads(), [9, 18, 27, 36, 36, 27, 18, 9])
+
+    def test_leads_run_one_way_round_without_both_ways(self):
+        # Counter-clockwise looking down the ring's normal, which is up.
+        self.ring_of_riders(count=4)
+        self.spread("LEAD", order="AROUND", first=0.0, last=30.0)
+        self.assertEqual(self.leads(), [0, 10, 20, 30])
+
+    def test_leads_follow_the_ring_not_the_order_they_were_added_in(self):
+        # The same four places, added 0, 270, 180, 90 degrees.
+        leader = cube("Leader", (2.0, 1.0, 3.0))
+        self.lifted([leader])
+        places = ring_places((2.0, 1.0, 3.0), 4, 3.0)
+        for number, where in enumerate([places[0], places[3], places[2], places[1]]):
+            self.ride(leader, where, "R{:d}".format(number))
+        select(leader)
+        self.spread("LEAD", order="AROUND", first=0.0, last=30.0)
+        self.assertEqual(self.leads(), [0, 30, 20, 10])
+
+    def test_each_leader_spreads_its_own_riders(self):
+        # Two rings, a leader each: both get the whole range, not half of it.
+        one, two = cube("One", (0.0, 0.0, 0.0)), cube("Two", (20.0, 0.0, 0.0))
+        self.lifted([one, two])
+        for leader, centre in ((one, (0.0, 0.0, 0.0)), (two, (20.0, 0.0, 0.0))):
+            for number, where in enumerate(ring_places(centre, 4, 3.0)):
+                self.ride(leader, where, "{:s}{:d}".format(leader.name, number))
+        select(one)
+        self.assertEqual(self.spread("LEAD", order="AROUND", first=0.0, last=30.0),
+                         {"FINISHED"})
+        self.assertEqual(self.leads("One"), [0, 10, 20, 30])
+        self.assertEqual(self.leads("Two"), [0, 10, 20, 30])
+
+    def test_leads_play_at_once_on_a_built_move(self):
+        leader = cube("Leader", (0.0, 5.0, 0.0))
+        self.lifted([leader])
+        riders = [self.ride(leader, (x, 0.0, 0.0), "R{:d}".format(x)) for x in (1, 2, 3)]
+        bpy.ops.rigmoves.build()
+        select(leader)
+        self.assertEqual(self.spread("LEAD", order="AXIS", axis="X", first=0.0,
+                                     last=-50.0), {"FINISHED"})
+        self.assertEqual(self.leads(), [0, -25, -50])
+        # No Build since. Behind by 0, half and a whole leader: the windows
+        # on the control are 0-.5, .25-.75 and .5-1, so at half way the first
+        # has arrived, the second is half way and the third has not set off.
+        drive(self.move, 0.5)
+        self.assertEqual([round(centre(r).z, 3) for r in riders], [1.0, 0.5, 0.0])
+        bpy.ops.rigmoves.build()
+        drive(self.move, 0.5)
+        self.assertEqual([round(centre(r).z, 3) for r in riders], [1.0, 0.5, 0.0])
+
+    def test_one_write_for_all_of_them(self):
+        # The drivers are rewritten once, not once for every rider.
+        leader = cube("Leader", (0.0, 5.0, 0.0))
+        self.lifted([leader])
+        for x in (1, 2, 3, 4):
+            self.ride(leader, (x, 0.0, 0.0), "R{:d}".format(x))
+        bpy.ops.rigmoves.build()
+        select(leader)
+        calls = []
+        was = rigmoves.refresh_drivers
+
+        def counting(*args):
+            calls.append(1)
+            return was(*args)
+
+        rigmoves.refresh_drivers = counting
+        try:
+            self.spread("LEAD", order="AXIS", axis="X", first=0.0, last=-40.0)
+        finally:
+            rigmoves.refresh_drivers = was
+        self.assertEqual(len(calls), 1)
+
+    def test_leads_along_a_row_only_ever_step_one_way(self):
+        leader = cube("Leader", (0.0, 5.0, 0.0))
+        self.lifted([leader])
+        for x in (3, 1, 4, 2):
+            self.ride(leader, (x, 0.0, 0.0), "R{:d}".format(x))
+        select(leader)
+        self.spread("LEAD", order="AXIS", axis="X", first=0.0, last=-30.0)
+        by_place = sorted((p.lead for p in self.move.parts if p.leader), reverse=True)
+        self.assertEqual(by_place, [0, -10, -20, -30])
+        self.assertEqual({p.name: p.lead for p in self.move.parts if p.leader},
+                         {"R1": 0, "R2": -10, "R3": -20, "R4": -30})
+
+    def test_leads_by_distance(self):
+        leader = cube("Leader", (0.0, 0.0, 0.0))
+        self.lifted([leader])
+        for x in (1, 2, 4):
+            self.ride(leader, (x, 0.0, 3.0), "R{:d}".format(x))
+        select(leader)
+        self.spread("LEAD", order="DISTANCE", first=0.0, last=-40.0)
+        # Straight ahead of 3 up the sides, 4 out: nearest to farthest.
+        far = [math.sqrt(x * x + 9.0) for x in (1, 2, 4)]
+        self.assertEqual(self.leads(),
+                         [round(-40.0 * d / max(far)) for d in far])
+
+    def test_only_the_selected_riders_take_part(self):
+        leader, riders = self.ring_of_riders(count=4)
+        for part in self.move.parts:
+            if part.leader:
+                part.lead = 7
+        select(leader, riders[1], riders[3])
+        self.spread("LEAD", order="AROUND", first=0.0, last=30.0)
+        self.assertEqual(self.leads(), [7, 0, 7, 30])
+
+    def test_leads_are_held_to_what_a_lead_can_be(self):
+        self.ring_of_riders(count=4)
+        self.spread("LEAD", order="AROUND", first=-100.0, last=100.0)
+        self.assertEqual(self.leads(), [-50, -33, 33, 50])
+        self.assertIn("held at the limit", rig().rigmoves.report)
+
+    def test_leads_need_riders(self):
+        part = cube("Alone", (0.0, 0.0, 0.0))
+        self.lifted([part])
+        select(part)
+        self.assertEqual(self.spread("LEAD", order="AROUND", first=0.0, last=9.0),
+                         {"CANCELLED"})
+        self.assertIn("no riders", rig().rigmoves.report)
+
+    def test_riders_have_no_chain_to_spread_down(self):
+        self.ring_of_riders(count=4)
+        self.assertEqual(self.spread("LEAD", order="CHAIN", first=0.0, last=9.0),
+                         {"CANCELLED"})
+        self.assertIn("no chain", rig().rigmoves.report)
+        self.assertEqual(self.leads(), [0, 0, 0, 0])
+
+    # -- Delays -------------------------------------------------------------
+
+    def parts_at(self, places):
+        objects = [cube("P{:d}".format(n), where) for n, where in enumerate(places)]
+        self.lifted(objects)
+        return objects
+
+    def test_delays_take_effect_on_a_built_move(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in (0, 1, 2)])
+        bpy.ops.rigmoves.build()
+        select(*objects)
+        self.assertEqual(self.spread("DELAY", order="AXIS", axis="X", first=0.0,
+                                     last=0.5), {"FINISHED"})
+        self.assertEqual(self.delays(), [0.0, 0.25, 0.5])
+        # Waiting 0, a quarter and a half of the control: at half way the
+        # first is half way through its path, the second a third, the last
+        # has not set off.
+        drive(self.move, 0.5)
+        self.assertEqual([round(centre(o).z, 3) for o in objects], [0.5, 0.333, 0.0])
+
+    def test_delays_down_a_chain_follow_the_depth(self):
+        objects = self.parts_at([(x + 0.5, 0.0, 0.0) for x in range(4)])
+        for number in range(1, 4):
+            self.move.parts[number].follows = "P{:d}".format(number - 1)
+        select(*objects)
+        self.assertEqual(self.spread("DELAY", order="CHAIN", first=0.0, last=0.6),
+                         {"FINISHED"})
+        self.assertEqual(self.delays(), [0.0, 0.2, 0.4, 0.6])
+
+    def test_delays_by_distance_from_the_active_part(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in (0, 1, 3, 6)])
+        select(*objects)
+        self.spread("DELAY", order="DISTANCE", first=0.0, last=0.6)
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.3, 0.6])
+        # Measured from another part when that one is active.
+        select(*reversed(objects))
+        self.spread("DELAY", order="DISTANCE", first=0.0, last=0.6)
+        self.assertEqual(self.delays(), [0.6, 0.5, 0.3, 0.0])
+
+    def test_delays_round_a_ring_from_the_active_part(self):
+        # Six parts on the ring, the third active: it goes first, and the
+        # delay climbs round the ring from it.
+        places = ring_places((0.0, 0.0, 0.0), 6, 3.0)
+        objects = self.parts_at(places)
+        select(objects[2], *[o for o in objects if o is not objects[2]])
+        self.spread("DELAY", order="AROUND", first=0.0, last=0.5)
+        self.assertEqual(self.delays(), [0.4, 0.5, 0.0, 0.1, 0.2, 0.3])
+        self.spread("DELAY", order="AROUND", first=0.0, last=0.6, both_ways=True)
+        self.assertEqual(self.delays(), [0.4, 0.2, 0.0, 0.2, 0.4, 0.6])
+
+    def test_parts_turning_about_one_hub_are_ordered_by_where_they_are(self):
+        # Every pivot the same point - a fan's blades about its hub - says
+        # nothing about who stands where, so the blades' own places count.
+        objects = self.parts_at(ring_places((0.0, 0.0, 0.0), 4, 3.0))
+        bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
+        select(*objects)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.spread("DELAY", order="AROUND", first=0.0, last=0.3)
+        self.assertEqual(self.delays(), [0.0, 0.1, 0.2, 0.3])
+
+    def test_random_is_the_same_every_time_for_a_seed(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(6)])
+        select(*objects)
+        self.spread("DELAY", order="RANDOM", first=0.1, last=0.9, seed=5)
+        again = self.delays()
+        self.assertTrue(all(0.1 <= d <= 0.9 for d in again), again)
+        self.assertGreater(len(set(again)), 3)
+        for part in self.move.parts:
+            part.start = 0.0
+        self.spread("DELAY", order="RANDOM", first=0.1, last=0.9, seed=5)
+        self.assertEqual(self.delays(), again)
+        self.spread("DELAY", order="RANDOM", first=0.1, last=0.9, seed=6)
+        self.assertNotEqual(self.delays(), again)
+
+    def test_only_the_selected_parts_take_a_delay(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(4)])
+        for part in self.move.parts:
+            part.start = 0.05
+        select(objects[3], objects[1])
+        self.spread("DELAY", order="AXIS", axis="X", first=0.2, last=0.4)
+        self.assertEqual(self.delays(), [0.05, 0.2, 0.05, 0.4])
+
+    def test_delays_are_held_to_what_a_delay_can_be(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(3)])
+        select(*objects)
+        self.spread("DELAY", order="AXIS", axis="X", first=-1.0, last=5.0)
+        self.assertEqual(self.delays(), [0.0, 0.99, 0.99])
+        self.assertIn("held at the limit", rig().rigmoves.report)
+
+    def test_a_spread_can_be_undone(self):
+        objects = self.parts_at([(x, 0.0, 0.0) for x in range(3)])
+        select(*objects)
+        undo_push()
+        self.spread("DELAY", order="AXIS", axis="X", first=0.1, last=0.5)
+        undo_push()
+        self.assertEqual(self.delays(), [0.1, 0.3, 0.5])
+        undo_once()
+        self.assertEqual([round(p.start, 4) for p in rig().rigmoves.moves[0].parts],
+                         [0.0, 0.0, 0.0])
+
+    # -- the pieces ---------------------------------------------------------
+
+    def test_a_rings_plane_is_found_and_a_line_falls_back_to_up(self):
+        up = Vector((0.0, 0.0, 1.0))
+        turn = Matrix.Rotation(math.radians(20.0), 3, "Z") @ Matrix.Rotation(
+            math.radians(30.0), 3, "X")
+        found = rigmoves.ring_normal(ring_places((1.0, 2.0, 3.0), 7, 2.0))
+        self.assertLess((found - turn @ up).length, 1e-5)
+        # A ring on its side has no up to point along: Y breaks the tie, the
+        # same way every time.
+        side = rigmoves.ring_normal([Vector((math.cos(a), 0.0, math.sin(a)))
+                                     for a in (0.0, 1.5, 3.0, 4.5)])
+        self.assertLess((side - Vector((0.0, 1.0, 0.0))).length, 1e-5)
+        for points in ([], [Vector((1.0, 2.0, 3.0))],
+                       [Vector((0.0, 0.0, 0.0)), Vector((1.0, 1.0, 1.0))],
+                       [Vector((n, 2.0 * n, 3.0 * n)) for n in range(5)]):
+            self.assertEqual(rigmoves.ring_normal(points), up)
+
+    # -- the panel ----------------------------------------------------------
+
+    def test_spread_buttons_sit_in_the_headers_of_riding_along_and_timing(self):
+        self.ring_of_riders(count=4)
+        found = [(where, text, idname) for where, idname, text in drawn_buttons()
+                 if idname == "rigmoves.spread"]
+        self.assertEqual(sorted(found), sorted([
+            (("head:show_riders",), "Spread…", "rigmoves.spread"),
+            (("head:show_timing",), "Spread…", "rigmoves.spread")]))
 
 
 class TestCombined(CopyThatCase):
