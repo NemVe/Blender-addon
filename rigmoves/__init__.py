@@ -31,12 +31,13 @@ import random
 
 import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
+from mathutils.bvhtree import BVHTree
 from mathutils.geometry import interpolate_bezier
 
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 17, 0),
+    "version": (0, 17, 1),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -5604,9 +5605,9 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         data.report = ""
         refresh_drivers(rig, data, move)
         cramped = data.report
-        data.report = "Spread the {:s} of {:d} {:s} from {:g} to {:g}, {:s}.".format(
-            "Leads" if self.what == "LEAD" else "Delays", len(parts),
-            ("rider" if self.what == "LEAD" else "part") + ("" if len(parts) == 1 else "s"),
+        data.report = "Spread the {:s} of {:s} from {:g} to {:g}, {:s}.".format(
+            "Leads" if self.what == "LEAD" else "Delays",
+            counted(len(parts), "rider" if self.what == "LEAD" else "part"),
             self.first, self.last,
             spread_words(self.what, self.order, groups, self.axis,
                          self.both_ways, self.seed))
@@ -5629,17 +5630,70 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
 # of the first joint and repeats it down the rest.
 
 
+def touching_distance(part):
+    """How far a point is from the mesh of a part standing where it stood at
+    Before, as (function of a world point, how big the part is across) - or
+    None for a part with no mesh to measure against.
+
+    The distance is to the surface, not to the nearest vertex: a box has eight
+    vertices, and a hinge in the middle of one of its faces is a long way from
+    all of them.
+    """
+    obj = bpy.data.objects.get(part.name)
+    if (obj is None or obj.type != "MESH" or not part.has_before
+            or not len(obj.data.vertices)):
+        return None
+    before = as_matrix(part.before)
+    values = [0.0] * (3 * len(obj.data.vertices))
+    obj.data.vertices.foreach_get("co", values)
+    world = [before @ Vector(values[i:i + 3]) for i in range(0, len(values), 3)]
+    across = (Vector([max(v[a] for v in world) for a in range(3)])
+              - Vector([min(v[a] for v in world) for a in range(3)])).length
+    polygons = [tuple(poly.vertices) for poly in obj.data.polygons]
+    if polygons:
+        tree = BVHTree.FromPolygons(world, polygons)
+
+        def distance(point):
+            found = tree.find_nearest(point)
+            return (point - found[0]).length if found[0] is not None else math.inf
+    else:
+        def distance(point):
+            return min((point - v).length for v in world)
+    return distance, across
+
+
 def chain_order(rig, move, parts, root):
-    """The parts in the order a chain runs through them: from the root, each
-    next one the nearest of those not yet in it, measured between pivots at
-    Before. Parts equally near keep the order they were listed in."""
+    """The parts in the order a chain runs through them, from the root.
+
+    A joint is built at the far end of the part before it, so from the part
+    the chain has got to, the next is the one whose pivot touches that part's
+    mesh - within a twentieth of how big it is across - and, of those, the one
+    whose pivot is farthest from the part's own: the far end, not the near one.
+    That is what tells the pleats of a folded leaf apart, where the third
+    segment's pivot is back by the first's and no nearness can say which comes
+    next. When nothing touches, as with gaps between the parts or pivots left
+    in the middle of them, it is the nearest pivot, measured between pivots at
+    Before; parts equally near keep the order they were listed in.
+    """
     spots = {p.name: where for p, where in zip(parts, spots_of(rig, move, parts))}
+    # The pivots as they are, not the middles spots_of falls back on.
+    pivots = {p.name: part_spot(rig, move, p) for p in parts}
     order = [root]
     left = [p for p in parts if p.name != root.name]
     while left:
-        here = spots[order[-1].name]
-        nearest = min(range(len(left)), key=lambda n: (spots[left[n].name] - here).length)
-        order.append(left.pop(nearest))
+        here = order[-1]
+        measure = touching_distance(here)
+        near = []
+        if measure is not None:
+            distance, across = measure
+            near = [n for n in range(len(left))
+                    if distance(pivots[left[n].name]) <= 0.05 * across]
+        if near:
+            pick = max(near, key=lambda n: (pivots[left[n].name] - pivots[here.name]).length)
+        else:
+            where = spots[here.name]
+            pick = min(range(len(left)), key=lambda n: (spots[left[n].name] - where).length)
+        order.append(left.pop(pick))
     return order
 
 
@@ -5647,8 +5701,9 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
     bl_idname = "rigmoves.make_chain"
     bl_label = "Make Chain"
     bl_description = ("Make the selected parts follow one another down a line, "
-                      "starting from the active one: each follows the nearest "
-                      "of those not in the chain yet")
+                      "starting from the active one: each joint is the one "
+                      "built at the far end of the part before it - failing "
+                      "that, the nearest pivot")
     bl_options = {"REGISTER", "UNDO"}
     index: bpy.props.IntProperty(options={"HIDDEN"})
 
@@ -5727,10 +5782,15 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
                 " and {:d} more".format(len(replaced) - 3) if len(replaced) > 3 else ""))
         loosened = paired - {p.name for p in move.parts if p.leader and riding_on(move, p)}
         if loosened:
-            notes.append("{:d} joint(s) of copied chains no longer ride joint for "
-                         "joint: take those copies out with their x under Riding "
-                         "along, then Ride Along again to copy the new chain."
-                         .format(len(loosened)))
+            one = len(loosened) == 1
+            notes.append("{:s} no longer {:s} joint for joint: take {:s} out with "
+                         "{:s} under Riding along, then Ride Along again to copy the "
+                         "new chain.".format(
+                             "1 joint of a copied chain" if one else
+                             "{:d} joints of copied chains".format(len(loosened)),
+                             "rides" if one else "ride",
+                             "that copy" if one else "those copies",
+                             "its x" if one else "their x"))
         if notes:
             said += ". " + " ".join(notes)
         data.report = said
@@ -5907,12 +5967,15 @@ class RIGMOVES_OT_curl(bpy.types.Operator):
             about = Matrix.Translation(pivot) @ spin @ Matrix.Translation(-pivot)
             obj.matrix_world = carry @ about @ before
             context.view_layer.update()
-        said = "{:d} part(s) below '{:s}' now bend {:g} degrees like it".format(
-            len(names), short(root.name, 18), round(math.degrees(turn_angle(turn)), 1))
+        said = "{:s} below '{:s}' now {:s} {:g} degrees like it".format(
+            counted(len(names), "part"), short(root.name, 18),
+            "bends" if len(names) == 1 else "bend",
+            round(math.degrees(turn_angle(turn)), 1))
         if abs(self.factor - 1.0) > 1e-9:
             said += ", each joint x{:g} of the one before".format(self.factor)
         if gone:
-            said += " ({:d} left out: its object is gone)".format(len(gone))
+            said += " ({:d} left out: {:s} gone)".format(
+                len(gone), "its object is" if len(gone) == 1 else "their objects are")
         # Copies of the chain play what is recorded, once a Build has copied
         # it onto them: Record alone leaves them on the old path.
         named = {root.name} | {name for name, _steps in names}
@@ -6201,13 +6264,15 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                               "none were kept.".format(short(name, 18)))
             return {"CANCELLED"}
 
-        said = "{:d} copies of '{:s}'{:s} round {:s} ride along with it{:s}.".format(
-            len(places), short(name, 18),
-            " ({:d} joints each)".format(len(joints)) if len(joints) > 1 else "",
+        said = "{:s} of '{:s}'{:s} round {:s} {:s} along with it{:s}.".format(
+            counted(len(places), "copy", "copies"), short(name, 18),
+            " ({:s} each)".format(counted(len(joints), "joint")) if len(joints) > 1 else "",
             "the 3D cursor" if self.center == "CURSOR" else "the world origin",
+            "rides" if len(places) == 1 else "ride",
             ", joint for joint" if len(joints) > 1 else "")
         if skipped:
-            said += " {:d} place(s) already held a copy and were skipped.".format(skipped)
+            said += " {:s} already held a copy and {:s} skipped.".format(
+                counted(skipped, "place"), "was" if skipped == 1 else "were")
         if self.lead_first != self.lead_last:
             # Out from the original both ways round: the two sides match. Only
             # for the copies made now: the Leads of riders already there are
@@ -6588,6 +6653,11 @@ class RIGMOVES_OT_pick_rig(bpy.types.Operator):
 
 # ---------------------------------------------------------------------------
 # the panel - which is the rig's UI once the sliders exist
+
+
+def counted(number, one, many=None):
+    """A count with its noun in the right number: "1 copy", "5 copies"."""
+    return "{:d} {:s}".format(number, one if number == 1 else (many or one + "s"))
 
 
 def short(name, keep=15):

@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.17.0
+# CopyThat (experiment) - v0.17.1
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -17,7 +17,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.17.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.17.1.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
 
 ## Use
@@ -351,8 +351,15 @@ each one's **Follows** by hand is the slow part.
 *Recipe:* select the parts, with the one the chain starts from the active
 object, and press **Make Chain** at the top of the **Follows** section.
 
-From the first, each next part is the one nearest it, by pivot at Before,
-that is not in the chain yet; each is set to follow the one before. It goes
+From the first, each next part is found by how joints are built: a joint sits
+at the far end of the part before it. So of the parts not in the chain yet, the
+next is one whose pivot touches the mesh of the part the chain has got to - within
+a twentieth of how big that part is across - and of those, the one whose pivot is
+farthest from that part's own pivot. A leaf folded in pleats, which puts the third
+segment's pivot back by the first's, chains in the order it is built, not by which
+pivot is nearest. Where nothing touches - gaps between the parts, or pivots left
+in the middle of them - it is the nearest pivot at Before. Each is set to follow
+the one before. It goes
 through the same choice as the dropdowns, so a rider, a curved part and a loop
 are turned down with their reason, and the chain stops there, keeping the
 links already made. A part that leads riders may be chained: its riders hang
@@ -1019,6 +1026,15 @@ and one lifted 1 m:
   looks the same with its axes turned: the rolled joint's curl was not mirrored while
   the others' were. Every joint mirrors across the first joint's plane now, carried
   into its own axes.
+
+- **Make Chain chained a leaf folded in pleats in the wrong order.** It took the
+  nearest pivot, and a leaf shut in pleats puts the third segment's pivot back by the
+  first's: Leaf 1 > Leaf 3 > Leaf 2. A joint is built at the far end of the part before
+  it, so the next part is now the one whose pivot touches the last part's mesh and is
+  farthest from its own pivot; the nearest pivot is only the fallback.
+- **Reports said "1 copies", "1 joints" and "part(s)".** Ring, Make Chain, Curl and
+  Spread count in the right number now: "1 copy ... rides along", "2 places ... were
+  skipped", "1 part below ... bends".
 
 ## Known rough edges
 

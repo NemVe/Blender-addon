@@ -2388,7 +2388,7 @@ class TestCurl(CopyThatCase):
         self.assertEqual(self.curl(), {"FINISHED"})
         self.check_places(self.bent_by((20.0,) * 5))
         self.check_joints()
-        self.assertIn("4 part(s) below 'Seg1' now bend 20 degrees like it",
+        self.assertIn("4 parts below 'Seg1' now bend 20 degrees like it",
                       rig().rigmoves.report)
         # Kept: recorded, built, and played.
         self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
@@ -2548,8 +2548,24 @@ class TestCurl(CopyThatCase):
         self.pose_root(20.0)
         self.assertEqual(self.curl(), {"FINISHED"})
         self.check_places_of(range(4), self.bent_by((20.0,) * 5))
-        self.assertIn("1 left out", rig().rigmoves.report)
-        self.assertIn("3 part(s) below", rig().rigmoves.report)
+        self.assertIn("1 left out: its object is gone", rig().rigmoves.report)
+        self.assertIn("3 parts below", rig().rigmoves.report)
+
+    def test_the_report_counts_one_in_the_singular(self):
+        # Two segments in the chain: one part below the first, which bends.
+        for number in ("Seg3", "Seg4", "Seg5"):
+            self.move.parts[number].follows = ""
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+        self.assertIn("1 part below 'Seg1' now bends 20 degrees like it",
+                      rig().rigmoves.report)
+
+    def test_two_lost_tips_are_counted_in_the_plural(self):
+        self.lose(4)
+        self.lose(3)
+        self.pose_root(20.0)
+        self.assertEqual(self.curl(), {"FINISHED"})
+        self.assertIn("(2 left out: their objects are gone)", rig().rigmoves.report)
 
     def test_a_lost_part_with_parts_below_it_is_a_refusal_and_nothing_moves(self):
         self.lose(2)
@@ -2691,7 +2707,7 @@ class TestCurlBranches(CopyThatCase):
         for name, obj in self.objects.items():
             expected = [carried[name] @ self.homes[name] @ v.co for v in obj.data.vertices]
             self.assertLess(drift(obj, expected), TOLERANCE, name)
-        self.assertIn("4 part(s) below 'Palm'", rig().rigmoves.report)
+        self.assertIn("4 parts below 'Palm'", rig().rigmoves.report)
         # And it plays: recorded, built, closed at 1 and home at 0.
         self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
         bpy.ops.rigmoves.build()
@@ -2922,7 +2938,16 @@ class TestRing(CopyThatCase):
                 self.assertGreater((here - there).length, 0.1)
         said = rig().rigmoves.report
         self.assertIn("4 copies of 'Blade'", said)
-        self.assertIn("3 place(s) already held a copy", said)
+        self.assertIn("3 places already held a copy and were skipped", said)
+
+    def test_the_report_counts_one_copy_in_the_singular(self):
+        self.assertEqual(self.ring(count=2), {"FINISHED"})
+        self.assertEqual(rig().rigmoves.report,
+                         "1 copy of 'Blade' round the 3D cursor rides along with it.")
+        # And a ring that finds one place held says so in the singular.
+        self.assertEqual(self.ring(count=4), {"FINISHED"})
+        self.assertIn("1 place already held a copy and was skipped", rig().rigmoves.report)
+        self.assertIn("2 copies of 'Blade'", rig().rigmoves.report)
 
     def test_the_same_ring_again_is_refused_and_leaves_nothing(self):
         self.ring(count=4)
@@ -3802,6 +3827,73 @@ class TestCopiedParts(CopyThatCase):
         self.check_travel(first, rest, 1.0)
 
 
+class TestMakeChainOrder(CopyThatCase):
+    """The order follows how a joint is built, at the far end of the part before
+    it: not whichever pivot happens to be nearest."""
+
+    def made(self, specs):
+        """New Move on cubes of (name, centre, size, pivot); the objects."""
+        objects = []
+        for name, centre, size, pivot in specs:
+            obj = cube(name, centre)
+            obj.scale = size
+            objects.append((obj, pivot))
+        bpy.context.view_layer.update()
+        select(*[obj for obj, _pivot in objects])
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj, pivot in objects:
+            bpy.context.scene.cursor.location = pivot
+            select(obj)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        return {obj.name: obj for obj, _pivot in objects}
+
+    def chain_from(self, objects, first):
+        select(objects[first], *[o for n, o in objects.items() if n != first])
+        return bpy.ops.rigmoves.make_chain(index=0)
+
+    def test_a_leaf_folded_in_pleats_chains_in_the_order_it_is_built(self):
+        # Three plates hinged end to end, shut in a Z: the second folds back
+        # under the first and the third out again under that, so the third's
+        # pivot stands by the first's, nearer than the second's.
+        plate = (1.0, 0.4, 0.04)
+        objects = self.made([("Leaf3", (0.5, 0.0, -0.08), plate, (0.0, 0.0, -0.06)),
+                             ("Leaf1", (0.5, 0.0, 0.0), plate, (0.0, 0.0, 0.0)),
+                             ("Leaf2", (0.5, 0.0, -0.04), plate, (1.0, 0.0, -0.02))])
+        move = rig().rigmoves.moves[0]
+        spots = {p.name: rigmoves.part_spot(rig(), move, p) for p in move.parts}
+        self.assertLess((spots["Leaf3"] - spots["Leaf1"]).length,
+                        (spots["Leaf2"] - spots["Leaf1"]).length)
+        self.assertEqual(self.chain_from(objects, "Leaf1"), {"FINISHED"})
+        self.assertEqual(rig().rigmoves.report, "Chain: Leaf1 > Leaf2 > Leaf3")
+        self.assertEqual({p.name: p.follows for p in move.parts},
+                         {"Leaf1": "", "Leaf2": "Leaf1", "Leaf3": "Leaf2"})
+
+    def test_a_straight_tentacle_made_in_no_order_with_pivots_on_the_joints(self):
+        sizes = (1.0, 0.3, 0.3)
+        objects = self.made([("Seg{:d}".format(n + 1), (n + 0.5, 0.0, 0.0), sizes,
+                              (float(n), 0.0, 0.0)) for n in (3, 0, 4, 2, 1)])
+        self.assertEqual(self.chain_from(objects, "Seg1"), {"FINISHED"})
+        self.assertEqual(rig().rigmoves.report, "Chain: Seg1 > Seg2 > Seg3 > Seg4 > Seg5")
+
+    def test_a_chain_with_gaps_between_its_segments_goes_by_the_nearest_pivot(self):
+        # Nothing touches, so it is the nearest pivot, as before.
+        sizes = (1.0, 0.3, 0.3)
+        objects = self.made([("Seg{:d}".format(n + 1), (1.4 * n + 0.5, 0.0, 0.0), sizes,
+                              (1.4 * n, 0.0, 0.0)) for n in (2, 0, 3, 1)])
+        self.assertEqual(self.chain_from(objects, "Seg1"), {"FINISHED"})
+        self.assertEqual(rig().rigmoves.report, "Chain: Seg1 > Seg2 > Seg3 > Seg4")
+
+    def test_a_pivot_that_touches_an_earlier_part_is_not_taken_for_the_next(self):
+        # Seg3's pivot stands on Seg1's far end too, as a branch would: of the
+        # two that touch, the one whose pivot is farther from Seg1's own is next.
+        sizes = (1.0, 0.3, 0.3)
+        objects = self.made([("Seg1", (0.5, 0.0, 0.0), sizes, (0.0, 0.0, 0.0)),
+                             ("Branch", (1.0, 0.0, 0.0), (0.2, 0.3, 0.3), (0.9, 0.0, 0.0)),
+                             ("Seg2", (1.5, 0.0, 0.0), sizes, (1.0, 0.0, 0.0))])
+        self.assertEqual(self.chain_from(objects, "Seg1"), {"FINISHED"})
+        self.assertEqual(rig().rigmoves.report, "Chain: Seg1 > Seg2 > Branch")
+
+
 class TestRingAFinger(CopyThatCase):
     """A finger of three segments, closed 30 degrees at After, made into five
     fingers round a tilted cursor: Ride Along takes whole copies of a chain,
@@ -4035,6 +4127,13 @@ class TestRingAFinger(CopyThatCase):
                                                      rig_name=rig().name), {"FINISHED"})
         self.assertTrue([p for p in self.move.parts if p.leader])
 
+    def test_one_copied_joint_unpaired_is_said_in_the_singular(self):
+        self.ring(count=2)
+        select(self.segments[0], self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.assertIn("1 joint of a copied chain no longer rides joint for joint: "
+                      "take that copy out with its x", rig().rigmoves.report)
+
     def test_a_selected_inner_joint_selects_its_whole_finger_for_a_spread(self):
         self.ring(count=5)
         select(self.joint(1, 2))
@@ -4073,7 +4172,7 @@ class TestRingAFinger(CopyThatCase):
         select(self.segments[0], self.segments[2])
         self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
         self.assertEqual(self.move.parts["Seg3"].follows, "Seg1")
-        self.assertIn("4 joint(s) of copied chains no longer ride joint for joint",
+        self.assertIn("4 joints of copied chains no longer ride joint for joint",
                       rig().rigmoves.report)
 
 

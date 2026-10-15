@@ -47,7 +47,7 @@ promises to the user.
 |---|---|
 | `rigmoves/__init__.py` | the whole add-on, about 7,200 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 218 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 226 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
@@ -101,6 +101,7 @@ Features, in the order the user asked for them:
 | 0.17.0 | **Curl**: the first joint's bend repeated down every follower, each joint `factor` times the one before | `bend_of`, `quaternion_power`, `shows_a_pose`, `RIGMOVES_OT_curl` |
 | 0.17.0 | **Ring**: a part and the parts below it made into a ring of riders, through 0.16's Ride Along | `copy_for_ring`, `take_riders_out`, `RIGMOVES_OT_ring` |
 | 0.17.0 | Merge of the two lines of work: Spread and Ring work on 0.16's copy roots and chains; one binding fix (`own_binding`) and one leader read-back fix | see "The four tools of 0.17" |
+| 0.17.1 | Make Chain's order follows how joints are built (far end of the part before), not the nearest pivot, so a folded leaf chains right; plurals in the new tools' reports | `chain_order`, `touching_distance`, `counted` |
 
 ## The model underneath (read before changing any maths)
 
@@ -251,7 +252,13 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     conditioned. A reference sitting on the middle has no direction, so the first
     target gives it.
 - **Make Chain** sets `part.follows` link by link, so `_follows_changed` does all
-  the validating. The chain stops at the first refusal and keeps what it made.
+  the validating. The order is `chain_order`: from the part the chain has got to,
+  among the unvisited parts whose *pivot touches its mesh* (`touching_distance`: a
+  BVH tree of the mesh at Before, surface distance within 5% of the part's bounding
+  diagonal), the one whose pivot is farthest from the part's own pivot - a joint is
+  at the far end of the part before it; else the nearest pivot (`spots_of`). Nearest
+  alone chains a leaf folded in pleats as 1 > 3 > 2: the third pivot is back by the
+  first's. The flower's leaf is the real case. The chain stops at the first refusal and keeps what it made.
   A part that leads riders may be chained (0.16 allowed it). It first clears the
   links the chosen parts have to one another - kept, they refuse a chain made from
   the other end as a loop - and puts them back if the chain is refused at its first
