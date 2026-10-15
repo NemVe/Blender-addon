@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CopyThat end card</title>
+<meta name="viewport" content="width=1920">
+<style>
+  /* End card, 1920x1080, 3 s at 30 fps, TRANSPARENT: it is laid over the last
+     seconds of the Cycles render, where the open flower sits in the upper
+     middle of the frame. The text lives in the lower third, under a soft dark
+     gradient that fades in with it. Everything is posed by setTime(t). */
+  :root {
+    --gold: #C9A76A;
+    --ink:  #F2EADB;   /* warm white */
+  }
+  html, body {
+    margin: 0; padding: 0;
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: transparent; }
+
+  /* The shade: a tall, eased gradient from clear (flower untouched) to near
+     black at the bottom edge, plus a soft pool right behind the text. The
+     stops are filled in by the script below. */
+  #shade { position: absolute; inset: 0; opacity: 0; }
+  #pool  {
+    position: absolute; inset: 0; opacity: 0;
+    background: radial-gradient(ellipse 980px 270px at 50% 900px,
+      rgba(3,3,5,.55) 0%, rgba(3,3,5,.30) 55%, rgba(3,3,5,0) 100%);
+  }
+
+  .line { position: absolute; left: 0; right: 0; margin: 0; text-align: center; white-space: nowrap;
+          text-shadow: 0 2px 28px rgba(0,0,0,.55), 0 0 2px rgba(0,0,0,.25); opacity: 0; }
+
+  #mark {
+    top: 780px;
+    font-family: "Inter Display", "Inter", sans-serif;
+    font-weight: 300; font-size: 120px; line-height: 1;
+    letter-spacing: -.035em;
+    font-feature-settings: "kern" 1, "liga" 1;
+    color: var(--ink);
+  }
+  /* Negative tracking also follows the last glyph; this keeps the ink centred. */
+  #mark span { display: inline-block; padding-right: .035em; }
+
+  #tag {
+    top: 918px;
+    font-family: "Inter Display", "Inter", sans-serif;
+    font-weight: 300; font-size: 40px; line-height: 1.2;
+    letter-spacing: .012em;
+    color: var(--ink);
+  }
+  #by {
+    top: 995px;
+    font-family: "Inter", sans-serif;
+    font-weight: 500; font-size: 25px; line-height: 1.2;
+    letter-spacing: .12em;
+    color: rgba(242,234,219,.78);
+  }
+  #by i { font-style: normal; color: var(--gold); margin: 0 .6em; }
+  #by b { font-weight: 500; letter-spacing: .1em; color: var(--gold); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="shade"></div>
+  <div id="pool"></div>
+  <h1 id="mark" class="line"><span>CopyThat</span></h1>
+  <p id="tag" class="line">Record a move. Get a slider.</p>
+  <p id="by" class="line"><span>by NemVe3D</span><i>&middot;</i><b>creators.sa/nemve</b></p>
+</div>
+
+<script>
+  // ---- shade gradient: clear above SHADE_FROM, eased up to SHADE_MAX -------
+  const SHADE_FROM = 560, SHADE_MAX = 0.93;
+  (function () {
+    const stops = [];
+    for (let i = 0; i <= 12; i++) {
+      const u = i / 12, y = SHADE_FROM + u * (1080 - SHADE_FROM);
+      const a = SHADE_MAX * (u * u * (3 - 2 * u));          // smoothstep: no visible start edge
+      stops.push('rgba(3,3,5,' + a.toFixed(3) + ') ' + y.toFixed(0) + 'px');
+    }
+    document.getElementById('shade').style.background =
+      'linear-gradient(180deg, rgba(3,3,5,0) 0px, ' + stops.join(', ') + ')';
+  })();
+
+  // ---- timeline (seconds): fade in over about a second, then hold ---------
+  const T = {
+    shade: [0.00, 1.00],
+    mark:  [0.10, 1.00],
+    tag:   [0.35, 1.15],
+    by:    [0.50, 1.30]
+  };
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const ramp  = (t, [a, b]) => clamp((t - a) / (b - a));
+  const outCubic  = x => 1 - Math.pow(1 - x, 3);
+  const inOutSine = x => 0.5 - 0.5 * Math.cos(Math.PI * x);
+  const $ = id => document.getElementById(id);
+
+  function rise(node, p, dy, blur) {
+    node.style.opacity = p;
+    node.style.transform = 'translateY(' + (dy * (1 - p)).toFixed(2) + 'px)';
+    node.style.filter = blur ? 'blur(' + (blur * (1 - p)).toFixed(2) + 'px)' : 'none';
+  }
+
+  window.setTime = function (t) {
+    const s = inOutSine(ramp(t, T.shade));
+    $('shade').style.opacity = s;
+    $('pool').style.opacity = s;
+    rise($('mark'), outCubic(ramp(t, T.mark)), 18, 8);
+    rise($('tag'), outCubic(ramp(t, T.tag)), 14, 5);
+    rise($('by'),  outCubic(ramp(t, T.by)),  10, 3);
+  };
+
+  window.setTime(0);
+  // Handy for looking at one frame:  end.html?t=2
+  const q = new URLSearchParams(location.search).get('t');
+  if (q !== null) window.setTime(parseFloat(q));
+</script>
+</body>
+</html>

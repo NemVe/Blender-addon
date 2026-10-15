@@ -1,0 +1,17 @@
+schema_version = "1.0.0"
+
+id = "copythat"
+# Written from bl_info["version"] by tools/build_zip.py when the zip is made,
+# so the two can never disagree.
+version = "0.18.0"
+name = "CopyThat"
+tagline = "Record a move, get a slider: animate machines without a rig"
+maintainer = "NemVe3D"
+type = "add-on"
+website = "https://creators.sa/nemve"
+tags = ["Animation", "Rigging"]
+
+blender_version_min = "4.4.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 NemVe3D"]

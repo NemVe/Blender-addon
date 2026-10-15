@@ -1,5 +1,11 @@
 # CopyThat (formerly RigMoves) - notes for Claude
 
+- New session? Read `START_HERE.md` first (the session handoff), then
+  `HANDOFF.md` and the guide.
+- The zip is a Blender extension: `rigmoves/blender_manifest.toml`, whose
+  version `tools/build_zip.py` writes from bl_info. Licence GPL-3.0-or-later
+  (`LICENSE`).
+
 - The add-on was renamed from RigMoves to CopyThat in 0.15.0. Only shown
   names changed: the folder `rigmoves`, the `rigmoves.*` operators and
   properties, and the markers stored in files ("RigMoves: " constraints,
