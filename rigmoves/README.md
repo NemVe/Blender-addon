@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.16.0
+# CopyThat (experiment) - v0.17.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -17,7 +17,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.16.0.zip`,
+Edit > Preferences > Add-ons > Install from Disk, pick `CopyThat-0.17.0.zip`,
 tick it on. Panel: 3D view sidebar (**N**), tab **CopyThat**.
 
 ## Use
@@ -202,14 +202,23 @@ the Path**), set the **Count**, **OK**.
   its own transform.
 - The copies then ride along with the part, exactly as if you had pressed Ride
   Along on them. On a built move that is a Build.
+- A part in a chain - a finger's first joint, or any joint of it - is ringed
+  whole: Ride Along takes copies of a whole chain joint for joint (see Copies
+  of a whole finger), so a ring of a finger is a ring of whole fingers, each
+  curling from where it stands. The copies are named per joint, "Seg1 2",
+  "Seg2 2", "Seg3 2", and so on. Each copy is matched to the finger before
+  anything is made part of the move: if copies stand too close together to be
+  told apart, the ring is turned down and nothing is left behind.
 - **First Lead** and **Last Lead**: set different, they are spread out from the
   original both ways round the ring (see Spread, Around a ring, both ways), so
-  the blades open one after another, the two sides alike. Leave them equal
-  and every copy moves with the original.
+  the blades open one after another, the two sides alike. A copied finger has
+  one Lead, its first joint's, so the fingers go one after another with their
+  joints in step. Leave them equal and every copy moves with the original.
 
 It asks before it makes anything: a part that is not in the move, a rider, a
-part that follows another, or a part dragged and not recorded on a built move
-are each turned down in words, and nothing is left behind.
+part with no Before, or a part dragged and not recorded on a built move are
+each turned down in words, and nothing is left behind. A part that follows
+another is not turned down - it is ringed with the chain it hangs in.
 
 ### Spread: Leads and Delays in one go
 
@@ -235,7 +244,10 @@ Delays held to 0 to 0.99; if any were held, the report says how many.
 
 - Leads belong to riders. Each leader's riders are put in order among
   themselves, so two rings with a leader each both get the whole range. The
-  start is the leader.
+  start is the leader. A copied finger has one Lead, its first joint's, so
+  that is what is spread and counted - one for a whole finger - and selecting
+  any joint of a copy selects the copy. Down a chain is not offered for Leads:
+  riders have no Follows chain of their own.
 - Delays belong to the parts in the **Timing** list. The start is the active
   part, or the first one.
 - If some of them are selected, only those are spread. Select nothing among
@@ -327,12 +339,17 @@ object, and press **Make Chain** at the top of the **Follows** section.
 
 From the first, each next part is the one nearest it, by pivot at Before,
 that is not in the chain yet; each is set to follow the one before. It goes
-through the same choice as the dropdowns, so a rider, a part that leads
-riders, a curved part and a loop are turned down with their reason, and the
-chain stops there, keeping the links already made. Only the first may lead
-riders. The report names the order: "Chain: Seg1 > Seg2 > Seg3 > Seg4". On a
-loose move the objects hang from one another at once; on a built one the red
-note waits for Build, like any **Follows** change.
+through the same choice as the dropdowns, so a rider, a curved part and a loop
+are turned down with their reason, and the chain stops there, keeping the
+links already made. A part that leads riders may be chained: its riders hang
+from what it hangs from. The report names the order: "Chain: Seg1 > Seg2 >
+Seg3 > Seg4". On a loose move the objects hang from one another at once; on a
+built one the red note waits for Build, like any **Follows** change.
+
+Copies of a whole finger ride joint for joint only while the finger they copy
+is the chain they were made against. A new chain that changes what a copied
+part follows says how many copied joints stop riding joint for joint; press
+Ride Along again on copies to take the new chain.
 
 ### Curl: bend one joint and the whole chain bends
 
@@ -348,12 +365,12 @@ The bend is the first segment's turn from its Before, about its own pivot, in
 its own axes; where its pivot went is not part of it. It is repeated on every
 part that follows it, directly or not, branches included, each about its own
 pivot in its own axes and carried by the part before it, so the joints stay
-together. The first part after the root repeats the root's bend; each part
-after that keeps **Each next joint x** of the one before. The default is 1:
-every joint bends as much as the first. At 0.5 a 20 degree bend runs 20, 20,
-10, 5, 2.5 down the root and four followers, so the tip curls least. The
-factor is in the Adjust Last Operation panel, bottom left of the viewport,
-right after pressing Curl.
+together. Each joint keeps **Each next joint x** of the bend of the one before
+it, so the bend is the factor to the power of how far below the root a joint
+is. The default is 1: every joint bends as much as the first. At 0.5 a 20
+degree bend runs 20, 10, 5, 2.5, 1.25 down the root and four followers, so the
+tip curls least. The factor is in the Adjust Last Operation panel, bottom left
+of the viewport, right after pressing Curl.
 
 Curl works from rest. Joints already showing a pose have their own bend on top
 of where they stand, and Record would then not read what Curl made. So it
@@ -364,7 +381,9 @@ It also refuses when nothing follows the part, when the part rides along, and
 when the part has not been turned.
 
 Curl puts every part below the root where its bend says, replacing whatever
-bend it had.
+bend it had. Copies of the finger ride along with it once a Build has copied
+the new path onto them, so after **Record After** press **Build**; the report
+says so when there are copies.
 
 ### Several moves under one control
 
@@ -602,12 +621,13 @@ where B is the part's Before, W_Q B_Q^-1 is how far Q has been carried, and
 D_F is the turn about F's pivot in the world at Before, about F's own axes -
 its Before frame without its scale, so a part stretched in one direction is
 turned rigidly and not sheared. The turn is the root's quaternion raised to
-the power factor^(k-1) for a part k below it, taken the short way round.
+the power factor^k for a part k below it, taken the short way round.
 
 Spread works out an angle round a ring from the best-fit plane of the parts'
 spots and writes the values with the drivers left alone, then refreshes them
-once. Ring copies the object, takes off what the original was bound by, sets
-the copy on the original's Before turned about the axis, and presses Ride
+once. Ring copies the object - every joint of it, for a chain - takes off what
+the original was bound by, sets each copy on the original's Before turned
+about the axis, finds the copies of a chain joint for joint, and presses Ride
 Along on them.
 
 ## Tested on
@@ -905,7 +925,9 @@ and one lifted 1 m:
 - **Linked copies moved each other** (0.16.0). Alt+D copies share one mesh,
   and Blender keeps vertex groups on the mesh, so binding the copy gave the
   original the copy's group too: each was moved half by the other's bone,
-  the leader included. A bound object gets a mesh of its own now.
+  the leader included. A bound object gets a mesh of its own now. So did two
+  Alt+D copies of one part put in a move together and bound in one Build: each
+  was pulled by both bones, and neither landed where it was recorded.
 - **A group left from a deleted rig pulled a part once a part of its name
   joined** (0.16.0). Copied from a part of an old rig, a segment kept that
   part's group under a name no bone had - until an object of that name rode
@@ -915,18 +937,10 @@ and one lifted 1 m:
 - **Ride Along with several objects at once could crash Blender** (0.16.0).
   It read the leader back after adding the new riders to the list of parts,
   and adding can move that list in memory. Six at once crashed it in five
-  runs out of eight. Everything is worked out before anything is added now.
-
-- **The ninth part of a move could be left with no leader.** Ride Along read the
-  leader's name after adding a part, and adding to the list can move all of it
-  in memory, leaving the leader a dead pointer. From the ninth part on, the last
-  rider rode with nobody: "rides with a part that is no longer in its move".
-  The name is read first now.
-- **Linked duplicates pulled each other apart.** Blender keeps vertex groups with
-  the mesh, so objects sharing a mesh share their groups. Two Alt+D copies
-  bound to a bone each were each pulled by both bones, and neither landed where
-  it was recorded. Binding now gives an object a mesh of its own, and takes off
-  the group named after the bone of the part it was copied from.
+  runs out of eight. In the runs that did not crash, the last rider of a move
+  from its ninth part on was left riding with nobody: "rides with a part that
+  is no longer in its move". Everything is worked out before anything is added
+  now.
 
 ## Known rough edges
 
@@ -977,12 +991,15 @@ and one lifted 1 m:
 - Handles are always laid along the rig's up axis and placed above the parts.
   There is no way to move one somewhere better yet.
 - Curl puts every part below the root where the bend says, replacing the bend
-  it had. A joint whose new bend is none at all - a factor of 0, past the first
-  joint - is read by Record as only carried, and keeps the keys it had.
+  it had. A joint whose new bend is none at all - a factor of 0, which leaves
+  everything below the root straight - is read by Record as only carried, and
+  keeps the keys it had.
 - Curl works only from rest, and the factor is only in the Adjust Last Operation
   panel, not on the button.
 - Ring's linked copies share one mesh only until Build, which gives every bound
   part a mesh of its own; edit-mode changes after that are one part's alone.
+- Ring of a chain finds its copies by where they stand. Copies that overlap
+  too much to be told apart are turned down; make the ring wider.
 - Spread's ring takes the best-fit plane of the parts' spots. Parts that are not
   roughly on one ring - a scatter - get an order that is the plane's, and is
   seldom what was meant: use By distance or Along an axis instead.

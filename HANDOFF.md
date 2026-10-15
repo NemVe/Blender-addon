@@ -45,16 +45,16 @@ promises to the user.
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 6,500 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 7,000 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 159 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 188 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
 
 **Commands:**
 
-    .venv/bin/python tests/test_rigmoves.py      # all tests, about 12 s
+    .venv/bin/python tests/test_rigmoves.py      # all tests, about 14 s
     .venv/bin/python tests/test_rigmoves.py TestFollowers   # one class
     ruff check rigmoves tests tools
     python tools/build_zip.py
@@ -97,10 +97,10 @@ Features, in the order the user asked for them:
 | 0.15.0 | Renamed RigMoves to CopyThat | see the top of this file |
 | 0.16.0 | **Copies of a whole finger** ride along joint for joint; a follower can lead riders; each part moved by its own bone only; a Ride Along crash fixed | `chain_of`, `match_copies`, `rides_on`, `riding_on`, `copy_root`, `rider_holder`, `holder_bone`; `own_binding`, `heal_bindings` |
 | 0.17.0 | **Spread**: Leads or Delays filled in one go, by ring, distance, axis, chain or at random | `spread_shares`, `spread_values`, `ring_angles`, `ring_normal`, `part_spot`/`rider_spot`, `RIGMOVES_OT_spread` |
-| 0.17.0 | **Make Chain**: Follows down a line, nearest neighbour from the active part | `chain_order`, `RIGMOVES_OT_make_chain` |
-| 0.17.0 | **Curl**: the first joint's bend repeated down every follower | `bend_of`, `quaternion_power`, `shows_a_pose`, `RIGMOVES_OT_curl` |
-| 0.17.0 | **Ring**: one part made into a ring of riders | `copy_for_ring`, `RIGMOVES_OT_ring` |
-| 0.17.0 | Fixed: the ninth part of a move lost its leader; linked duplicates pulled each other | `RIGMOVES_OT_ride_along`, `bind_object` |
+| 0.17.0 | **Make Chain**: Follows down a line, nearest neighbour from the active part; says which copied joints stop riding joint for joint | `chain_order`, `RIGMOVES_OT_make_chain` |
+| 0.17.0 | **Curl**: the first joint's bend repeated down every follower, each joint `factor` times the one before | `bend_of`, `quaternion_power`, `shows_a_pose`, `RIGMOVES_OT_curl` |
+| 0.17.0 | **Ring**: one part - or a whole chain, through 0.16's Ride Along - made into a ring of riders | `copy_for_ring`, `RIGMOVES_OT_ring` |
+| 0.17.0 | Merge of the two lines of work: Spread and Ring work on 0.16's copy roots and chains; one binding fix (`own_binding`) and one leader read-back fix | see "The four tools of 0.17" |
 
 ## The model underneath (read before changing any maths)
 
@@ -208,7 +208,7 @@ Features, in the order the user asked for them:
   (`keeps_drags`). Remember this when writing tests: a pivot set on new
   parts binds them.
 
-## The four tools of 0.16 (read before changing them)
+## The four tools of 0.17 (read before changing them)
 
 The goal was "make building any multi-part animation as fast as possible".
 The tools are generic (a finger, a fan, dominoes, a tentacle), not made for
@@ -224,6 +224,9 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
   1, `spread_values` writes First to Last and holds it to the property limits.
   Writes set `WRITING["many"]` so `_timing_changed` skips, and the caller runs
   `refresh_drivers` once; a built move plays the new values with no Build.
+  - Leads go to *copy roots* (`copy_root`): a copied finger has one Lead, its
+    first joint's, so that is what is spread, and a selected inner joint selects
+    its copy.
   - A part's place is `part_spot`: its pivot at Before. A rider's pivot is its
     leader's carried over (`rider_spot`, the same maths as `bind_riders`). Using
     the rider's own origin put the leader's hinge on a different ring from the
@@ -235,29 +238,43 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     direction, so the first target gives it.
 - **Make Chain** sets `part.follows` link by link, so `_follows_changed` does all
   the validating. The chain stops at the first refusal and keeps what it made.
+  A part that leads riders may be chained (0.16 allowed it). It reports how many
+  copied joints `riding_on` no longer pairs, since a changed Follows undoes the
+  pairing.
 - **Curl.** Part F following Q is put at `carried(Q) @ D_F @ B_F`, where
   `carried(Q) = W_Q B_Q^-1` and `D_F` is the root's bend (a quaternion in its own
-  frame) raised to `factor**(k-1)`, applied about F's pivot in F's own frame
+  frame) raised to `factor**k`, applied about F's pivot in F's own frame
   *without scale*. The design wrote it as `W_Q B_Q^-1 B_F bend_F` with the bend
   in local axes, which shears any object that has non-uniform scale (all the
   test segments do). Parents first, a view-layer update after each.
-  - The first follower repeats the root's full bend: 20, 20, 10, 5, 2.5 at 0.5.
+  - Each joint is `factor` times the one before it: 20, 10, 5, 2.5, 1.25 at
+    0.5 (`k` is the depth below the root, so the first follower already has
+    `factor`). Chains with copies riding them say to Build after Record.
   - It refuses unless every chain bone shows no pose (`shows_a_pose`, the same
     read as Record), because `seen_poses` is exact only then. A Build is what
     clears a pose the eye left.
   - Followers whose new bend is none read as "only carried" in Record and keep
-    their old keys (factor 0, past the first joint). Not handled.
+    their old keys (factor 0, which straightens everything below the root). Not
+    handled.
 - **Ring.** Everything is checked in `plan` before anything is made, so a refusal
   leaves nothing. Copies are made with `copy_for_ring`, placed at
   `as_matrix(part.before)` turned about the axis, then the existing
   `ride_along` runs (a Build when the move is built).
-  - Vertex group names live on the mesh. Linked copies therefore share groups
-    with the leader, and two bound objects on one mesh pull each other.
-    `bind_object` now gives a bound object its own mesh and removes groups named
-    after other parts' bones. This also fixed Alt+D duplicates in any move.
+  - A part in a chain is ringed whole: `plan` takes `chain_of`, every joint is
+    copied (named "<joint> N") and 0.16's `match_copies` pairs the copies with
+    the joints. It is run once on the copies *before* `ride_along`, so copies it
+    cannot tell apart are discarded and nothing is left behind; `ride_along` then
+    finds the same pairing. Leads are spread over copy roots of the chain root.
+  - Vertex group names live on the mesh, so linked copies share groups with
+    the leader. `own_binding` (0.16, called by `bind_object`) gives a bound
+    object its own mesh and drops groups for other parts' bones; Build heals
+    older files. Both lines wrote this fix; the merge kept this one, with one
+    refinement from the other (a mesh whose only other user is a fake user is
+    not shared).
   - Never keep a collection item across `.add()`: it can move all the parts in
-    memory, and the stale pointer reads as empty. `ride_along` did, so the ninth
-    part of a move lost its leader.
+    memory, and the stale pointer reads as empty. `ride_along` did; both lines
+    fixed it, and `TestRiders.test_the_ninth_part_of_a_move_keeps_its_leader`
+    fails deterministically on the old code.
 
 Test helpers added: `ring_places` (a tilted ring), `turn_about`, `eased` (a bone
 turn is blended as a quaternion between keys, so its angle is even only at the

@@ -35,13 +35,14 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 16, 0),
+    "version": (0, 17, 0),
     "blender": (4, 4, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
                    "delays. Works on loose objects with no rig at all, and makes one. "
                    "Other objects can ride along, each from its own place - "
-                   "copies of a whole finger joint for joint",
+                   "copies of a whole finger joint for joint. Spread, Make "
+                   "Chain, Curl and Ring do the repetitive work",
     "doc_url": "https://creators.sa/nemve",
     "category": "Rigging",
 }
