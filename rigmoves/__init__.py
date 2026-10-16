@@ -2555,9 +2555,38 @@ def catch_up(rig, data=None, reframe=True):
     return take_back_reframed(rig, data) if reframe else ""
 
 
+def unavailable(context, rig):
+    """Why a rig cannot be edited now, as a sentence - or "" if it can.
+
+    Switched off in the viewport (the screen icon, Show in Viewports) it cannot
+    be put into edit mode, which almost everything this add-on does to a rig
+    needs; and a rig that is not in the view layer cannot be made the active
+    object. Said before anything is changed: found out half way, a first Build
+    had already taken the lid off its parent, and Ring had made its copies.
+    """
+    name = short(rig.name, 24)
+    if not here(context, rig):
+        return "'{:s}' is not in this view layer, so it cannot be edited here.".format(name)
+    if rig.hide_viewport:
+        return ("Show '{:s}' in the viewport first (the screen icon in the Outliner): it "
+                "cannot be edited while it is switched off.".format(name))
+    return ""
+
+
+def cannot_edit(operator, context, rig):
+    """Whether a rig cannot be edited now, after saying why. For an operator
+    that edits the rig but does not go through ready."""
+    why = unavailable(context, rig)
+    if why:
+        rig.rigmoves.report = why
+        operator.report({"WARNING"}, why)
+    return bool(why)
+
+
 def ready(operator, rig, data, reframe=True):
-    """Catch a rig up, and say why if the operator may not go on."""
-    refusal = catch_up(rig, data, reframe)
+    """Say why the operator may not go on - the rig cannot be edited - or catch
+    the rig up, and say why if it may not go on then."""
+    refusal = unavailable(bpy.context, rig) or catch_up(rig, data, reframe)
     if not refusal:
         return True
     data.report = refusal
@@ -5774,6 +5803,8 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
+        if cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         catch_up(rig, data)
         if not keeps_drags(self, data):
             return {"CANCELLED"}
@@ -8760,6 +8791,8 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
     @mentioning
     def execute(self, context):
         rig = rig_of(context)
+        if rig is None or cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         data = rig.rigmoves
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
@@ -8892,6 +8925,8 @@ class RIGMOVES_OT_remove_group(bpy.types.Operator):
 
     def execute(self, context):
         rig = rig_of(context)
+        if rig is None or cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         data = rig.rigmoves
         if not 0 <= self.index < len(data.groups):
             return {"CANCELLED"}
@@ -8919,6 +8954,8 @@ class RIGMOVES_OT_drop_member(bpy.types.Operator):
 
     def execute(self, context):
         rig = rig_of(context)
+        if rig is None or cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         data = rig.rigmoves
         group = data.groups[self.group_index]
         group.members.remove(self.member_index)

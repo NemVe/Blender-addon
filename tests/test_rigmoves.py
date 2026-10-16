@@ -9071,6 +9071,124 @@ class TestARigScaledToNothing(ChestCase):
         self.assertFalse(rigmoves.is_singular(Matrix.Diagonal((1.0, 1.0, 1e-3, 1.0))))
 
 
+class TestARigSwitchedOffInTheViewport(ChestCase):
+    """The rig's Show in Viewports (the screen icon in the Outliner) is off. A
+    rig cannot be put into edit mode like that, and Build, Remove, Ring and Set
+    Pivot raised "Cannot edit hidden object" half way: a first Build had already
+    taken the lid off its parent, Remove had deleted the move and left its bones,
+    and Ring's rollback ran a Build that raised again and left eight copies."""
+
+    def said(self):
+        return ("Show '{:s}' in the viewport first (the screen icon in the Outliner): it "
+                "cannot be edited while it is switched off.".format(rig().name))
+
+    def state(self):
+        """Everything these buttons add or change, as it is now."""
+        shown = {}
+        for share in (0.0, 1.0):
+            drive(self.move, share)
+            shown[share] = world_points(self.lid)
+        drive(self.move, 0.0)
+        return {
+            "objects": sorted(o.name for o in bpy.data.objects),
+            "meshes": sorted(m.name for m in bpy.data.meshes),
+            "moves": [(m.name, [(p.name, p.bone_name) for p in m.parts], m.built)
+                      for m in rig().rigmoves.moves],
+            "bones": sorted(b.name for b in rig().data.bones),
+            "constraints": sorted((pb.name, c.name) for pb in rig().pose.bones
+                                  for c in pb.constraints),
+            "lid": (self.lid.parent.name if self.lid.parent else None,
+                    [m.name for m in self.lid.modifiers],
+                    [g.name for g in self.lid.vertex_groups]),
+            "shown": shown,
+        }
+
+    def check_refused(self, press):
+        rig().hide_viewport = True
+        bpy.context.view_layer.update()
+        select(self.lid)
+        before = self.state()
+        self.assertEqual(press(), {"CANCELLED"})
+        self.assertEqual(rig().rigmoves.report, self.said())
+        after = self.state()
+        for key in before:
+            if key == "shown":
+                for share in before[key]:
+                    self.assertLess(drift_of(after[key][share], before[key][share]), TOLERANCE)
+            else:
+                self.assertEqual(after[key], before[key], key)
+
+    def test_build_is_refused_before_it_changes_anything(self):
+        self.check_refused(lambda: bpy.ops.rigmoves.build())
+
+    def test_remove_is_refused_before_it_changes_anything(self):
+        self.check_refused(lambda: bpy.ops.rigmoves.remove(index=0))
+
+    def test_ring_is_refused_before_it_makes_anything(self):
+        bpy.context.scene.cursor.location = Vector((0.0, 0.0, 0.0))
+        self.check_refused(lambda: bpy.ops.rigmoves.ring(index=0, count=5, use="COPY"))
+
+    def test_set_pivot_is_refused_before_it_changes_anything(self):
+        pivot = list(self.move.parts["Lid"].pivot)
+        self.check_refused(lambda: bpy.ops.rigmoves.set_pivot(index=0, kind="BASE"))
+        self.assertEqual(list(self.move.parts["Lid"].pivot), pivot)
+
+    def test_the_other_buttons_that_would_build_are_refused_too(self):
+        for press in (lambda: bpy.ops.rigmoves.record(index=0, which="AFTER"),
+                      lambda: bpy.ops.rigmoves.show(index=0, which="AFTER"),
+                      lambda: bpy.ops.rigmoves.free_keys()):
+            rig().hide_viewport = False
+            self.check_refused(press)
+
+    def test_a_first_build_leaves_the_lid_as_it_was(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        body = cube("Body", (0.0, 0.0, 0.5))
+        body.scale = (2.0, 1.2, 1.0)
+        lid = cube("Lid", (0.0, 0.0, 1.1))
+        lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        lid.parent = body
+        lid.matrix_parent_inverse = body.matrix_world.inverted()
+        bpy.context.view_layer.update()
+        home = lid.matrix_world.copy()
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        lid.matrix_world = turn_about(self.hinge, "X", -70.0) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        rig().hide_viewport = True
+        bpy.context.view_layer.update()
+        part = rig().rigmoves.moves[0].parts[0]
+        parent, matrix = lid.parent, lid.matrix_world.copy()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        self.assertIs(lid.parent, parent)
+        self.assertTrue(rigmoves.same_matrix(lid.matrix_world, matrix, 1e-9))
+        self.assertEqual((part.bone_name, len(lid.modifiers), len(lid.vertex_groups)), ("", 0, 0))
+        self.assertEqual(part.home_parent, "")
+        self.assertFalse(rig().rigmoves.moves[0].built)
+
+    def test_shown_again_it_works_as_ever(self):
+        rig().hide_viewport = True
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        rig().hide_viewport = False
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_a_rig_that_is_not_in_the_view_layer_is_refused_too(self):
+        owner = rig()
+        for collection in list(owner.users_collection):
+            collection.objects.unlink(owner)
+        bpy.context.view_layer.update()
+        said = []
+        fake = types.SimpleNamespace(report=lambda kind, text: said.append(text))
+        self.assertFalse(rigmoves.ready(fake, owner, owner.rigmoves))
+        self.assertIn("is not in this view layer", said[0])
+        self.assertEqual(owner.rigmoves.report, said[0])
+
+
 class TestRigidFit(unittest.TestCase):
     """The fit of three marks onto three others, which tells a part that was
     framed another way from one that was moved."""
