@@ -135,6 +135,22 @@ Features, in the order the user asked for them:
   `curve_for(bag, path, index)`. Never read `action.fcurves` as well: 4.4 and
   4.5 still answer it with the first slot's curves again, so every curve was
   counted twice there (5.0 removed it).
+- **An object's own keys are its own slot's** (0.19): `slot_curves(action, slot)`
+  reads the one channelbag of a slot, `own_transform_curves(obj)` the slot in
+  `obj.animation_data.action_slot` (none when it has no slot: it plays nothing).
+  An Alt+D twin plays the same action AND slot; another object can have a slot of
+  its own in the same action. `own_action(obj)` runs before keys are lifted: if any
+  other ID uses the action (`bpy.data.user_map`) the object gets `action.copy()`,
+  without the other slots and without a fake user, and the same slot, and the keys
+  come out of the copy only (`drop_empty_action` then drops the empty copy).
+- **Motion Build cannot lift** (0.19): `fighting_parts(data)` names the parts whose
+  transform an unmuted NLA strip (`moved_by_nla`: the strip's own slot, tracks muted
+  or put aside by a solo skipped, `use_nla` off skipped, meta strips followed) or an
+  unmuted driver (`moved_by_driver`) works. They are the user's work: the panel's
+  box (`_draw_own_keys`) says what to do, with no Lift button for them, Build adds
+  `fighting_words` to its report and is a WARNING while any are left, and
+  `clear_autokey` / Lift Those Keyframes never touch them. `has_own_motion` (Ring's
+  "may it be taken up") is the wider test: any NLA track at all.
 - **Drivers must stay "simple expressions"** so they run with Auto Run
   Python Scripts off, and must stay under 256 characters, or Blender cuts
   them short.
@@ -333,7 +349,24 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
   or `invoke` is about to) the step is `sized_step`: -10 / 0.1, less if the top
   place would pass 40 of 50 (Lead) or 0.9 of 0.99 (Delay). `invoke` also turns
   Both ways on for Leads around a ring when it was not set; `execute` does not
-  (scripts keep the literal default). Ring's `lead_step` stays 0 unless typed.
+  (scripts keep the literal default). Ring's `lead_step` stays 0 unless typed:
+  it is SKIP_SAVE (0.19) - Blender restores every property of an operator that is
+  not, on the next invoke, so the outer petals' step reached the leaf's dialog -
+  while Use, Count, Round, About and Linked copies are remembered on purpose.
+  Blender stores the last use only when a dialog's OK runs the operator, not for a
+  script's call (`window_manager.operator_properties_last` stays at the defaults
+  headless), so the tests read the `is_skip_save` flag and a real window shows it.
+  **The dialog keeps the step sized** (0.19): `invoke` writes it and sets the
+  hidden SKIP_SAVE `sizing` flag; the `update=` callback `_spread_changed` on Order,
+  By, Both ways, Only the selected, Axis and Seed sizes it again (`sized_for`, which
+  the operator's `sized` calls too) while `sizing` is on, and `_step_typed` on Step
+  turns it off - unless the write is ours (`SIZING["ours"]`). Blender calls these
+  with `self` = the operator's PROPERTIES (no methods, no `plan`), and also when a
+  script passes the settings, which then leave `sizing` off and are untouched.
+  Blender applies a script's keywords in the order the properties are DEFINED, not
+  written: `sizing` is defined before the settings it follows, and a Step passed
+  with them is applied after it. Both ways and Only the selected are SKIP_SAVE,
+  or Blender restores them (as "set") on the next invoke.
   Writes set `WRITING["many"]` so `_timing_changed` skips, and the caller runs
   `refresh_drivers` once; a built move plays the new values with no Build.
   - Leads go to *copy roots* (`copy_root`): a copied finger has one Lead, its
@@ -432,14 +465,35 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     move excluded) standing on no place; the operator refuses Fill when any is within
     1.5 x the ring's radius of the axis and the part's height (a wrong 3D cursor or
     Count), and appends it as a note in Use what's there. `left` is sorted nearest
-    place first and only says "off the ring" when it is.
+    place first and only says "off the ring" when it is. `stacked` (0.19) lists the
+    copies of the first joint standing on the part's OWN place (a `Slot` with the
+    identity turn: a Shift+D cancelled with a right-click): not `off`, not in
+    `left`, and `stacked_words` is Fill's refusal and Use what's there's note. Use
+    what's there says "Fill the gaps would copy the part there" only when Fill
+    would not be refused (no note). `ours` (the riders of the part's earlier copies,
+    which `left` never names) is every rider whose leader is ANY joint of the ringed
+    chain, not the first joint's alone; `left` calls an object standing in a place
+    with the part's mesh and a mirrored frame that does not fit "a mirror image of
+    ... (not the same on both sides) ... can ride along with Ride Along, which
+    mirrors by itself", not "not turned to its place". Reports read: what was done,
+    the Leads step, the advice (`notes`, or the `empty` hint - never both), what was
+    skipped, THEN `outs`, then the places left alone: the panel's box (`_draw_report`)
+    shows nine lines, and past them ends the ninth with "…" and adds "(the full
+    report is in the Info editor)". The note about copies off the ring says "check
+    the centre (3D cursor), About and Count": a ring about the wrong axis looks the
+    same. Ride Along's "N copies of 'X' ride along" names the first joint any copy
+    has (not `chain[0]`, a palm that was never copied).
     Before any change `reframe_blocker` refuses constraints, instancing, particles,
     a vertex/bone parent, any dependent in `bpy.data.user_map` but an OBJECT-parented
-    child, modifiers except Subsurf/Triangulate/Edge Split/Weighted Normal/an
+    child (and that child must have no `has_own_motion`: its keys, driver or NLA
+    would rewrite the transform `reframe` holds it by - "has a child with keys or
+    drivers of its own ('Bee')"), modifiers except Subsurf/Triangulate/Edge Split/Weighted Normal/an
     Armature of another rig (Bevel/Solidify only when both scales are 1), and a
     mirrored frame with custom normals. Then `reframe` (a NEW mesh from `old.copy()`
     is transformed - exact rollback by swapping `old` back, `put_back`; `settle`
-    names the new one after the old on success) and one `view_layer.update()`:
+    removes each distinct old mesh ONCE - Alt+D petals share one, found by
+    `as_pointer()` before any removal, never touching a removed datablock - when
+    nothing uses it, and names the new ones after it) and one `view_layer.update()`:
     `look_of` (evaluated world vertices and winding as shown, i.e. times the sign of
     the frame's determinant) must equal the look before to 1e-5 of the part's size,
     and the signed volume of the new mesh must have the leader's sign; otherwise the
@@ -447,10 +501,17 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     gets its faces turned over (`Mesh.transform` does not). Only OBJECT-parented
     children are held in the world: `matrix_world` cannot be solved against a vertex
     parent. The whole thing is inside the operator, so Ctrl+Z restores meshes too.
+    Everything of `execute` after Ride Along is in a `try` (0.19): anything that
+    raises goes through `take_back` - the riders out, `put_back`, the copies
+    discarded - and says "Ring could not be finished: <reason>. Nothing was
+    changed.", because a Python error in an operator leaves what it did with no
+    undo step. `settle` is the last call in it.
     Taken objects and copies share the `told` pairing. `bpy.data.objects.remove`
     leaves `None` in `view_layer.objects` (and in `scene.objects`) until an update:
-    `standing_pool` skips them. Not checked (rough edge): materials using Object or
-    Generated texture coordinates.
+    `standing_pool` skips them. Not checked (rough edges): materials using Object or
+    Generated texture coordinates; and anything that is not a MESH - a collection
+    instance (an empty), a curve, a text - which the pool never lists, so Fill the
+    gaps copies on top of it (the guide says so).
   - Vertex group names live on the mesh, so linked copies share groups with
     the leader. `own_binding` (0.16, called by `bind_object`) gives a bound
     object its own mesh and drops groups for other parts' bones; Build heals

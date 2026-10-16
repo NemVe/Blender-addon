@@ -5404,7 +5404,8 @@ class TestRingWhatIsThere(CopyThatCase):
         self.assertEqual(self.ring(use="FILL"), {"CANCELLED"})
         self.assertEqual(self.new_names(before), set())
         self.assertIn("7 copies of 'Outer Leader' stand near the ring but off its places: "
-                      "check the centre (3D cursor) and Count. Nothing done.", self.report())
+                      "check the centre (3D cursor), About and Count. Nothing done.",
+                      self.report())
         self.assertEqual(len([p for p in self.move.parts if p.leader]), 0)
 
     def test_fill_is_refused_when_the_count_is_wrong(self):
@@ -5421,8 +5422,8 @@ class TestRingWhatIsThere(CopyThatCase):
         self.rig_the_flower()
         bpy.context.scene.cursor.location = (0.27, 0.0, 0.0)
         self.assertEqual(self.ring(use="ADOPT"), {"CANCELLED"})
-        self.assertIn("stand near the ring but off its places: check the centre (3D cursor) "
-                      "and Count.", self.report())
+        self.assertIn("stand near the ring but off its places: check the centre (3D cursor), "
+                      "About and Count.", self.report())
         self.assertNotIn("Nothing done", self.report())
         self.assertIn("Nothing standing in the places", self.report())
 
@@ -5679,6 +5680,1257 @@ class TestRingTurnedAndMirrored(CopyThatCase):
         before = {o.name for o in bpy.data.objects}
         self.assertEqual(self.ring_it("ADOPT"), {"CANCELLED"})
         self.assertEqual({o.name for o in bpy.data.objects}, before)
+
+
+class RingFlows(CopyThatCase):
+    """What the 0.19 review of Ring found, played the way a person would: the
+    petals, the frames and the cursor are the ones the review used."""
+
+    def setUp(self):
+        super().setUp()
+        bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
+        azimuth = math.radians(-90.0)
+        self.base = (Matrix.Translation((0.4 * math.cos(azimuth), 0.4 * math.sin(azimuth), 1.0))
+                     @ Matrix.Rotation(azimuth, 4, "Z"))
+
+    @staticmethod
+    def turn(number, count=8):
+        return Matrix.Rotation(math.radians(360.0 * number / count), 4, "Z")
+
+    def report(self):
+        return rig().rigmoves.report
+
+    def riders(self):
+        return {p.name: p.lead for p in rig().rigmoves.moves[0].parts if p.leader}
+
+    def record_after(self, leader, turned=50.0, build=False):
+        """New Move on the leader, opened by hand, Record After."""
+        select(leader)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.rest = rest_points(leader)
+        leader.matrix_world = leader.matrix_world @ Matrix.Rotation(math.radians(turned), 4, "X")
+        bpy.context.view_layer.update()
+        self.after = rest_points(leader)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        if build:
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def ring(self, leader, **kwargs):
+        select(leader)
+        kwargs.setdefault("count", 8)
+        return bpy.ops.rigmoves.ring(index=0, **kwargs)
+
+    def what_is_there(self):
+        """Everything a ring could change, to compare before and after: each
+        object's frame, its mesh and where its vertices are, and the meshes
+        there are."""
+        return ({o.name: (o.matrix_world.copy(), o.data.name if o.data else None,
+                          rest_points(o) if o.type == "MESH" else None)
+                 for o in bpy.data.objects},
+                sorted((m.name, m.users) for m in bpy.data.meshes),
+                len(rig().rigmoves.moves[0].parts))
+
+    def assert_as_found(self, was):
+        frames, meshes, parts = self.what_is_there()
+        self.assertEqual(sorted(frames), sorted(was[0]))
+        for name, (matrix, mesh, points) in was[0].items():
+            self.assertTrue(same_matrix_of(frames[name][0], matrix, 1e-6), name)
+            self.assertEqual(frames[name][1], mesh, name)
+            if points is not None:
+                self.assertLess(max((a - b).length for a, b in zip(frames[name][2], points)),
+                                1e-6, name)
+        self.assertEqual(meshes, was[1])
+        self.assertEqual(parts, was[2])
+
+
+class TestRingPetalsSharingOneMesh(RingFlows):
+    """Petals made with Alt+D share one mesh. With Apply Rotation on the leader
+    alone, every one of the seven stands on a frame of its own, and is re-framed
+    to a mesh of its own: the mesh they shared goes once, not once for each."""
+
+    def alt_d_flower(self):
+        mesh = prism("Petal Shape", 4, 0.15, 1.0)
+        self.petal = stood("Petal", mesh,
+                           Matrix.Translation((0.0, -0.4, 1.0))
+                           @ Matrix.Rotation(math.radians(-90.0), 4, "Z")
+                           @ Matrix.Rotation(math.radians(20.0), 4, "Y"))
+        bpy.context.view_layer.update()
+        for k in range(1, 8):
+            select(self.petal)
+            self.assertEqual(bpy.ops.object.duplicate(linked=True), {"FINISHED"})
+            bpy.context.view_layer.objects.active.matrix_world = (
+                self.turn(k) @ self.petal.matrix_world)
+        bpy.context.view_layer.update()
+        self.assertEqual(mesh.users, 8)
+        # Ctrl+A > Rotation: Blender gives the leader a mesh of its own to do it.
+        select(self.petal)
+        self.assertEqual(bpy.ops.object.transform_apply(
+            location=False, rotation=True, scale=False, isolate_users=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(mesh.users, 7)
+        self.record_after(self.petal, build=True)
+        self.others = [bpy.data.objects["Petal.{:03d}".format(k)] for k in range(1, 8)]
+
+    def test_the_ring_finishes_and_each_petal_has_a_mesh_of_its_own(self):
+        self.alt_d_flower()
+        stood_at = {o.name: rest_points(o) for o in self.others}
+        self.assertEqual(self.ring(self.petal, lead_step=-10), {"FINISHED"})
+        self.assertEqual(len(self.riders()), 7)
+        self.assertEqual(sorted(self.riders().values()), [-40, -30, -30, -20, -20, -10, -10])
+        self.assertIn("7 objects re-framed", self.report())
+        self.assertEqual(len({o.data.name for o in self.others}), 7)
+        for petal in self.others:
+            self.assertEqual(petal.data.users, 1, petal.name)
+            self.assertLess(max((a - b).length for a, b in zip(rest_points(petal),
+                                                              stood_at[petal.name])), 1e-5)
+        # The mesh they shared is gone, and nothing is left unused.
+        self.assertEqual([m.name for m in bpy.data.meshes if m.users == 0], [])
+
+    def test_the_petals_then_play_like_the_leader_from_their_own_places(self):
+        self.alt_d_flower()
+        self.assertEqual(self.ring(self.petal), {"FINISHED"})
+        for number, petal in enumerate(self.others, start=1):
+            drive(self.move, 0.0)
+            self.assertLess(drift(petal, [self.turn(number) @ p for p in self.rest]),
+                            TOLERANCE, petal.name)
+            drive(self.move, 1.0)
+            self.assertLess(drift(petal, [self.turn(number) @ p for p in self.after]),
+                            TOLERANCE, petal.name)
+
+    def test_one_undo_takes_the_whole_ring_back(self):
+        self.alt_d_flower()
+        select(self.petal)
+        was = self.what_is_there()
+        undo_push()
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8, lead_step=-10),
+                         {"FINISHED"})
+        undo_push()
+        self.assertEqual(len(self.riders()), 7)
+        undo_once()
+        self.assertEqual(len([p for p in rig().rigmoves.moves[0].parts if p.leader]), 0)
+        self.assert_as_found(was)
+        self.assertEqual(bpy.data.meshes["Petal Shape"].users, 7)
+
+    def test_a_ring_that_fails_at_the_end_puts_everything_back(self):
+        # Whatever goes wrong after Ride Along - here the mesh clean-up - takes
+        # the riders out and puts every petal back as it was found, and says so.
+        self.alt_d_flower()
+        was = self.what_is_there()
+        with mock.patch.object(rigmoves, "settle", side_effect=RuntimeError("boom")):
+            self.assertEqual(self.ring(self.petal, lead_step=-10), {"CANCELLED"})
+        self.assertEqual(self.report(),
+                         "Ring could not be finished: boom. Nothing was changed.")
+        self.assertEqual(self.riders(), {})
+        self.assert_as_found(was)
+        self.assertEqual(bpy.data.meshes["Petal Shape"].users, 7)
+
+    def test_a_ring_that_fails_while_stepping_the_leads_puts_everything_back(self):
+        self.alt_d_flower()
+        was = self.what_is_there()
+        with mock.patch.object(rigmoves, "spread_put", side_effect=ValueError("no good.")):
+            self.assertEqual(self.ring(self.petal, lead_step=-10), {"CANCELLED"})
+        self.assertEqual(self.report(),
+                         "Ring could not be finished: no good. Nothing was changed.")
+        self.assertEqual(self.riders(), {})
+        self.assert_as_found(was)
+
+    def test_copies_made_for_a_ring_that_fails_are_taken_away_again(self):
+        self.alt_d_flower()
+        was = self.what_is_there()
+        with mock.patch.object(rigmoves, "spread_put", side_effect=ValueError("no good")):
+            self.assertEqual(self.ring(self.petal, use="COPY", lead_step=-10),
+                             {"CANCELLED"})
+        self.assertIn("Ring could not be finished: no good. Nothing was changed.",
+                      self.report())
+        self.assert_as_found(was)
+
+    def test_the_mesh_of_petals_still_used_elsewhere_is_kept(self):
+        # A twin that is not part of the ring still has the mesh the petals
+        # shared: it stays, with its name, and the petals get names of their own.
+        self.alt_d_flower()
+        shared = self.others[0].data
+        twin = stood("Twin", shared, Matrix.Translation((6.0, 6.0, 0.0)))
+        self.assertEqual(self.ring(self.petal), {"FINISHED"})
+        self.assertIs(twin.data, shared)
+        self.assertEqual(shared.users, 1)
+        for petal in self.others:
+            self.assertIsNot(petal.data, shared)
+            self.assertEqual(petal.data.users, 1, petal.name)
+
+
+def curves_in(action, slot=None):
+    """(data path, index) of every curve an action holds - of one slot, or of
+    all of them - read from the channelbags."""
+    return sorted((curve.data_path, curve.array_index)
+                  for layer in action.layers for strip in layer.strips
+                  for bag in strip.channelbags
+                  if slot is None or bag.slot_handle == slot.handle
+                  for curve in bag.fcurves)
+
+
+class TestSharedActions(CopyThatCase):
+    """A part keyed on its own transform has the keys lifted when it is built. An
+    action another object plays too is that object's as much as the part's: it
+    must keep what it has."""
+
+    def keyed_gear(self):
+        """A gear that rises from 1 to 3 over twenty frames, keyed on location."""
+        self.gear = cube("Gear", (0.0, 0.0, 1.0))
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        self.gear.keyframe_insert("location", frame=1)
+        self.gear.location.z = 3.0
+        self.gear.keyframe_insert("location", frame=20)
+        scene.frame_set(1)
+
+    def lamp_in_the_same_action(self):
+        """Another object plays the gear's action under a slot of its own, as
+        the Action editor leaves it: assigned, then keyed on its height."""
+        self.keyed_gear()
+        self.lamp = cube("Lamp", (5.0, 0.0, 1.0))
+        scene = bpy.context.scene
+        self.lamp.animation_data_create()
+        self.lamp.animation_data.action = self.gear.animation_data.action
+        self.lamp.keyframe_insert("location", index=2, frame=1)
+        self.lamp.location.z = 4.0
+        self.lamp.keyframe_insert("location", index=2, frame=20)
+        scene.frame_set(1)
+        self.assertEqual(len(self.gear.animation_data.action.slots), 2)
+
+    def twin_by_alt_d(self):
+        self.keyed_gear()
+        select(self.gear)
+        self.assertEqual(bpy.ops.object.duplicate(linked=True), {"FINISHED"})
+        self.twin = bpy.context.view_layer.objects.active
+        self.twin.location.x += 4.0
+        self.assertEqual(self.twin.animation_data.action, self.gear.animation_data.action)
+        self.assertEqual(self.twin.animation_data.action_slot.identifier,
+                         self.gear.animation_data.action_slot.identifier)
+
+    @staticmethod
+    def height_at(obj, frame):
+        bpy.context.scene.frame_set(frame)
+        return obj.matrix_world.translation.z
+
+    def build_the_gear(self):
+        """The gear turned a quarter about X for its After, and Build."""
+        bpy.context.scene.frame_set(1)
+        select(self.gear)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.gear.rotation_euler.x = math.radians(90.0)
+        bpy.context.view_layer.update()
+        self.after = rest_points(self.gear)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def test_a_part_reads_only_the_curves_of_its_own_slot(self):
+        self.lamp_in_the_same_action()
+        self.assertEqual(len(rigmoves.own_transform_curves(self.gear)), 3)
+        self.assertEqual(len(rigmoves.own_transform_curves(self.lamp)), 1)
+        # Nothing to play: no slot, no keys of its own.
+        spare = cube("Spare", (9.0, 0.0, 0.0))
+        spare.animation_data_create()
+        spare.animation_data.action = self.gear.animation_data.action
+        self.assertIsNone(spare.animation_data.action_slot)
+        self.assertEqual(rigmoves.own_transform_curves(spare), [])
+
+    def test_building_the_gear_leaves_the_twin_its_keys(self):
+        self.twin_by_alt_d()
+        frames = (1, 10, 20)
+        was = [self.height_at(self.twin, f) for f in frames]
+        self.assertGreater(was[1], 1.5)
+        self.build_the_gear()
+        self.assertEqual([round(self.height_at(self.twin, f), 6) for f in frames],
+                         [round(z, 6) for z in was])
+        self.assertEqual(len(rigmoves.own_transform_curves(self.twin)), 3)
+        # The gear's own keys are lifted, and it plays the move at any frame.
+        self.assertEqual(rigmoves.own_transform_curves(self.gear), [])
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+        move = rig().rigmoves.moves[0]
+        for frame in frames:
+            bpy.context.scene.frame_set(frame)
+            drive(move, 1.0)
+            self.assertLess(drift(self.gear, self.after), TOLERANCE, frame)
+
+    def test_the_part_given_a_copy_has_none_left_over(self):
+        self.twin_by_alt_d()
+        original = self.twin.animation_data.action
+        self.build_the_gear()
+        # The copy made for the gear was emptied and went; the twin has the
+        # action the two shared, to itself now.
+        self.assertIsNone(self.gear.animation_data.action)
+        self.assertEqual(self.twin.animation_data.action.name, original.name)
+        self.assertEqual(original.users, 1)
+        self.assertEqual([a.name for a in bpy.data.actions if a.name.startswith(original.name)
+                          and a.name != original.name], [])
+
+    def test_building_the_gear_leaves_another_slot_of_its_action_its_curve(self):
+        self.lamp_in_the_same_action()
+        action = self.gear.animation_data.action
+        everything = curves_in(action)
+        self.assertEqual(len(everything), 4)
+        was = [self.height_at(self.lamp, f) for f in (1, 10, 20)]
+        self.assertAlmostEqual(was[2], 4.0, places=5)
+        self.build_the_gear()
+        self.assertEqual([round(self.height_at(self.lamp, f), 6) for f in (1, 10, 20)],
+                         [round(z, 6) for z in was])
+        self.assertEqual(curves_in(action), everything)
+        self.assertEqual(curves_in(action, self.lamp.animation_data.action_slot),
+                         [("location", 2)])
+        self.assertEqual(rigmoves.own_transform_curves(self.gear), [])
+        # Counted: the gear's three tracks, not the lamp's as a fourth.
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+        self.assertNotIn("4 stray", rig().rigmoves.report)
+
+    def test_the_lift_button_takes_only_the_parts_own_keys_and_counts_them(self):
+        self.lamp_in_the_same_action()
+        select(self.gear)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        was = [self.height_at(self.lamp, f) for f in (1, 10, 20)]
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"FINISHED"})
+        self.assertIn("3 keyframe track(s) lifted off the parts", rig().rigmoves.report)
+        self.assertEqual(rigmoves.own_transform_curves(self.gear), [])
+        self.assertEqual([round(self.height_at(self.lamp, f), 6) for f in (1, 10, 20)],
+                         [round(z, 6) for z in was])
+
+    def test_an_action_played_by_one_object_is_lifted_in_place_as_before(self):
+        # Nobody else plays it: no copy is made, and the action is emptied and
+        # taken off the part, as it always was.
+        self.keyed_gear()
+        name = self.gear.animation_data.action.name
+        self.build_the_gear()
+        self.assertIsNone(self.gear.animation_data.action)
+        self.assertIsNone(bpy.data.actions.get(name))
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+
+
+class TestRingAnimatedChild(RingFlows):
+    """Eight petals modelled in place, with every origin left at the world's
+    origin - the most ordinary way to model them - and something hung from the
+    petals. Ring stands the petals on their frames, and holds what hangs from
+    them where it is by rewriting its own transform: not an animated child,
+    which its own keys, drivers or NLA strips rewrite on the next frame."""
+
+    def modelled_flower(self):
+        shape = prism("Petal Shape", 4, 0.15, 1.0)
+        self.petals = []
+        for k in range(8):
+            mesh = shape.copy()
+            mesh.transform(self.turn(k) @ self.base)
+            self.petals.append(stood("Petal" if not k else "Petal {:d}".format(k + 1),
+                                     mesh, Matrix.Identity(4)))
+        bpy.context.view_layer.update()
+        self.leader = self.petals[0]
+
+    def hang(self, name, petal):
+        """A small object parented to a petal with Ctrl+P > Object."""
+        kid = stood(name, prism(name + " Shape", 3, 0.03, 0.05), Matrix.Translation((0.0, 0.0, 0.0)))
+        select(kid, petal)
+        bpy.context.view_layer.objects.active = petal
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=False),
+                         {"FINISHED"})
+        return kid
+
+    def key_a_flight(self, kid):
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        kid.keyframe_insert("location", frame=1)
+        kid.location.x += 0.3
+        kid.location.z += 0.2
+        kid.keyframe_insert("location", frame=10)
+        kid.location.x -= 0.3
+        kid.location.z -= 0.2
+        scene.frame_set(1)
+
+    def worked_by_a_driver(self, kid):
+        curve = kid.driver_add("location", 2)
+        curve.driver.type = "SCRIPTED"
+        curve.driver.expression = "0.1 * frame"
+
+    def worked_by_the_nla(self, kid):
+        self.key_a_flight(kid)
+        action = kid.animation_data.action
+        kid.animation_data.nla_tracks.new().strips.new("Flight", 1, action)
+        kid.animation_data.action = None
+
+    def seen_at(self, kids, frames=(1, 10)):
+        out = {}
+        for frame in frames:
+            bpy.context.scene.frame_set(frame)
+            out[frame] = {kid.name: world_points(kid) for kid in kids}
+        bpy.context.scene.frame_set(1)
+        return out
+
+    def ring_it(self, **kwargs):
+        self.record_after(self.leader, turned=60.0)
+        return self.ring(self.leader, **kwargs)
+
+    def check_the_bee(self, how):
+        self.modelled_flower()
+        bee = self.hang("Bee", self.petals[3])
+        how(bee)
+        dew = self.hang("Dewdrop", self.petals[2])
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        was = self.seen_at([bee, dew])
+        self.assertEqual(self.ring_it(), {"FINISHED"})
+        # Petal 4 is left where it stands, and named, with the reason.
+        self.assertNotIn("Petal 4", self.riders())
+        self.assertEqual(len(self.riders()), 6)
+        self.assertIn("'Petal 4' cannot be re-framed safely (has a child with keys or "
+                      "drivers of its own ('Bee'))", self.report())
+        # The bee plays exactly as before. So does the dewdrop, that is held
+        # where it hung by the petal that was re-framed.
+        now = self.seen_at([bee, dew])
+        for frame in (1, 10):
+            for kid in (bee, dew):
+                self.assertLess(drift_of(now[frame][kid.name], was[frame][kid.name]), 1e-5,
+                                (kid.name, frame))
+        # The leader's frame is the world's, so a petal's is its place's turn.
+        self.assertIn("Petal 3", self.riders())
+        self.assertTrue(same_matrix_of(self.petals[2].matrix_world, self.turn(2)))
+
+    def test_a_petal_with_a_keyed_child_is_left_out_and_the_child_plays_as_before(self):
+        self.check_the_bee(self.key_a_flight)
+
+    def test_a_petal_with_a_child_driven_by_a_driver_is_left_out_too(self):
+        self.check_the_bee(self.worked_by_a_driver)
+
+    def test_a_petal_with_a_child_in_the_nla_is_left_out_too(self):
+        self.check_the_bee(self.worked_by_the_nla)
+
+    def test_a_child_that_is_not_animated_is_still_held_where_it_is(self):
+        self.modelled_flower()
+        dew = self.hang("Dewdrop", self.petals[3])
+        bpy.context.view_layer.update()
+        was = world_points(dew)
+        self.assertEqual(self.ring_it(), {"FINISHED"})
+        self.assertEqual(len(self.riders()), 7)
+        self.assertNotIn("child with keys", self.report())
+        self.assertLess(drift_of(world_points(dew), was), 1e-5)
+
+    def test_without_the_blocker_the_keyed_bee_would_fly_off(self):
+        # What happens to a keyed child of a petal that is re-framed anyway:
+        # the fault the blocker keeps away, to show the others test something.
+        self.modelled_flower()
+        bee = self.hang("Bee", self.petals[3])
+        self.key_a_flight(bee)
+        was = self.seen_at([bee])
+        with mock.patch.object(rigmoves, "has_own_motion", lambda obj: False):
+            self.assertEqual(self.ring_it(), {"FINISHED"})
+        self.assertGreater(drift_of(self.seen_at([bee])[10]["Bee"], was[10]["Bee"]), 0.1)
+
+
+def drift_of(points, expected):
+    """How far the furthest of these points is from the same one of the others."""
+    return max((a - b).length for a, b in zip(points, expected))
+
+
+class TestSpreadDialogFollowsItsSettings(CopyThatCase):
+    """The dialog sizes its Step for the way it opens. Until somebody types a Step
+    of their own, every setting that changes the places the parts take sizes it
+    again, so what the dialog shows is what OK does. The callbacks Blender runs
+    when a field is changed are run here by hand, against what the dialog holds."""
+
+    def lifted(self, objects):
+        select(*objects)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj in objects:
+            obj.location.z += 1.0
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def ride(self, leader, where, name):
+        obj = cube(name, where)
+        select(leader, obj)
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader=leader.name,
+                                                     rig_name=rig().name), {"FINISHED"})
+        return obj
+
+    def crown(self, count=11):
+        """A leader on a ring of count + 1 places, and a rider on each of the rest."""
+        places = ring_places((2.0, 1.0, 3.0), count + 1, 3.0)
+        self.leader = cube("Leader", places.pop(0))
+        self.lifted([self.leader])
+        self.riders = [self.ride(self.leader, where, "R{:d}".format(number))
+                       for number, where in enumerate(places)]
+        select(self.leader)
+
+    def dominoes(self, count=8):
+        """A leader at one end of a row along X, and a rider on each of the next places."""
+        self.leader = cube("Leader", (0.0, 0.0, 0.0))
+        self.lifted([self.leader])
+        self.riders = [self.ride(self.leader, (float(number + 1), 0.0, 0.0),
+                                 "R{:d}".format(number)) for number in range(count)]
+        select(self.leader)
+
+    def leads(self):
+        return [p.lead for p in self.move.parts if p.leader]
+
+    @staticmethod
+    def dialog(what="LEAD", **given):
+        """What Spread... holds when its dialog is opened (invoke has run), and
+        how it was run: `given` are settings the caller passed, which are set."""
+        stand_in = types.SimpleNamespace(
+            index=0, what=what, order="AROUND", axis="X", seed=1, only_selected=False,
+            both_ways=False, start=0.0, step=0.0, first=0.0, last=0.0, by="STEP",
+            sizing=False, report=lambda *args: None,
+            properties=types.SimpleNamespace(is_property_set=lambda name: name in given))
+        for name, value in given.items():
+            setattr(stand_in, name, value)
+        stand_in.plan = lambda context: rigmoves.RIGMOVES_OT_spread.plan(stand_in, bpy.context)
+        stand_in.sized = lambda *args: rigmoves.RIGMOVES_OT_spread.sized(stand_in, *args)
+        opened = types.SimpleNamespace(
+            window_manager=types.SimpleNamespace(invoke_props_dialog=lambda op: {"RUNNING_MODAL"}),
+            scene=bpy.context.scene, view_layer=bpy.context.view_layer,
+            selected_objects=bpy.context.selected_objects, selected_pose_bones=None)
+        assert rigmoves.RIGMOVES_OT_spread.invoke(stand_in, opened, None) == {"RUNNING_MODAL"}
+        return stand_in
+
+    @staticmethod
+    def change(dialog, **settings):
+        """A field changed in the dialog: what Blender does, and then calls."""
+        for name, value in settings.items():
+            setattr(dialog, name, value)
+            if name == "step":
+                rigmoves._step_typed(dialog, bpy.context)
+            else:
+                rigmoves._spread_changed(dialog, bpy.context)
+
+    def test_unticking_both_ways_sizes_the_step_again(self):
+        # Twelve spikes: one way round there are eleven places, and ten each
+        # would hold the last six at the limit. Both ways it is -6, and one way -3.
+        self.crown()
+        dialog = self.dialog()
+        self.assertTrue(dialog.both_ways)
+        self.assertEqual(dialog.step, -6.0)
+        self.change(dialog, both_ways=False)
+        self.assertEqual(dialog.step, -3.0)
+        self.change(dialog, both_ways=True)
+        self.assertEqual(dialog.step, -6.0)
+
+    def test_changing_the_order_sizes_the_step_again(self):
+        # Dominoes in a row: round a ring, both ways, the places are few and
+        # ten each fits. Along an axis there are eight, and it is -5.
+        self.dominoes()
+        dialog = self.dialog()
+        self.assertEqual(dialog.step, -10.0)
+        self.change(dialog, order="AXIS")
+        self.assertEqual(dialog.step, -5.0)
+        self.change(dialog, order="DISTANCE")
+        self.assertEqual(dialog.step, -5.0)
+        self.change(dialog, order="AROUND")
+        self.assertEqual(dialog.step, -10.0)
+
+    def test_only_the_selected_sizes_the_step_for_those(self):
+        self.crown()
+        dialog = self.dialog()
+        self.assertEqual(dialog.step, -6.0)
+        select(self.riders[0], self.riders[1], self.riders[2])
+        self.change(dialog, only_selected=True)
+        self.assertEqual(dialog.step, -10.0)
+        self.change(dialog, only_selected=False)
+        self.assertEqual(dialog.step, -6.0)
+
+    def test_axis_seed_and_by_keep_the_step_sized_too(self):
+        self.dominoes()
+        dialog = self.dialog()
+        self.change(dialog, order="AXIS")
+        self.assertEqual(dialog.step, -5.0)
+        # Along Y the row stands in one place: nobody waits for anybody.
+        self.change(dialog, axis="Y")
+        self.assertEqual(dialog.step, -10.0)
+        for setting in ({"axis": "X"}, {"seed": 7}, {"by": "RANGE"}, {"by": "STEP"}):
+            self.change(dialog, **setting)
+            self.assertEqual(dialog.step, -5.0, setting)
+        # Random deals out the places, none shared: the same count as along X.
+        self.change(dialog, order="RANDOM")
+        self.assertEqual(dialog.step, -5.0)
+        self.change(dialog, seed=3)
+        self.assertEqual(dialog.step, -5.0)
+
+    def test_a_step_that_was_typed_is_kept(self):
+        self.crown()
+        dialog = self.dialog()
+        self.change(dialog, step=-8.0)
+        self.assertFalse(dialog.sizing)
+        self.change(dialog, both_ways=False)
+        self.change(dialog, order="DISTANCE")
+        self.change(dialog, only_selected=True)
+        self.assertEqual(dialog.step, -8.0)
+
+    def test_the_dialogs_own_writes_are_not_taken_for_a_typed_step(self):
+        self.crown()
+        dialog = self.dialog()
+        self.assertTrue(dialog.sizing)
+        self.change(dialog, both_ways=False)
+        self.assertTrue(dialog.sizing)
+        # And once typed over, the dialog's own sizing is no longer the one in force.
+        self.change(dialog, step=-4.0)
+        self.change(dialog, both_ways=True)
+        self.assertEqual(dialog.step, -4.0)
+
+    def test_a_step_the_caller_gave_is_never_sized(self):
+        self.crown()
+        dialog = self.dialog(step=-7.0)
+        self.assertFalse(dialog.sizing)
+        self.change(dialog, both_ways=False)
+        self.assertEqual(dialog.step, -7.0)
+
+    def test_the_callbacks_are_wired_to_the_properties_of_the_operator(self):
+        # Through Blender's own machinery: the settings a script passes call
+        # them, and with the dialog's flag on, the Step is sized as the last of
+        # them leaves things.
+        self.crown()
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", sizing=True, order="AROUND", both_ways=True), {"FINISHED"})
+        self.assertEqual(self.leads(), [-6 * n for n in range(1, 7)] + [-30, -24, -18, -12, -6])
+        self.assertIn("in steps of -6 from 0,", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", sizing=True, order="AROUND", both_ways=False), {"FINISHED"})
+        self.assertEqual(self.leads(), [-3 * n for n in range(1, 12)])
+        self.assertIn("in steps of -3 from 0,", rig().rigmoves.report)
+        # A Step passed with them is the caller's, and is kept.
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", sizing=True, order="AROUND", step=-10.0, both_ways=False),
+            {"FINISHED"})
+        self.assertEqual(self.leads(), [-10, -20, -30, -40] + [-50] * 7)
+
+    def test_a_script_that_does_not_open_a_dialog_is_not_touched(self):
+        self.crown()
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", order="AROUND", both_ways=False), {"FINISHED"})
+        self.assertEqual(self.leads(), [-3 * n for n in range(1, 12)])
+        self.assertIn("(sized to fit)", rig().rigmoves.report)
+
+    def test_both_ways_and_only_the_selected_are_not_remembered(self):
+        # Blender keeps every property of an operator that is not marked
+        # otherwise, for the next time the dialog opens: Both ways, whose smart
+        # default then worked only the first time, and Only the selected, which
+        # a spread of Delays left on for the next spread of Leads.
+        props = bpy.ops.rigmoves.spread.get_rna_type().properties
+        for name in ("order", "start", "step", "first", "last", "both_ways",
+                     "only_selected", "sizing"):
+            self.assertTrue(props[name].is_skip_save, name)
+        self.assertTrue(props["sizing"].is_hidden)
+
+
+def shift_d(obj, name):
+    """Shift+D: a copy of the object with a mesh of its own."""
+    copy = obj.copy()
+    copy.data = obj.data.copy()
+    copy.name = name
+    for collection in obj.users_collection:
+        collection.objects.link(copy)
+    return copy
+
+
+class TestRingReports(RingFlows):
+    """Reports of Ring that named the wrong thing or gave the wrong advice, each
+    played from the flow the review found it in."""
+
+    KNUCKLES = [Vector((float(n), 0.0, 0.0)) for n in range(3)]
+
+    def modelled_flower(self, count=8):
+        """A leader and a copy on every other place round the world's Z, each
+        made with Shift+D and turned about the centre."""
+        shape = prism("Petal Shape", 4, 0.15, 1.0)
+        self.leader = stood("Petal", shape, self.base)
+        self.petals = [self.leader] + [
+            stood("Petal {:d}".format(k + 1), shape.copy(), self.turn(k, count) @ self.base)
+            for k in range(1, count)]
+        bpy.context.view_layer.update()
+        self.record_after(self.leader, turned=60.0)
+
+    def finger(self):
+        """A finger of three segments, chained and bent 30 degrees at After, built,
+        with the cursor on the centre of the ring it is going to be one of."""
+        scene = bpy.context.scene
+        scene.cursor.location = (-2.0, 0.0, 0.0)
+        self.segments = []
+        for number in range(3):
+            segment = cube("Seg{:d}".format(number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+        bpy.context.view_layer.update()
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for segment, knuckle in zip(self.segments, self.KNUCKLES):
+            scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        scene.cursor.location = (-2.0, 0.0, 0.0)
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        carry = Matrix.Identity(4)
+        for knuckle, home, segment in zip(self.KNUCKLES, self.homes, self.segments):
+            carry = carry @ turn_about(knuckle, "Y", 30.0)
+            segment.matrix_world = carry @ home
+            bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    # -- a second Ring of a finger ------------------------------------------
+
+    def test_a_second_ring_of_a_finger_does_not_list_its_own_copies_as_left_out(self):
+        self.finger()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8), {"FINISHED"})
+        report = self.report()
+        self.assertNotIn("is already part of a move", report)
+        self.assertNotIn("Left out", report)
+        self.assertIn("4 copies of 'Seg1' (3 joints each) round the 3D cursor ride along "
+                      "with it, joint for joint.", report)
+        self.assertIn("3 places already held a copy and were skipped", report)
+
+    def test_a_stray_leaf_is_named_not_hidden_behind_the_fingers_own_copies(self):
+        self.finger()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        stood("Stray Leaf", prism("Leaf Shape", 5, 0.12, 0.8),
+              turn_about(Vector((-2.0, 0.0, 0.0)), "Z", 135.0) @ self.homes[0])
+        bpy.context.view_layer.update()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8), {"FINISHED"})
+        report = self.report()
+        self.assertIn("Left out: 'Stray Leaf' stands in a place and is not a copy of 'Seg1'",
+                      report)
+        self.assertNotIn("is already part of a move", report)
+        self.assertNotIn("and 3 more", report)
+
+    # -- Ride Along with copies of a palm's finger --------------------------
+
+    def test_copies_of_a_palms_finger_are_said_to_be_of_the_finger_not_the_palm(self):
+        palm = cube("Palm", (1.5, 0.0, 0.0))
+        palm.scale = (4.0, 3.0, 0.5)
+        segs, y = [], 1.5
+        for number, length in enumerate((1.0, 0.7, 0.5)):
+            seg = cube("F1_{:d}".format(number + 1), (0.0, y + length / 2.0, 0.0))
+            seg.scale = (0.4, length, 0.3)
+            segs.append(seg)
+            y += length
+        bpy.context.view_layer.update()
+        copies = []
+        for finger, shift in ((2, 1.0), (3, 2.0), (4, 3.0)):
+            for number, seg in enumerate(segs):
+                made = shift_d(seg, "F{:d}_{:d}".format(finger, number + 1))
+                made.location.x += shift
+                copies.append(made)
+        bpy.context.view_layer.update()
+        select(palm, *segs)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        select(palm, *segs)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual(move.parts["F1_1"].follows, "Palm")
+        for where, seg in zip((Vector((0, 1.5, 0)), Vector((0, 2.5, 0)), Vector((0, 3.2, 0))),
+                              segs):
+            bpy.context.scene.cursor.location = where
+            select(seg)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        segs[0].matrix_world = turn_about((0, 1.5, 0), "X", 30.0) @ segs[0].matrix_world
+        bpy.context.view_layer.update()
+        select(segs[0])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(*copies, segs[0])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="F1_1",
+                                                     rig_name=rig().name), {"FINISHED"})
+        self.assertIn("3 copies of 'F1_1' ride along, joint for joint.", self.report())
+        self.assertNotIn("'Palm'", self.report())
+
+    # -- the advice for copies that are off the ring ------------------------
+
+    def test_a_ring_about_the_wrong_axis_is_told_to_check_About_too(self):
+        self.modelled_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(self.leader, axis="X"), {"CANCELLED"})
+        self.assertEqual({o.name for o in bpy.data.objects}, before)
+        self.assertEqual(self.report(),
+                         "7 copies of 'Petal' stand near the ring but off its places: check "
+                         "the centre (3D cursor), About and Count. Nothing done.")
+
+    def test_use_what_is_there_does_not_promise_a_fill_that_would_be_refused(self):
+        self.modelled_flower()
+        self.assertEqual(self.ring(self.leader, axis="X", use="ADOPT"), {"CANCELLED"})
+        report = self.report()
+        self.assertIn("check the centre (3D cursor), About and Count.", report)
+        self.assertNotIn("Fill the gaps would copy", report)
+        self.assertNotIn("had nothing standing", report)
+
+    def test_use_what_is_there_still_says_so_when_fill_the_gaps_would_copy(self):
+        self.modelled_flower()
+        for petal in (self.petals[3], self.petals[5]):
+            bpy.data.objects.remove(petal, do_unlink=True)
+        self.assertEqual(self.ring(self.leader, use="ADOPT"), {"FINISHED"})
+        self.assertIn("2 places had nothing standing in them: Fill the gaps would copy the "
+                      "part there.", self.report())
+
+    def test_the_advice_for_a_refused_ring_comes_before_what_was_left_out(self):
+        self.modelled_flower()
+        self.assertEqual(self.ring(self.leader, axis="X", use="ADOPT"), {"CANCELLED"})
+        report = self.report()
+        self.assertIn("Left out:", report)
+        self.assertLess(report.index("check the centre (3D cursor)"), report.index("Left out:"))
+        # And in the panel's first lines, which is all a long report shows.
+        lines = rigmoves.wrapped(report, most=1000)
+        shown = " ".join(lines[:9])
+        self.assertIn("check the centre", shown)
+
+    def test_a_report_with_notes_and_a_success_puts_them_before_what_was_left_out(self):
+        self.modelled_flower()
+        # Seven copies stand where they should, and three more near the ring where
+        # no place is: a Count of 6 takes the ones that fit and notes the rest.
+        self.assertEqual(self.ring(self.leader, use="ADOPT", count=6), {"FINISHED"})
+        report = self.report()
+        self.assertIn("stand near the ring but off its places", report)
+        if "Left out:" in report:
+            self.assertLess(report.index("stand near the ring"), report.index("Left out:"))
+
+    # -- the panel's box ----------------------------------------------------
+
+    @staticmethod
+    def drawn_report(text):
+        lines = []
+
+        class Column:
+            enabled = True
+
+            def label(self, text="", **_kwargs):
+                lines.append(text)
+
+        class Box:
+            def column(self, **_kwargs):
+                return Column()
+
+        class Layout:
+            def box(self):
+                return Box()
+
+        rigmoves.RIGMOVES_PT_panel._draw_report(None, Layout(), types.SimpleNamespace(report=text))
+        return lines
+
+    def test_a_report_the_box_has_room_for_is_shown_whole(self):
+        text = "Spread the Leads of 11 riders in steps of -3 from 0, round the ring."
+        self.assertEqual(self.drawn_report(text), rigmoves.wrapped(text))
+        # Seven words of four letters fill a line, so sixty-three are nine lines.
+        nine = " ".join(["word"] * 63)
+        self.assertEqual(len(rigmoves.wrapped(nine, most=1000)), 9)
+        self.assertEqual(self.drawn_report(nine), rigmoves.wrapped(nine, most=1000))
+        ten = " ".join(["word"] * 64)
+        self.assertEqual(len(rigmoves.wrapped(ten, most=1000)), 10)
+        self.assertEqual(len(self.drawn_report(ten)), 10)
+        self.assertEqual(self.drawn_report(ten)[-1], "(the full report is in the Info editor)")
+
+    def test_a_longer_report_ends_with_a_sign_and_says_where_the_rest_is(self):
+        text = " ".join("word{:d}".format(n) for n in range(80))
+        whole = rigmoves.wrapped(text, most=1000)
+        self.assertGreater(len(whole), 9)
+        lines = self.drawn_report(text)
+        self.assertEqual(len(lines), 10)
+        self.assertTrue(lines[8].endswith("…"), lines[8])
+        self.assertTrue(whole[8].startswith(lines[8][:-1].rstrip()), (whole[8], lines[8]))
+        self.assertEqual(lines[:8], whole[:8])
+        self.assertEqual(lines[9], "(the full report is in the Info editor)")
+        self.assertLessEqual(len(lines[8]), 34)
+
+    # -- a half made with Ctrl+M that is not the same on both sides ---------
+
+    def test_an_asymmetric_ctrl_m_half_is_said_to_be_a_mirror_image(self):
+        shape = prism("Odd Shape", 4, 0.15, 1.0)
+        self.leader = stood("Outer Leader", shape, self.base)
+        flip = Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0)))
+        stood("Outer 2", shape.copy(), flip @ self.turn(7) @ self.base)
+        bpy.context.view_layer.update()
+        self.record_after(self.leader, turned=50.0)
+        for use in ("ADOPT", "FILL"):
+            self.ring(self.leader, use=use)
+            self.assertIn("'Outer 2' is a mirror image of 'Outer Leader' (not the same on "
+                          "both sides), so it is not a copy - it can ride along with Ride "
+                          "Along, which mirrors by itself", self.report(), use)
+            self.assertNotIn("not turned to its place", self.report(), use)
+
+    def test_a_copy_that_is_only_not_turned_to_its_place_is_still_said_so(self):
+        shape = prism("Odd Shape", 4, 0.15, 1.0)
+        self.leader = stood("Outer Leader", shape, self.base)
+        stood("Unturned", shape.copy(),
+              Matrix.Translation((self.turn(2) @ self.base).translation) @ self.base.to_3x3().to_4x4())
+        bpy.context.view_layer.update()
+        self.record_after(self.leader, turned=50.0)
+        self.ring(self.leader, use="ADOPT")
+        self.assertIn("'Unturned' is a copy of 'Outer Leader' that is not turned to its place",
+                      self.report())
+        self.assertNotIn("mirror image", self.report())
+
+
+class TestRingDialogMemory(CopyThatCase):
+    """Blender opens an operator's dialog with what it was last used with, for
+    every property not marked SKIP_SAVE. Ring keeps Use, Count, Round, About and
+    Linked copies from the last Ring - the next flower is likely to be made the
+    same way - but not the Lead step: after the outer petals' step, the leaf's
+    Ring opened with it and, left alone, the second leaf opened ahead of the
+    first."""
+
+    @staticmethod
+    def next_dialog_opens_with(used):
+        """What Blender puts back from the last use, as a script can see it: the
+        properties that are not marked SKIP_SAVE. The rest are the default."""
+        props = bpy.ops.rigmoves.ring.get_rna_type().properties
+        return {name: value for name, value in used.items() if not props[name].is_skip_save}
+
+    def test_two_rings_in_a_row_the_second_opens_with_no_lead_step(self):
+        outer_petals = {"use": "ADOPT", "count": 8, "center": "ORIGIN", "axis": "X",
+                        "linked": False, "lead_step": -9}
+        reopened = self.next_dialog_opens_with(outer_petals)
+        self.assertEqual(reopened, {"use": "ADOPT", "count": 8, "center": "ORIGIN",
+                                    "axis": "X", "linked": False})
+        self.assertNotIn("lead_step", reopened)
+        self.assertEqual(bpy.ops.rigmoves.ring.get_rna_type().properties["lead_step"].default, 0)
+
+    def test_what_a_ring_keeps_it_keeps(self):
+        props = bpy.ops.rigmoves.ring.get_rna_type().properties
+        for name in ("use", "count", "center", "axis", "linked"):
+            self.assertFalse(props[name].is_skip_save, name)
+        self.assertTrue(props["lead_step"].is_skip_save)
+
+
+class TestRingDuplicateOnTop(RingFlows):
+    """Shift+D, then a right-click to cancel the move, leaves a copy exactly on
+    the part. That is not a copy off the ring - the advice for those, the centre
+    and the Count, is wrong for it - but a slip, and is said to be one."""
+
+    SAID = ("'Petal.001' stands exactly where 'Petal' is - a duplicate left on top of "
+            "it? Delete it, then Ring again.")
+
+    def one_petal_with_a_duplicate_on_it(self):
+        self.leader = stood("Petal", prism("Petal Shape", 4, 0.15, 1.0), self.base)
+        self.record_after(self.leader, turned=60.0)
+        self.leader.matrix_world = self.base
+        bpy.context.view_layer.update()
+        select(self.leader)
+        self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
+        self.dup = bpy.context.view_layer.objects.active
+        self.assertEqual(self.dup.name, "Petal.001")
+        self.assertTrue(same_matrix_of(self.dup.matrix_world, self.base))
+
+    def made_by(self, **kwargs):
+        before = {o.name for o in bpy.data.objects}
+        result = self.ring(self.leader, **kwargs)
+        return result, {o.name for o in bpy.data.objects} - before
+
+    def test_fill_refuses_and_names_the_duplicate(self):
+        self.one_petal_with_a_duplicate_on_it()
+        result, made = self.made_by(use="FILL")
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertEqual(made, set())
+        self.assertEqual(self.report(), self.SAID + " Nothing done.")
+        self.assertEqual(self.riders(), {})
+
+    def test_use_what_is_there_names_it_too_and_does_not_call_it_off_the_ring(self):
+        self.one_petal_with_a_duplicate_on_it()
+        result, made = self.made_by(use="ADOPT")
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertEqual(made, set())
+        self.assertIn(self.SAID, self.report())
+        self.assertNotIn("off the ring", self.report())
+        self.assertNotIn("off its places", self.report())
+        self.assertNotIn("Left out", self.report())
+        # Fill the gaps is not what it would be sent to: it refuses the same.
+        self.assertNotIn("Fill the gaps would copy", self.report())
+
+    def test_use_what_is_there_takes_what_fits_and_adds_it_as_a_note(self):
+        self.one_petal_with_a_duplicate_on_it()
+        shape = self.leader.data
+        for k in (2, 5):
+            stood("Petal {:d}".format(k + 1), shape.copy(), self.turn(k) @ self.base)
+        bpy.context.view_layer.update()
+        result, made = self.made_by(use="ADOPT")
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(made, set())
+        self.assertEqual(sorted(self.riders()), ["Petal 3", "Petal 6"])
+        self.assertTrue(self.report().endswith(self.SAID), self.report())
+        self.assertNotIn("off the ring", self.report())
+
+    def test_after_the_duplicate_is_deleted_fill_makes_seven(self):
+        self.one_petal_with_a_duplicate_on_it()
+        self.assertEqual(self.made_by(use="FILL")[0], {"CANCELLED"})
+        bpy.data.objects.remove(self.dup, do_unlink=True)
+        bpy.context.view_layer.update()
+        result, made = self.made_by(use="FILL")
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(len(made), 7)
+        self.assertEqual(self.report(),
+                         "7 copies of 'Petal' round the 3D cursor ride along with it.")
+
+    def test_making_copies_is_not_refused_for_it(self):
+        self.one_petal_with_a_duplicate_on_it()
+        result, made = self.made_by(use="COPY")
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(len(made), 7)
+        self.assertNotIn("exactly where", self.report())
+
+    def test_two_duplicates_are_named_together(self):
+        self.one_petal_with_a_duplicate_on_it()
+        select(self.leader)
+        self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
+        result, made = self.made_by(use="FILL")
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertEqual(self.report(),
+                         "'Petal.001' and 'Petal.002' stand exactly where 'Petal' is - "
+                         "duplicates left on top of it? Delete them, then Ring again. "
+                         "Nothing done.")
+
+    def test_a_copy_off_the_ring_is_still_said_to_be_off_it(self):
+        # What the old sentence is for: a copy that stands near the ring and on
+        # none of its places, and is not on the part.
+        self.one_petal_with_a_duplicate_on_it()
+        bpy.data.objects.remove(self.dup, do_unlink=True)
+        stood("Stray", self.leader.data.copy(), self.turn(0.5) @ self.base)
+        bpy.context.view_layer.update()
+        self.assertEqual(self.made_by(use="FILL")[0], {"CANCELLED"})
+        self.assertIn("1 copy of 'Petal' stands near the ring but off its places",
+                      self.report())
+        self.assertNotIn("exactly where", self.report())
+
+
+class TestPartsMovedByTheirOwn(CopyThatCase):
+    """A part whose transform is worked by an NLA strip or a driver of its own
+    plays the wrong move: the rig is measured from where it stands, and what it
+    stands on is worked out again on every frame. Build cannot lift those, as it
+    lifts keys - they are somebody's work - so it names them, and says what to
+    do."""
+
+    NLA = ("'Lid' is moved by an NLA strip of its own, which fights the rig: mute or "
+           "remove it in the NLA editor, then Build.")
+    DRIVER = ("'Lid' is moved by a driver on its transform: remove it in the Drivers "
+              "editor, then Build.")
+
+    def keyed(self, obj):
+        bpy.context.scene.frame_set(1)
+        obj.keyframe_insert("location", frame=1)
+        obj.location.z = 3.0
+        obj.keyframe_insert("location", frame=20)
+
+    def in_the_nla(self, obj):
+        self.keyed(obj)
+        action = obj.animation_data.action
+        track = obj.animation_data.nla_tracks.new()
+        self.strip = track.strips.new("Idle", 1, action)
+        self.track = track
+        obj.animation_data.action = None
+
+    @staticmethod
+    def by_a_driver(obj):
+        curve = obj.driver_add("location", 2)
+        curve.driver.type = "SCRIPTED"
+        curve.driver.expression = "1 + frame / 10"
+        return curve
+
+    def lid_with(self, how, name="Lid", where=(0.0, 0.0, 1.0)):
+        lid = cube(name, where)
+        how(lid)
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        return lid
+
+    def start(self, *lids):
+        select(*lids)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for lid in lids:
+            lid.rotation_euler.x = math.radians(90.0)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    @staticmethod
+    def said_by_the_panel():
+        return " ".join(text for _where, kind, text in drawn_panel()
+                        if kind.startswith("label"))
+
+    @staticmethod
+    def build_and_hear():
+        """Run what Build does, and keep how it reported: (kinds, text) of the
+        last. Blender hands an operator's reports to the Info editor and does
+        not let a script ask for them, so it is run against a stand-in that
+        keeps them."""
+        heard = []
+        stand_in = types.SimpleNamespace(
+            report=lambda kinds, text: heard.append((set(kinds), text)))
+        assert rigmoves.RIGMOVES_OT_build.execute(stand_in, bpy.context) == {"FINISHED"}
+        return heard[-1]
+
+    def lift_button(self):
+        return [text for _where, idname, text in drawn_buttons()
+                if idname == "rigmoves.free_keys"]
+
+    # -- named in the panel -------------------------------------------------
+
+    def test_a_part_moved_by_an_nla_strip_is_named_in_the_panel(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(self.lid)
+        self.assertIn(self.NLA, self.said_by_the_panel())
+        # Nothing to lift: no button that would not do anything.
+        self.assertEqual(self.lift_button(), [])
+
+    def test_a_part_moved_by_a_driver_is_named_in_the_panel(self):
+        self.lid = self.lid_with(self.by_a_driver)
+        self.start(self.lid)
+        self.assertIn(self.DRIVER, self.said_by_the_panel())
+        self.assertEqual(self.lift_button(), [])
+
+    def test_a_part_with_keys_in_its_action_has_the_box_it_always_had(self):
+        self.lid = self.lid_with(self.keyed)
+        self.start(self.lid)
+        said = self.said_by_the_panel()
+        self.assertIn("'Lid' keyed on its own transform", said)
+        self.assertEqual(self.lift_button(), ["Lift Those Keyframes"])
+        self.assertNotIn("fights the rig", said)
+        self.assertNotIn("Drivers editor", said)
+
+    def test_a_renamed_part_moved_by_an_nla_strip_is_still_found(self):
+        # A part is found by its object, not its name (0.19.0): asked before
+        # the rename has reached the move's own records, the strip is still
+        # named, under the object's new name.
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(self.lid)
+        self.lid.name = "Hatch"
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), (["Hatch"], []))
+
+    def test_keys_and_an_nla_strip_on_different_parts_are_each_said(self):
+        keyed = self.lid_with(self.keyed, "Keyed", (0.0, 3.0, 1.0))
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(keyed, self.lid)
+        said = self.said_by_the_panel()
+        self.assertIn("'Keyed' keyed on its own transform", said)
+        self.assertIn(self.NLA, said)
+        self.assertEqual(self.lift_button(), ["Lift Those Keyframes"])
+
+    def test_a_part_that_is_both_is_said_both_ways(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.by_a_driver(self.lid)
+        self.start(self.lid)
+        said = self.said_by_the_panel()
+        self.assertIn(self.NLA, said)
+        self.assertIn(self.DRIVER, said)
+
+    def test_several_parts_are_named_together(self):
+        lids = [self.lid_with(self.in_the_nla, "Lid {:d}".format(n), (0.0, 3.0 * n, 1.0))
+                for n in range(4)]
+        self.start(*lids)
+        self.assertIn("'Lid 0', 'Lid 1', 'Lid 2' and 1 more are moved by NLA strips of "
+                      "their own, which fight the rig: mute or remove them in the NLA "
+                      "editor, then Build.", self.said_by_the_panel())
+
+    def test_nothing_is_said_of_what_plays_nothing(self):
+        # A muted strip, a muted track, the NLA switched off, a muted driver, a
+        # strip with no transform in it: none of them moves the part.
+        cases = []
+        lid = self.lid_with(self.in_the_nla, "Muted Strip", (0.0, 0.0, 1.0))
+        self.strip.mute = True
+        cases.append(lid)
+        lid = self.lid_with(self.in_the_nla, "Muted Track", (0.0, 3.0, 1.0))
+        self.track.mute = True
+        cases.append(lid)
+        lid = self.lid_with(self.in_the_nla, "No NLA", (0.0, 6.0, 1.0))
+        lid.animation_data.use_nla = False
+        cases.append(lid)
+        lid = self.lid_with(self.by_a_driver, "Muted Driver", (0.0, 9.0, 1.0))
+        lid.animation_data.drivers[0].mute = True
+        cases.append(lid)
+
+        def hidden_only(obj):
+            obj.hide_render = False
+            obj.keyframe_insert("hide_render", frame=1)
+            obj.animation_data.nla_tracks.new().strips.new(
+                "Hide", 1, obj.animation_data.action)
+            obj.animation_data.action = None
+
+        cases.append(self.lid_with(hidden_only, "Hide Only", (0.0, 12.0, 1.0)))
+        self.start(*cases)
+        said = self.said_by_the_panel()
+        self.assertNotIn("fights the rig", said)
+        self.assertNotIn("Drivers editor", said)
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), ([], []))
+
+    def test_only_the_part_whose_own_slot_has_the_transform_is_named(self):
+        # One action holds a slot for the lid (a keyed visibility) and one for
+        # the lamp (its height); each has a strip of it. The lid's strip plays
+        # the lid's slot, which moves nothing.
+        lid = cube("Lid", (0.0, 0.0, 1.0))
+        lamp = cube("Lamp", (4.0, 0.0, 1.0))
+        bpy.context.scene.frame_set(1)
+        lid.keyframe_insert("hide_render", frame=1)
+        action = lid.animation_data.action
+        lamp.animation_data_create()
+        lamp.animation_data.action = action
+        lamp.keyframe_insert("location", index=2, frame=1)
+        for obj in (lid, lamp):
+            obj.animation_data.nla_tracks.new().strips.new("Play", 1, action)
+            obj.animation_data.action = None
+        self.assertEqual(rigmoves.moved_by_nla(lid), False)
+        self.assertEqual(rigmoves.moved_by_nla(lamp), True)
+        self.start(lid, lamp)
+        said = self.said_by_the_panel()
+        self.assertIn("'Lamp' is moved by an NLA strip of its own", said)
+        self.assertNotIn("'Lid' is moved", said)
+
+    # -- named by Build -----------------------------------------------------
+
+    def test_build_names_a_part_moved_by_an_nla_strip_and_is_not_a_success(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(self.lid)
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"WARNING"})
+        self.assertIn(self.NLA, text)
+        self.assertIn(self.NLA, rig().rigmoves.report)
+
+    def test_build_names_a_part_moved_by_a_driver_and_is_not_a_success(self):
+        self.lid = self.lid_with(self.by_a_driver)
+        self.start(self.lid)
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"WARNING"})
+        self.assertIn(self.DRIVER, text)
+
+    def test_build_of_keys_lifts_them_and_is_a_success_as_it_was(self):
+        self.lid = self.lid_with(self.keyed)
+        self.start(self.lid)
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"INFO"})
+        self.assertIn("3 stray keyframe track(s) on the parts", text)
+        self.assertNotIn("fights the rig", text)
+        self.assertEqual(rigmoves.own_transform_curves(self.lid), [])
+
+    def test_build_keeps_saying_so_until_the_strip_is_muted(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(self.lid)
+        self.assertEqual(self.build_and_hear()[0], {"WARNING"})
+        self.strip.mute = True
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"INFO"})
+        self.assertNotIn("fights the rig", text)
+
+    # -- left alone ---------------------------------------------------------
+
+    def test_lifting_keyframes_leaves_the_strip_and_the_driver_alone(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        curve = self.by_a_driver(self.lid)
+        self.start(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"CANCELLED"})
+        self.assertIn("Nothing is carrying stray keyframes", rig().rigmoves.report)
+        animation = self.lid.animation_data
+        self.assertEqual(len(animation.nla_tracks), 1)
+        self.assertEqual(len(animation.nla_tracks[0].strips), 1)
+        self.assertEqual(len(animation.drivers), 1)
+        self.assertEqual(animation.drivers[0].data_path, curve.data_path)
+        # Nor does Build.
+        self.build_and_hear()
+        self.assertEqual(len(animation.nla_tracks[0].strips), 1)
+        self.assertEqual(len(animation.drivers), 1)
 
 
 class TestCombined(CopyThatCase):

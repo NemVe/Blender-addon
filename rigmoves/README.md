@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.18.3
+# CopyThat - v0.18.3
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -243,7 +243,7 @@ the Path**), pick **Use**, set the **Count**, **OK**.
 |---|---|---|
 | **Make copies** | a new copy for every place round the ring, whatever already stands there | nothing is modelled but the one part |
 | **Use what's there** | takes up the objects already standing in the places, and makes nothing | every petal is modelled already, and you do not want one more object |
-| **Fill the gaps** (the default) | takes up what stands in a place, and copies the part only into the places where nothing does | most are modelled and a few are missing - or you are not sure. It never puts a copy on top of a petal that is there |
+| **Fill the gaps** (the default) | takes up what stands in a place, and copies the part only into the places where nothing does | most are modelled and a few are missing - or you are not sure. It never puts a copy on top of a mesh object that is there (other kinds of object are not seen: see the rough edges) |
 
 How an object already there is told from one that is not. Ring takes an object
 up, or stands it on a new frame, only when that is **provably safe**; anything
@@ -260,7 +260,7 @@ else is left exactly as it is, and the report says why:
   editable, in no move of this add-on, and with no keys, drivers or NLA of its
   own. Left alone, and named: "has keys or drivers of its own" (Build lifts a
   part's own keys, and a re-framed object would jump when they play: use Lift
-  Their Own Keyframes first), "is linked from a library" or "cannot be edited"
+  Those Keyframes first), "is linked from a library" or "cannot be edited"
   (the change would be lost when the file is saved and opened), "is hidden",
   "cannot be selected", "is already part of a move".
 - **Stood on a frame, only when plain.** A rider copies its leader's move from
@@ -272,7 +272,9 @@ else is left exactly as it is, and the report says why:
   **not** re-framed if it has constraints, instances other objects, has
   particles, hangs from a vertex or a bone, has another object depending on it
   (a Child Of, a Shrinkwrap target, a modifier's target, a child hung from its
-  vertices - only a child hung by the object is held in place), has a modifier
+  vertices - only a child hung by the object is held in place, and not one with
+  keys, a driver or an NLA strip of its own, which would throw it off on the next
+  frame), has a modifier
   that reads its frame (anything but Subdivision, Triangulate, Edge Split,
   Weighted Normal or an Armature of another rig; Bevel and Solidify only at a
   scale of 1, before and after), or is mirrored and has custom normals. Textures
@@ -294,29 +296,45 @@ else is left exactly as it is, and the report says why:
   turned down with that reason.
 - **Where two objects stand on one place**, the closer fit is taken and the other is
   named.
-- **Nothing is ever copied on top of anything.** In **Fill the gaps** a place is
+- **Nothing is copied on top of a mesh object.** In **Fill the gaps** a place is
   occupied, and no copy is made there, when any mesh object at all - hidden, in a
   move, of any number of vertices, a near miss scaled or nudged or cut - has the
   middle of the box round it within a quarter of the part's reach of where the
-  part would stand. The report says how many places "had something standing there
-  that is not a copy". **Use what's there** says how many places had nothing
-  standing in them, and that **Fill the gaps** would copy the part there.
-- **A wrong centre or Count is caught.** When copies of the part stand near the
-  ring - within a ring's radius and a half of its middle, at its height - and on
-  none of its places, the ring is round the wrong point or has the wrong Count, and
-  copying between them would double the flower. **Fill the gaps** is turned down:
-  "7 copies of 'Petal' stand near the ring but off its places: check the centre
-  (3D cursor) and Count. Nothing done." **Use what's there** takes what fits and
-  says the same as a note. **Make copies** is never turned down. Copies a move
-  plays already do not count.
+  part would stand. Only mesh objects are seen: a collection instance, a curve, a
+  text or an empty standing in a place is not, and a copy is made on top of it. The
+  report says how many places "had something standing there that is not a copy". **Use what's there** says how many places had nothing
+  standing in them, and that **Fill the gaps** would copy the part there - but only
+  when it would: where Fill the gaps would be turned down, as below, it gives that
+  advice instead.
+- **A wrong centre, About or Count is caught.** When copies of the part stand near
+  the ring - within a ring's radius and a half of its middle, at its height - and
+  on none of its places, the ring is round the wrong point, about the wrong axis or
+  has the wrong Count, and copying between them would double the flower. **Fill the
+  gaps** is turned down: "7 copies of 'Petal' stand near the ring but off its
+  places: check the centre (3D cursor), About and Count. Nothing done." **Use
+  what's there** takes what fits and says the same as a note. **Make copies** is
+  never turned down. Copies a move plays already do not count.
+- **A duplicate left on top of the part is a case of its own.** Shift+D, then a
+  right-click to cancel the move, leaves a copy exactly where the part stands. That
+  is no place of the ring, and no copy off it: "'Petal.001' stands exactly where
+  'Petal' is - a duplicate left on top of it? Delete it, then Ring again."
+  **Fill the gaps** is turned down with that, and nothing is done; **Use what's
+  there** takes what fits and says it as a note; **Make copies** is not turned
+  down.
 - **The report names what was left out**, up to three, the nearest to the ring's
   places first: "'Leaf B1' is not a copy of 'Leaf A1'", "'Petal 4' stands in a place
   and is not a copy of 'Petal'", "'Stray' is a copy of 'Petal' that is not turned to
   its place", "'Far' is a copy of 'Petal' that stands off the ring" (only when it
-  does), "'Twin' stands on the same place as 'Petal 3'". It looks at objects with as
-  many vertices as a joint of the part, because those are the ones you may have
-  meant, and at any object standing in a place. When nothing can be taken or made,
-  Ring is turned down with those names and nothing is changed.
+  does), "'Twin' stands on the same place as 'Petal 3'". A half made with Ctrl+M of
+  a petal that is not the same on both sides is none of those, and is told so:
+  "'Petal.M5' is a mirror image of 'Petal' (not the same on both sides), so it is
+  not a copy - it can ride along with Ride Along, which mirrors by itself". The
+  copies a ring made earlier - every joint of them - are not left out. Ring looks at
+  objects with as many vertices as a joint of the part, because those are the ones
+  you may have meant, and at any object standing in a place. When nothing can be
+  taken or made, Ring is turned down with those names and nothing is changed. What
+  to do about it comes before the names: the panel's box shows nine lines of a
+  report, and the end of a long one was cut.
 
 What it makes, and the rest:
 
@@ -361,7 +379,8 @@ What it makes, and the rest:
   filled now are given a Lead; those of an earlier ring keep theirs. A copied
   finger has one Lead, its first joint's, so the fingers go one after another
   with their joints in step. Leave it at 0 and every copy moves with the
-  original.
+  original. The dialog keeps Use, Count, Round, About and Linked copies from the
+  last Ring; Lead step always opens at 0.
 
 It asks before it makes anything: a part that is not in the move, a rider, a
 part with no Before, or a part dragged and not recorded on a built move are
@@ -386,9 +405,13 @@ want to type a number into every row.
   when the last place would run past 40 of the 50 a Lead can be (or 0.9 of the
   0.99 a Delay can be), because a wave that is held at the limit stops dead
   there: twelve spikes one way round get -3, both ways -6, eight petals both ways
-  keep -10. For Leads **Around a ring** opens with **Both ways** on. A Step you
-  type is kept as you typed it, and what it holds at the limit is still counted.
-  Below 0 each
+  keep -10. For Leads **Around a ring** opens with **Both ways** on. The Step
+  follows the dialog while you have not typed one: untick **Both ways**, or change
+  the **Order**, **Axis**, **Seed**, **By** or **Only the selected**, and the field
+  reads the Step that fits now, before you press OK (twelve spikes: -6.00, and -3.00
+  with Both ways unticked). A Step you type is kept as you typed it, whatever you
+  change after, and what it holds at the limit is still counted. The dialog does
+  not remember **Both ways** or **Only the selected** from the last time. Below 0 each
   rider waits more than the one before it, above 0 each goes earlier; for Delays
   each waits that much longer. It is a *step*, so adding a petal gives it the next
   value and leaves the rest as they were - **+10 each** is +10, +20, +30 whether
@@ -404,7 +427,7 @@ Parts the order cannot tell apart share a place, so they get the same value:
 | **Around a ring** | further round the ring it stands from the start, one way round. **Both ways** folds it in half, so the two sides of the ring match: the parts either side of the start go together | the two sides of the ring, with **Both ways** |
 | **By distance** | further it is from the start: a ripple | parts the same distance away |
 | **Along an axis** | further along world X, Y or Z: dominoes, a wave across a grid | parts at the same place along it |
-| **Down a chain** | further down a **Follows** chain it hangs: a finger or a tentacle (Delays only) | joints at the same depth - the branches of a tree |
+| **Down a chain** | further down a **Follows** chain it hangs: a finger or a tentacle (Delays only: refused for Leads, riders have no Follows chain of their own) | joints at the same depth - the branches of a tree |
 | **Random** | no order - the same every time for the same **Seed**. The places are dealt out, none shared | none |
 
 "The same" is to within a ten-thousandth of how far the parts run, so the two
@@ -422,8 +445,9 @@ together, and the petal opposite it is the last.
   start is the leader, which is place 0, so a rider's Lead is Start + Step x its
   place with the first rider at place 1. A copied finger has one Lead, its first
   joint's, so that is what is spread and counted - one for a whole finger - and
-  selecting any joint of a copy selects the copy. Down a chain is not offered for
-  Leads: riders have no Follows chain of their own.
+  selecting any joint of a copy selects the copy. **Down a chain** is listed for
+  Leads, and refused when you press OK: riders have no Follows chain of their own,
+  so there is none to spread down.
 - Delays belong to the parts in the **Timing** list. **Around a ring** and **By
   distance** are measured from the active part (or the first one), which is place
   0 and gets Start. **Along an axis** the part lowest along it is place 0; **down
@@ -705,6 +729,17 @@ when Paths is pressed again.
 - **Pause** switches the move off so the bones can be posed by hand again;
   Build puts it back. Recording does this for you.
 - **To Before** returns every control to its start.
+- **The box at the top of the panel** appears when something would make the rig
+  play the wrong move. Auto Keying on, which leaves a keyframe behind with every
+  drag. Parts with keys of their own on their location, rotation or scale: **Lift
+  Those Keyframes** takes them off (Build does too), only the keys the part itself
+  plays. And parts moved by an NLA strip or a driver of their own. Those two are
+  your work, so nothing lifts them: the box says to mute or remove the strip in the
+  NLA editor, or to remove the driver in the Drivers editor, and then to Build.
+  Build names them as well, and is a warning, not a success, until they are gone.
+- **The report** at the foot of the panel says what the last button did, and what to
+  do next. It shows nine lines. A longer one ends with "…" and a last line, "(the
+  full report is in the Info editor)", where all of it is.
 
 ## What it does underneath
 
@@ -1257,7 +1292,7 @@ and one lifted 1 m:
   until the file was opened again. It is redrawn now.
 - **On Blender 4.5 every key was found twice.** The red box that warns about
   stray keys said "2 key track(s) on this rig's bones" for a single stray key,
-  and "6" for a bone keyed on three channels. Lift Their Own Keyframes and Build
+  and "6" for a bone keyed on three channels. Lift Those Keyframes and Build
   reported the right numbers, but Blender's console printed "F-Curve not found"
   once for every track they took off. Each track is counted once now. Blender
   5.0 and newer never did it.
@@ -1309,6 +1344,92 @@ and one lifted 1 m:
   two metres from where it should be. It is not in the move, so it is left where it is;
   that is not changed, but New Move, Add To This Group and Build now name it and say
   what to do. An empty or a light cannot be in a move, and the report says that.
+
+- **Ring stopped with a Python error when the petals it stood on a new frame
+  shared one mesh.** Petals made with Alt+D share a mesh, and applying the
+  rotation of the leader alone puts each of the other seven on a frame of its own,
+  so Ring re-frames all seven. The first one settled took the shared mesh away, and
+  the next one asked it a question: "StructRNA of type Mesh has been removed". The
+  riders were left bound with a Lead of 0, and there was no step to undo. The old
+  mesh now goes once, after every petal is settled, and only if nothing else uses
+  it. And if anything at all goes wrong once the riders are made, Ring takes them
+  out again, puts every petal back as it found it, and says "Ring could not be
+  finished: ... Nothing was changed."
+- **Build took the animation of other objects away.** A part keyed on its own
+  transform has those keys lifted when it is built, and they were taken out of the
+  action the part plays. Where another object plays the same action - an Alt+D twin,
+  or a lamp with a slot of its own in it - that object lost its animation too, and
+  the report counted its tracks as the part's. Now only the keys of the slot the part
+  itself plays are looked at, lifted and counted, and an action another object plays
+  too is copied for the part first, so the keys come out of the copy: the others keep
+  theirs exactly. **Lift Those Keyframes** does the same.
+- **A bee on a petal that Ring re-framed flew off.** Ring stands a petal on its frame
+  and holds what hangs from it where it is by rewriting the child's own transform,
+  which the child's own keys, drivers or NLA strips rewrite again on the next
+  frame, from the petal's new frame: a keyed bee was half a unit off by frame 10. A
+  petal with a child like that is now left out, and named: "'Petal 4' cannot be
+  re-framed safely (has a child with keys or drivers of its own ('Bee'))". A child
+  with nothing of its own is held where it is, as before.
+- **A part moved by an NLA strip or a driver played the wrong move, and nothing said
+  so.** The warning looked only at keys in the part's own action, so a part whose
+  animation had been pushed down into the NLA, or that had a driver on its location,
+  rotation or scale, was not named anywhere, and played the wrong move by up to
+  two units. The box at the top of the panel, and Build, now name those parts and
+  say what to do: "'Gear' is moved by an NLA strip of its own, which fights the rig:
+  mute or remove it in the NLA editor, then Build", or "... by a driver on its
+  transform: remove it in the Drivers editor, then Build". They are your work, so
+  Lift Those Keyframes does not touch them, and Build is a warning, not a success,
+  until they are gone. A muted strip, a muted track and a muted driver play nothing,
+  and are not named.
+- **A duplicate left on top of the part was blamed on the centre and the Count.**
+  Shift+D, then a right-click, leaves a copy exactly on the part. Ring looked at the
+  places round the ring but not the part's own, so Fill the gaps refused with "1
+  copy of 'Petal' stands near the ring but off its places: check the centre (3D
+  cursor) and Count" - wrong, and with no name - and Use what's there called it "a
+  copy that stands off the ring". A copy standing where the part does now has a
+  sentence of its own that names it and says what to do, in Fill the gaps and in Use
+  what's there. Use what's there no longer says "Fill the gaps would copy the part
+  there" when Fill the gaps would be turned down.
+- **Spread kept a Step sized for the settings the dialog opened with.** The Step is
+  sized to fit when the dialog opens, and changing **Both ways**, **Order**,
+  **Axis**, **Seed**, **By** or **Only the selected** afterwards kept it, so the
+  riders were held at the limit: twelve spikes one way round got -6 instead of -3,
+  dominoes along an axis -10 instead of -5, and the end of the wave stopped dead. The
+  Step now follows those settings, and the dialog shows the new one before you press
+  OK, until you type a Step of your own, which is kept. The dialog also stopped
+  remembering **Both ways** and **Only the selected** from the last time: the smart
+  default of Both ways worked only the first time, and an **Only the selected** left
+  on after a spread of Delays reached only the riders Ring had left selected, which
+  is what 0.17 had stopped it doing.
+- **Ring's Lead step was remembered from the last Ring.** Blender opens a dialog
+  with what it was last used with, and the Lead step was not marked otherwise: after
+  the outer petals' step of 9, the Ring dialog of the leaf opened with 9 as well,
+  and, left alone, the second leaf opened ahead of the first. The Lead step always
+  opens at 0 now. Use, Count, Round, About and Linked copies are still remembered.
+- **A second Ring of a finger listed its own earlier copies as left out, and hid a
+  real stray behind them.** "'Seg2 2' is already part of a move; 'Seg2 3' ...; and 3
+  more": only the first joint of each copy was known to be the ring's own, so the
+  inner joints took up the three names the report gives, and an object that really
+  was in the way was one of the "more". Every joint of the copies the part already
+  has is the ring's own now.
+- **Ride Along said "3 copies of 'Palm' ride along" when the palm was never
+  copied.** The sentence named the root of the Follows chain. It names the first
+  joint any of the copies has - the finger's, here.
+- **Copies off the ring were blamed on the centre and the Count alone.** A ring about
+  the wrong axis shows the same picture, so the advice is "check the centre (3D
+  cursor), About and Count".
+- **Use what's there promised "Fill the gaps would copy the part there" when Fill
+  the gaps would have been turned down** for copies standing off the ring. It says
+  so only when Fill the gaps would copy.
+- **The advice at the end of a long report never showed.** The panel's box shows
+  nine lines and cut the rest without a sign, so the advice that ended a long Ring
+  report was lost. In a refused Ring the advice now comes before the names of what
+  was left out, and a report the box has to cut ends with "…" and "(the full report
+  is in the Info editor)".
+- **A half made with Ctrl+M that is not the same on both sides was "a copy that is
+  not turned to its place".** It is a mirror image, and turning it would not help:
+  "is a mirror image of 'Petal' (not the same on both sides), so it is not a copy -
+  it can ride along with Ride Along, which mirrors by itself".
 
 ## Known rough edges
 
@@ -1383,6 +1504,9 @@ and one lifted 1 m:
   panel, not on the button.
 - Ring's linked copies share one mesh only until Build, which gives every bound
   part a mesh of its own; edit-mode changes after that are one part's alone.
+- Ring sees mesh objects only. A collection instance, a curve, a text object or an
+  empty standing in a place of the ring is not seen: **Fill the gaps** makes its
+  copy on top of it, and **Use what's there** never takes it up.
 - Spread's ring takes the best-fit plane of the parts' spots. Parts that are not
   roughly on one ring - a scatter - get an order that is the plane's, and is
   seldom what was meant: use By distance or Along an axis instead.

@@ -1616,25 +1616,67 @@ def own_transform_curves(obj):
 
     Easy to end up with by accident: with Auto Keying on, dragging a part into
     its After pose keys it, which is exactly the gesture this tool asks for.
+
+    Only the curves of the slot the object plays are its own: one action can
+    hold a slot for each of several objects, and an Alt+D twin plays the same
+    slot as the original, but the keys of the others are theirs.
+    """
+    if obj is None or obj.animation_data is None:
+        return []
+    animation = obj.animation_data
+    return [(bag, curve) for bag, curve in slot_curves(animation.action, animation.action_slot)
+            if curve.data_path in TRANSFORM_PATHS]
+
+
+def slot_curves(action, slot):
+    """Every F-curve an action holds for one slot, as (channelbag, curve) - none
+    for an action or a slot that is not there.
+
+    Only the channelbags are read. From Blender 4.4 every action keeps its
+    curves in them (a file made before is converted when it opens), but 4.4
+    and 4.5 still answer `action.fcurves` as well, with the first slot's
+    curves over again, so reading both counted every curve twice. 5.0 took
+    that list away. And only the channelbag of the slot asked for: the others
+    belong to whatever plays them.
     """
     found = []
-    if obj is None or obj.animation_data is None:
+    if action is None or slot is None:
         return found
-    action = obj.animation_data.action
-    if action is None:
-        return found
-    # Only the channelbags are read. From Blender 4.4 every action keeps its
-    # curves in them (a file made before is converted when it opens), but 4.4
-    # and 4.5 still answer `action.fcurves` as well, with the first slot's
-    # curves over again, so reading both counted every curve twice. 5.0 took
-    # that list away.
     for layer in action.layers:
         for strip in layer.strips:
-            for bag in strip.channelbags:
-                for curve in bag.fcurves:
-                    if curve.data_path in TRANSFORM_PATHS:
-                        found.append((bag, curve))
+            bag = strip.channelbag(slot)
+            if bag is not None:
+                found.extend((bag, curve) for curve in bag.fcurves)
     return found
+
+
+def own_action(obj):
+    """Make sure the action an object plays is its own, before keys come out.
+
+    An action can be shared: Alt+D plays the same action on the twin, and one
+    action can hold a slot for each of several objects. Taking the keys out of
+    it takes them from every one of them. An object whose action is played by
+    another ID too is given a copy of it - with its own slot, and nobody else's
+    - to take its keys out of; the others keep theirs.
+    """
+    animation = obj.animation_data
+    action = animation.action if animation is not None else None
+    slot = animation.action_slot if animation is not None else None
+    if action is None or slot is None:
+        return
+    others = [user for user in bpy.data.user_map(subset={action}, key_types={"ACTION"})
+              .get(action, ())
+              if not (isinstance(user, bpy.types.Object) and user.name == obj.name)]
+    if not others:
+        return
+    identifier = slot.identifier
+    mine = action.copy()
+    mine.use_fake_user = False
+    # The other slots of the copy would be copies of what the others play.
+    for other in [s for s in mine.slots if s.identifier != identifier]:
+        mine.slots.remove(other)
+    animation.action = mine
+    animation.action_slot = next((s for s in mine.slots if s.identifier == identifier), None)
 
 
 def our_bone_names(data):
@@ -1676,7 +1718,7 @@ def rig_own_curves(rig, data):
             return False
         return bone in names and path.rsplit("].", 1)[-1] in TRANSFORM_PATHS
 
-    # Channelbags only, for the reason given in own_transform_curves.
+    # Channelbags only, for the reason given in slot_curves.
     for layer in action.layers:
         for strip in layer.strips:
             for bag in strip.channelbags:
@@ -1761,7 +1803,7 @@ def drop_empty_action(holder):
     action = animation.action if animation else None
     if action is None:
         return
-    # Channelbags only, for the reason given in own_transform_curves.
+    # Channelbags only, for the reason given in slot_curves.
     if any(len(bag.fcurves) for layer in action.layers
            for strip in layer.strips for bag in strip.channelbags):
         return
@@ -1793,9 +1835,12 @@ def clear_autokey(rig, data, auto=True):
             obj = part_object(part)
             if obj is None:
                 continue
-            found = own_transform_curves(obj)
-            if found:
-                objects += lift_curves(found)
+            # Only the keys this part plays, and from an action that is its own:
+            # a twin, or another object with a slot in the same action, keeps
+            # what it has, and is not counted.
+            if own_transform_curves(obj):
+                own_action(obj)
+                objects += lift_curves(own_transform_curves(obj))
                 drop_empty_action(obj)
 
     ours = rig_own_curves(rig, data)
@@ -1830,6 +1875,102 @@ def keyed_parts(data, move=None):
             if obj is not None and own_transform_curves(obj):
                 out.append((one, part, obj))
     return out
+
+
+def moved_by_driver(obj):
+    """Whether a driver that is not muted works an object's transform: it is
+    worked out again on every frame, so the rig plays against it."""
+    animation = obj.animation_data
+    return animation is not None and any(
+        curve.data_path in TRANSFORM_PATHS and not curve.mute for curve in animation.drivers)
+
+
+def clip_strips(strips):
+    """The NLA strips among these that play an action and are not muted, those
+    inside a meta strip too."""
+    for strip in strips:
+        if strip.mute:
+            continue
+        if strip.type == "META":
+            yield from clip_strips(strip.strips)
+        elif strip.action is not None:
+            yield strip
+
+
+def moved_by_nla(obj):
+    """Whether an NLA strip that is not muted works an object's transform: one
+    that plays an action with a curve on it, for the slot the strip plays.
+
+    The NLA is evaluated under the object's own action, and the rig plays
+    against it all the same. A track muted, or put aside by another that is
+    soloed, plays nothing.
+    """
+    animation = obj.animation_data
+    if animation is None or not animation.use_nla:
+        return False
+    tracks = list(animation.nla_tracks)
+    if any(track.is_solo for track in tracks):
+        tracks = [track for track in tracks if track.is_solo]
+    for track in tracks:
+        if track.mute:
+            continue
+        for strip in clip_strips(track.strips):
+            if any(curve.data_path in TRANSFORM_PATHS
+                   for _bag, curve in slot_curves(strip.action, strip.action_slot)):
+                return True
+    return False
+
+
+def fighting_parts(data):
+    """The parts whose transform something of their own works against the rig,
+    that this add-on cannot take away: (names moved by NLA strips, names moved
+    by drivers), each sorted. Keys in the object's own action are the other
+    fault (keyed_parts), and those Build lifts. An NLA strip or a driver is the
+    user's work, and is not touched."""
+    nla, driven = set(), set()
+    for move in data.moves:
+        for part in move.parts:
+            obj = part_object(part) if part.kind == "OBJECT" else None
+            if obj is None:
+                continue
+            if moved_by_nla(obj):
+                nla.add(obj.name)
+            if moved_by_driver(obj):
+                driven.add(obj.name)
+    return sorted(nla), sorted(driven)
+
+
+def named(names, shown=3):
+    """These names for a sentence: 'A', then 'A' and 'B', then 'A', 'B' and 'C',
+    and past that 'A', 'B', 'C' and 2 more."""
+    out = ["'{:s}'".format(short(name, 18)) for name in names[:shown]]
+    if len(names) > shown:
+        out.append("{:d} more".format(len(names) - shown))
+    return out[0] if len(out) == 1 else "{:s} and {:s}".format(", ".join(out[:-1]), out[-1])
+
+
+def fighting_words(nla, driven):
+    """What to tell somebody about parts moved by an NLA strip or a driver of
+    their own (see fighting_parts), as a sentence for each: what is wrong and
+    what to do about it."""
+    said = []
+    if nla:
+        one = len(nla) == 1
+        said.append("{:s} {:s} moved by {:s} of {:s} own, which {:s} the rig: mute or "
+                    "remove {:s} in the NLA editor, then Build.".format(
+                        named(nla), "is" if one else "are",
+                        "an NLA strip" if one else "NLA strips",
+                        "its" if one else "their", "fights" if one else "fight",
+                        "it" if one else "them"))
+    if driven:
+        one = len(driven) == 1
+        said.append("{:s} {:s} moved by {:s} on {:s}: remove {:s} in the Drivers editor, "
+                    "then Build.".format(
+                        named(driven), "is" if one else "are",
+                        "a driver" if one else "drivers",
+                        "its transform" if one else "their transforms",
+                        "it" if one else "them"))
+    return said
 
 
 def posed_away(rig, name):
@@ -5167,7 +5308,11 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
         for obj in alone:
             joining.append((obj, leader.name,
                             ride_on_existing(move, leader, body(obj, obj.matrix_world))))
-        lead_name, root_name = leader.name, chain[0].name
+        lead_name = leader.name
+        # The copies are of the first joint any of them has, for the report: the
+        # root of the chain may be a palm that was never copied.
+        root_name = next((joint.name for joint in chain
+                          if any(joint.name in copy for copy in copies)), lead_name)
         # Where each stands now is the place it copies the move from. That is
         # all there is to record: the path itself is the leader's.
         for obj, joint, rides in joining:
@@ -6036,6 +6181,11 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                                     ", and {:d} more objects are the same".format(len(twice) - 1)))
         else:
             warn_twice = False
+        # An NLA strip or a driver on a part is somebody's work, not Build's to
+        # lift: it is named, with what to do, and the build is not called done.
+        fights = fighting_words(*fighting_parts(data))
+        if fights:
+            data.report += " " + " ".join(fights)
         if healed:
             data.report += (" {:d} part(s) copied from another were being moved "
                              "by its bone as well as their own; now only by their "
@@ -6054,7 +6204,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += " {:d} turned about a new pivot.".format(pivoted)
         if laid:
             data.report += " {:d} path(s) laid along a curve.".format(laid)
-        warn = warn_parents or warn_twice or bool(behind)
+        warn = warn_parents or warn_twice or bool(behind) or bool(fights)
         if still_keyed:
             data.report += (" {:s} is animated by hand and was left as it is."
                             .format(", ".join(still_keyed[:3])))
@@ -6337,6 +6487,55 @@ def spread_words(what, order, groups, axis, both_ways, seed):
     return "at random (seed {:d})".format(seed)
 
 
+def sized_for(settings, rig, move, groups):
+    """The step to use for the order a Spread is set to (see sized_step).
+    `settings` is an operator, or what a dialog holds: anything with what,
+    order, axis, both_ways and seed."""
+    ranks = spread_ranks(rig, move, groups, settings.what, settings.order, settings.axis,
+                         settings.both_ways, settings.seed)
+    return sized_step(settings.what, max(ranks.values()))
+
+
+# Set while this add-on writes the Step itself, so that a write of its own is not
+# taken for a Step the user typed.
+SIZING = {"ours": False}
+
+
+def _spread_changed(self, context):
+    """A setting of the Spread dialog that changes the places the parts take -
+    Order, Both ways, Axis, Seed, By, Only the selected - was changed. Until a
+    Step has been typed, the Step is the one sized for the settings, so it is
+    sized again for these, and the dialog shows what OK is going to do: it was
+    sized once for the way the dialog opened, and a ring turned from both ways
+    to one way round was held at the limit by a step meant for half as many
+    places.
+
+    `self` here is the operator's properties, not the operator: Blender calls
+    this from the dialog, and from a script that passes the settings, where
+    `sizing` is not set and nothing is done.
+    """
+    if not self.sizing or SIZING["ours"]:
+        return
+    rig, _data, move = move_at(context, self.index)
+    if move is None:
+        return
+    groups = spread_groups(context, move, self.what, self.only_selected)
+    if not groups:
+        return
+    SIZING["ours"] = True
+    try:
+        self.step = sized_for(self, rig, move, groups)
+    finally:
+        SIZING["ours"] = False
+
+
+def _step_typed(self, context):
+    """The Step was changed. Unless this add-on did it, somebody typed it, and
+    it is theirs: it is no longer sized for the settings."""
+    if not SIZING["ours"]:
+        self.sizing = False
+
+
 class RIGMOVES_OT_spread(bpy.types.Operator):
     bl_idname = "rigmoves.spread"
     bl_label = "Spread"
@@ -6347,12 +6546,19 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
     index: bpy.props.IntProperty(options={"HIDDEN"})
     what: bpy.props.EnumProperty(items=SPREAD_WHAT, default="LEAD",
                                  options={"HIDDEN"})
+    # While it is on, the dialog keeps the Step sized for its settings: invoke
+    # sets it, and it is off for good once somebody types a Step of their own.
+    # Defined before the settings it follows, because Blender applies what a
+    # script passes in the order the properties are defined, not the order they
+    # were written in: a Step passed with the flag must be applied after it.
+    sizing: bpy.props.BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})
     # Not remembered from one use to the next: what is sensible for a Lead is
     # not for a Delay, and invoke picks the right ones.
     order: bpy.props.EnumProperty(name="Order", items=SPREAD_ORDERS,
-                                  default="AROUND", options={"SKIP_SAVE"})
+                                  default="AROUND", options={"SKIP_SAVE"},
+                                  update=_spread_changed)
     by: bpy.props.EnumProperty(
-        name="By", items=SPREAD_BY, default="STEP",
+        name="By", items=SPREAD_BY, default="STEP", update=_spread_changed,
         description="How the values are given: a start and a step for each "
                     "place in the order, or a first and a last with the rest "
                     "spread between them")
@@ -6365,7 +6571,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
                     "the leader")
     step: bpy.props.FloatProperty(
         name="Step", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
-        soft_max=50.0, precision=2, options={"SKIP_SAVE"},
+        soft_max=50.0, precision=2, options={"SKIP_SAVE"}, update=_step_typed,
         description="What each place in the order adds to the one before. For "
                     "Leads, below 0 each waits more than the one before it and "
                     "above 0 each goes earlier; for Delays, above 0 each waits "
@@ -6378,22 +6584,27 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         name="Last", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
         soft_max=50.0, precision=2, options={"SKIP_SAVE"},
         description="The value for the part that comes last in the order")
+    # Neither is remembered from the last use. Both ways was, and the smart
+    # default invoke gives it only ever worked the first time; Only the selected
+    # was, and after a spread of Delays it quietly reached only the riders a Ring
+    # had left selected, which is what 0.17 stopped it doing.
     both_ways: bpy.props.BoolProperty(
-        name="Both ways", default=False,
+        name="Both ways", default=False, options={"SKIP_SAVE"}, update=_spread_changed,
         description="Fold the ring in half, so the two sides of it match: "
                     "the parts either side of the start go together")
     only_selected: bpy.props.BoolProperty(
-        name="Only the selected", default=False,
+        name="Only the selected", default=False, options={"SKIP_SAVE"},
+        update=_spread_changed,
         description="Spread only the parts that are selected now. Off, it is "
                     "every rider (or every part) of the move")
-    axis: bpy.props.EnumProperty(name="Axis", items=AXIS_ITEMS, default="X")
-    seed: bpy.props.IntProperty(name="Seed", default=1, min=0, max=100000)
+    axis: bpy.props.EnumProperty(name="Axis", items=AXIS_ITEMS, default="X",
+                                 update=_spread_changed)
+    seed: bpy.props.IntProperty(name="Seed", default=1, min=0, max=100000,
+                                update=_spread_changed)
 
     def sized(self, rig, move, groups):
         """The step to use when none was given: see sized_step."""
-        ranks = spread_ranks(rig, move, groups, self.what, self.order, self.axis,
-                             self.both_ways, self.seed)
-        return sized_step(self.what, max(ranks.values()))
+        return sized_for(self, rig, move, groups)
 
     def plan(self, context):
         """(rig, data, move, groups) - or None, with the reason said."""
@@ -6441,7 +6652,14 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         if self.what == "LEAD" and not props.is_property_set("both_ways"):
             self.both_ways = self.order == "AROUND"
         if not props.is_property_set("step"):
-            self.step = self.sized(rig, move, groups)
+            SIZING["ours"] = True
+            try:
+                self.step = self.sized(rig, move, groups)
+            finally:
+                SIZING["ours"] = False
+            # From here the dialog keeps it sized as its settings are changed,
+            # until a Step is typed (see _spread_changed).
+            self.sizing = True
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
@@ -7260,13 +7478,15 @@ class Standing:
     occupied: {place: names} for the places, of those not placed, with
     something standing in them; left: (distance, words) for each object that
     was looked at and is not taken up; off: (name, middle) for each copy of
-    the part standing on none of the places; first: (middle, reach) of the
-    part; empty: the places with nothing in them.
+    the part standing on none of the places; stacked: the names of the copies
+    of the part standing on the part's own place (a duplicate left on top of
+    it); first: (middle, reach) of the part; empty: the places with nothing in
+    them.
     """
 
     def __init__(self):
         self.placed, self.partial, self.occupied = {}, [], {}
-        self.left, self.off, self.empty = [], [], []
+        self.left, self.off, self.empty, self.stacked = [], [], [], []
         self.first = (Vector(), 0.0)
         self.joints = []
 
@@ -7353,13 +7573,21 @@ def find_standing(pool, joints, turns, free, ours=()):
         else:
             found.empty.append(number)
 
-    # Copies of the part, standing on no place at all.
+    # Copies of the part, standing on no place at all - and, apart from those,
+    # on the part's own place: a duplicate made with Shift+D and left where it
+    # was, on top of the part. That is no place of the ring, so it is not off
+    # it either.
     first = shapes[0]
+    own = Slot(first, Matrix.Identity(4))
     for one in seen:
         # What a move plays already is not a stray copy.
         if (one.name in used or one.why == "is already part of a move"
                 or not one.like(first)):
             continue
+        if (one.box - own.box()).length <= 0.25 * first.reach:
+            found.stacked.append(one.name)
+            continue
+
         def on_a_place(number):
             there = slot(number, 0)
             close = (one.box - there.box()).length <= 0.25 * first.reach
@@ -7376,7 +7604,8 @@ def find_standing(pool, joints, turns, free, ours=()):
         if holder.get((number, index), name) != name:
             rival.setdefault(name, holder[(number, index)])
     for one in seen:
-        if one.name in used or one.name in ours:
+        # A duplicate on top of the part has a sentence of its own.
+        if one.name in used or one.name in ours or one.name in found.stacked:
             continue
         likes = [shape for shape in shapes if len(shape.local) == one.count]
         near = min((((one.mean - slot(number, index).mean).length, shape)
@@ -7401,6 +7630,14 @@ def find_standing(pool, joints, turns, free, ours=()):
             why = "stands on the same place as '{:s}'".format(short(rival[one.name], 18))
         elif one.name in owner:
             why = "fits a place where the rest of the chain is missing"
+        elif in_a_place and copy and one.matrix.determinant() < 0.0:
+            # Standing in a place with the part's own mesh and a mirrored frame -
+            # a half made with Ctrl+M - and it does not fit: the part is not the
+            # same on both sides, so its mirror image is another shape. Turning it
+            # would not help, and "not turned to its place" is what it is not.
+            why = ("is a mirror image of '{:s}' (not the same on both sides), so it is "
+                   "not a copy - it can ride along with Ride Along, which mirrors by "
+                   "itself".format(short(like.name, 18)))
         elif in_a_place:
             why = ("is a copy of '{:s}' that is not turned to its place" if copy else
                    "stands in a place and is not a copy of '{:s}'").format(
@@ -7501,6 +7738,13 @@ def reframe_blocker(obj, where, rig, users):
         if not (isinstance(user, bpy.types.Object) and user.parent is obj
                 and user.parent_type == "OBJECT"):
             return "'{:s}' depends on it".format(short(user.name, 14))
+        # A child hung by the object is held where it is by rewriting its own
+        # transform - and keys, a driver or an NLA strip rewrite it again on the
+        # next frame, from the new frame it would now hang from: the bee on the
+        # petal flew off.
+        if has_own_motion(user):
+            return "has a child with keys or drivers of its own ('{:s}')".format(
+                short(user.name, 14))
     plain = all(abs(abs(s) - 1.0) < 1e-4
                 for s in list(obj.matrix_world.to_scale()) + list(where.to_scale()))
     for modifier in obj.modifiers:
@@ -7562,12 +7806,38 @@ def put_back(framed):
 
 def settle(framed):
     """Let a re-frame stand: the old meshes nobody uses any more go, and the
-    new ones take their names."""
+    new ones take their names.
+
+    Objects that shared one mesh - petals made with Alt+D - all name the same
+    old one, and it can only go once. Which are the same is worked out before
+    any is removed, because a mesh that has been removed must not be touched
+    again, not even to ask who uses it.
+    """
+    olds, wanted = {}, []
     for obj, _was, old, _kept in framed:
+        olds.setdefault(old.as_pointer(), old)
+        wanted.append((obj, old.name, old.as_pointer()))
+    gone = set()
+    for pointer, old in olds.items():
         if old.users == 0:
-            name = old.name
             bpy.data.meshes.remove(old)
+            gone.add(pointer)
+    # An old mesh that something else still uses keeps its name; the new one
+    # of each object that stood on a frame takes the name of the one that went.
+    for obj, name, pointer in wanted:
+        if pointer in gone:
             obj.data.name = name
+
+
+def stacked_words(names, part):
+    """What to tell somebody whose duplicates of the part stand exactly where
+    the part does, as they do when Shift+D is cancelled with a right-click: the
+    copy is on top of the part, no part of the ring, and is most likely a slip."""
+    one = len(names) == 1
+    return ("{:s} {:s} exactly where '{:s}' is - {:s} left on top of it? Delete {:s}, then "
+            "Ring again.".format(named(names), "stands" if one else "stand", short(part, 18),
+                                 "a duplicate" if one else "duplicates",
+                                 "it" if one else "them"))
 
 
 class RIGMOVES_OT_ring(bpy.types.Operator):
@@ -7594,8 +7864,11 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         description="Share the original's mesh, so editing one edits them all. "
                     "Build gives each part a mesh of its own, because Blender "
                     "keeps a mesh's vertex groups with the mesh")
+    # Not remembered from the last Ring, as the others are: a step that fitted
+    # the outer petals is not the leaf's, and left alone, the second leaf opened
+    # ahead of the first.
     lead_step: bpy.props.IntProperty(
-        name="Lead step", default=0, min=-50, max=50,
+        name="Lead step", default=0, min=-50, max=50, options={"SKIP_SAVE"},
         description="What each copy's Lead is stepped by, further from the "
                     "original round the ring: the two next to it are 1 step "
                     "out, the two next to those 2, and so on, both ways round. "
@@ -7707,7 +7980,11 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         standing, notes = Standing(), ""
         if self.use != "COPY":
             context.view_layer.update()
-            ours = {p.name for p in move.parts if p.leader == name}
+            # Every joint of the copies the part has already, not only the
+            # first's: the inner joints of a finger's copies copy the joints
+            # below the first, and are no more "left out" than the first is.
+            ringed = {joint[0] for joint in joints}
+            ours = {p.name for p in move.parts if p.leader in ringed}
             standing = find_standing(standing_pool(context, rig, {j[0] for j in joints}),
                                      joints, turns, free, ours)
             # Copies of the part standing near the ring and on none of its
@@ -7725,13 +8002,20 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                         and abs(off.dot(axis) - along.dot(axis)) <= 1.5 * radius)
 
             near = [n for n, spot in standing.off if in_the_ring(spot)]
+            sentences = []
+            if standing.stacked:
+                sentences.append(stacked_words(standing.stacked, name))
             if near:
-                notes = "{:s} of '{:s}' {:s} near the ring but off its places: check the centre (3D cursor) and Count.".format(
-                    counted(len(near), "copy", "copies"), short(name, 18),
-                    "stands" if len(near) == 1 else "stand")
-                if self.use == "FILL":
-                    self.refuse(data, notes + " Nothing done.")
-                    return {"CANCELLED"}
+                # A ring about the wrong axis shows the same picture as one round
+                # the wrong point: copies near it, and on none of its places.
+                sentences.append(
+                    "{:s} of '{:s}' {:s} near the ring but off its places: check the centre (3D cursor), About and Count.".format(
+                        counted(len(near), "copy", "copies"), short(name, 18),
+                        "stands" if len(near) == 1 else "stand"))
+            notes = " ".join(sentences)
+            if notes and self.use == "FILL":
+                self.refuse(data, notes + " Nothing done.")
+                return {"CANCELLED"}
 
         # Objects to be taken up that are not on the frame a copy would have
         # are stood on it - but only those where that is provably safe: the
@@ -7795,7 +8079,9 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                 "; ".join(words for _distance, _object, words in left[:3]),
                 "; and {:d} more".format(len(left) - 3) if len(left) > 3 else "")
         elsewhere = [n for n in standing.occupied if n not in standing.partial]
-        empty = standing.empty if self.use == "ADOPT" else []
+        # What Fill the gaps would do about the empty places: copy the part
+        # there - unless it would be refused, as it is with a note to give.
+        empty = standing.empty if self.use == "ADOPT" and not notes else []
 
         taken = names_in_use()
         copies, riders, told = [], [], []
@@ -7831,10 +8117,14 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             else:
                 said = ("Every place round that ring already holds something, so nothing was "
                         "taken up or made.")
+            # What to do about it comes before the list of what was left out:
+            # the panel's box cuts a long report, and the end of it was the advice.
+            if notes:
+                said += " " + notes
             if empty:
                 said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
                     counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
-            self.refuse(data, said + outs + (" " + notes if notes else ""))
+            self.refuse(data, said + outs)
             return {"CANCELLED"}
         context.view_layer.update()
         objects = [obj for obj, _joint in riders]
@@ -7859,6 +8149,19 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             done = {"CANCELLED"}
         data = rig.rigmoves
         move = data.moves[self.index]
+
+        def take_back(why):
+            """Everything as it was found: the riders out, the objects that
+            were stood on a new frame put back, the copies gone."""
+            take_riders_out(rig, move, [obj.name for obj in objects
+                                        if move.parts.find(obj.name) >= 0])
+            if move.built:
+                bpy.ops.rigmoves.build()
+            put_back(framed)
+            discard_copies(copies)
+            self.refuse(data, why)
+            return {"CANCELLED"}
+
         # Every copy has to be a rider of the joint it was copied from. One
         # that is not - an object Ride Along took for already known - stands
         # still, or is put back where an old part stood, and the report would
@@ -7867,59 +8170,64 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                     if move.parts.get(obj.name) is None
                     or move.parts[obj.name].leader != joint]
         if done != {"FINISHED"} or stranded:
-            take_riders_out(rig, move, [obj.name for obj in objects
-                                        if move.parts.find(obj.name) >= 0])
-            if move.built:
-                bpy.ops.rigmoves.build()
-            # Objects that were taken up are put back as they were found.
-            put_back(framed)
-            discard_copies(copies)
-            self.refuse(data, "Not every copy of '{:s}' could be made to ride along, so "
-                              "none were kept.".format(short(name, 18)))
-            return {"CANCELLED"}
-        settle(framed)
+            return take_back("Not every copy of '{:s}' could be made to ride along, so "
+                             "none were kept.".format(short(name, 18)))
 
-        said = self.first_sentence(name, joints, len(placed), made_whole)
-        if framed:
-            said += (" {:s} re-framed to stand on {:s} place, the mesh moved the "
-                     "other way so nothing shifted.".format(
-                         counted(len(framed), "object"),
-                         "its" if len(framed) == 1 else "their"))
-        said += outs
-        if standing.partial:
-            said += " {:s} had only part of a chain standing and {:s} left alone.".format(
-                counted(len(standing.partial), "place"),
-                "was" if len(standing.partial) == 1 else "were")
-        if elsewhere:
-            said += " {:s} had something standing there that is not a copy and {:s} left alone.".format(
-                counted(len(elsewhere), "place"), "was" if len(elsewhere) == 1 else "were")
-        if gave_up:
-            said += " {:s} hold{:s} a copy that could not safely be re-framed and {:s} left alone.".format(
-                counted(len(gave_up), "place"), "s" if len(gave_up) == 1 else "",
-                "was" if len(gave_up) == 1 else "were")
-        if empty:
-            said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
-                counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
-        if notes:
-            said += " " + notes
-        if skipped:
-            said += " {:s} already held a copy and {:s} skipped.".format(
-                counted(skipped, "place"), "was" if skipped == 1 else "were")
-        if self.lead_step:
-            # Out from the original both ways round: the two sides match. Only
-            # for the copies made now: the Leads of riders already there are
-            # theirs. A copied finger has the one Lead, its first joint's.
-            roots = [move.parts[obj.name] for obj, joint in riders
-                     if joint == first_joint]
-            ranks = spread_ranks(rig, move, [(move.parts[name], roots)], "LEAD",
-                                 "AROUND", "Z", True, 0)
-            limited = spread_put("LEAD", roots,
-                                 [self.lead_step * ranks[r.name] for r in roots])
-            refresh_drivers(rig, data, move)
-            said += " Leads step by {:d}, out from it both ways round.".format(
-                self.lead_step)
-            if limited:
-                said += " {:d} held at the limit.".format(limited)
+        # Whatever goes wrong from here puts everything back too: a Python
+        # error in the middle of an operator leaves what it had done, with no
+        # step to undo it by. Settling the meshes is last, so that nothing is
+        # half settled when something else fails.
+        try:
+            stepped = ""
+            if self.lead_step:
+                # Out from the original both ways round: the two sides match. Only
+                # for the copies made now: the Leads of riders already there are
+                # theirs. A copied finger has the one Lead, its first joint's.
+                roots = [move.parts[obj.name] for obj, joint in riders
+                         if joint == first_joint]
+                ranks = spread_ranks(rig, move, [(move.parts[name], roots)], "LEAD",
+                                     "AROUND", "Z", True, 0)
+                limited = spread_put("LEAD", roots,
+                                     [self.lead_step * ranks[r.name] for r in roots])
+                refresh_drivers(rig, data, move)
+                stepped = " Leads step by {:d}, out from it both ways round.".format(
+                    self.lead_step)
+                if limited:
+                    stepped += " {:d} held at the limit.".format(limited)
+            # What was done, then what to do about what was not, and only then the
+            # list of what was left out: the panel's box shows the first lines.
+            said = self.first_sentence(name, joints, len(placed), made_whole)
+            if framed:
+                said += (" {:s} re-framed to stand on {:s} place, the mesh moved the "
+                         "other way so nothing shifted.".format(
+                             counted(len(framed), "object"),
+                             "its" if len(framed) == 1 else "their"))
+            said += stepped
+            if notes:
+                said += " " + notes
+            if empty:
+                said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
+                    counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
+            if skipped:
+                said += " {:s} already held a copy and {:s} skipped.".format(
+                    counted(skipped, "place"), "was" if skipped == 1 else "were")
+            said += outs
+            if standing.partial:
+                said += " {:s} had only part of a chain standing and {:s} left alone.".format(
+                    counted(len(standing.partial), "place"),
+                    "was" if len(standing.partial) == 1 else "were")
+            if elsewhere:
+                said += " {:s} had something standing there that is not a copy and {:s} left alone.".format(
+                    counted(len(elsewhere), "place"), "was" if len(elsewhere) == 1 else "were")
+            if gave_up:
+                said += " {:s} hold{:s} a copy that could not safely be re-framed and {:s} left alone.".format(
+                    counted(len(gave_up), "place"), "s" if len(gave_up) == 1 else "",
+                    "was" if len(gave_up) == 1 else "were")
+            settle(framed)
+        except Exception as error:
+            why = " ".join(str(error).split()).rstrip(".") or type(error).__name__
+            return take_back("Ring could not be finished: {:s}. Nothing was changed.".format(
+                why if len(why) <= 70 else why[:69] + "…"))
         data.report = said
         self.report({"INFO"}, said)
         return {"FINISHED"}
@@ -7964,7 +8272,7 @@ def action_curve(rig, data_path, index):
     action = rig.animation_data.action if rig.animation_data else None
     if action is None:
         return None, None
-    # Channelbags only, for the reason given in own_transform_curves.
+    # Channelbags only, for the reason given in slot_curves.
     holders = [bag for layer in action.layers for strip in layer.strips
                for bag in strip.channelbags]
     for holder in holders:
@@ -8460,7 +8768,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         auto = context.scene.tool_settings.use_keyframe_insert_auto
         names = sorted({obj.name for _m, _p, obj in keyed_parts(data)})
         ours = len(stray_curves(rig, data, auto))
-        if not (names or ours or auto):
+        fights = fighting_words(*fighting_parts(data))
+        if not (names or ours or auto or fights):
             return
         box = layout.box().column(align=True)
 
@@ -8495,6 +8804,16 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             for line in wrapped("Build does this too. Handles you have really "
                                 "animated are left alone."):
                 note.label(text=line)
+
+        # An NLA strip or a driver is somebody's work: Lift Those Keyframes
+        # leaves it alone, so there is no button, only what to do about it.
+        for number, sentence in enumerate(fights):
+            if auto or names or ours or number:
+                box.separator(factor=0.5)
+            told = box.column(align=True)
+            told.alert = True
+            for line in wrapped(sentence, most=8):
+                told.label(text=line)
 
     def _draw_newcomers(self, layout, context, rig, data):
         """What to do with objects this rig has never been told about.
@@ -8896,8 +9215,15 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             return
         note = layout.box().column(align=True)
         note.enabled = False
-        # Room for the names of what a ring left out.
-        for line in wrapped(data.report, most=9):
+        # Room for the names of what a ring left out. A report longer than that
+        # is cut, and what was cut can be what to do next: it is said to be cut,
+        # and where the rest is - the Info editor has it all.
+        lines = wrapped(data.report, most=1000)
+        if len(lines) > 9:
+            lines = lines[:9]
+            lines[-1] = lines[-1][:33].rstrip() + "…"
+            lines.append("(the full report is in the Info editor)")
+        for line in lines:
             note.label(text=line)
 
 
