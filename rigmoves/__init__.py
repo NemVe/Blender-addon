@@ -1438,6 +1438,11 @@ class RIGMOVES_Rig(bpy.types.PropertyGroup):
     # 0.19.0: Apply and Set Origin on the rig change the object and the bones
     # by the same amount, and the model has not moved.
     seat_on_root: bpy.props.BoolProperty(default=False)
+    # The farthest from the world's origin the seat has stood, as far as catch_up
+    # has seen it carried. Blender's matrices keep seven digits, so what is carried
+    # a few hundred metres off is rounded by the carrying, and keeps that rounding
+    # when the rig is back near the origin: hand_moved allows for it by this much.
+    far: bpy.props.FloatProperty(default=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -1588,6 +1593,22 @@ def unbind_object(rig, part):
     return True
 
 
+def same_place(one, other, near, far=0.0):
+    """Whether two world matrices are the same place, to the rounding they carry.
+
+    A matrix keeps seven digits, so one that stands a few hundred metres from the
+    world's origin is only right to a hair over 1e-5, and one carried there and
+    back is a little less right than that for good. Its turn and scale are not
+    out by more than 1e-5 whatever the distance; its position is by 1e-5 of
+    1 + `near`, how far from the origin the two stand, and 2e-6 of `far`, the
+    farthest the rig has been carried (see RIGMOVES_Rig.far).
+    """
+    turn = max(abs(a - b) for row_a, row_b in zip(one.to_3x3(), other.to_3x3())
+               for a, b in zip(row_a, row_b))
+    shift = max(abs(a - b) for a, b in zip(one.translation, other.translation))
+    return turn <= 1e-5 and shift <= 1e-5 * (1.0 + near) + 2e-6 * far
+
+
 def hand_moved(part):
     """A bound object's own transform, if it has been dragged off its Before.
 
@@ -1603,10 +1624,8 @@ def hand_moved(part):
         return None, None
     rest = as_matrix(part.before)
     world = obj.matrix_world.copy()
-    moved = max(abs(a - b)
-                for row_a, row_b in zip(world, rest)
-                for a, b in zip(row_a, row_b))
-    return obj, (world if moved > 1e-5 else None)
+    near = max(world.translation.length, rest.translation.length)
+    return obj, (None if same_place(world, rest, near, part.id_data.rigmoves.far) else world)
 
 
 TRANSFORM_PATHS = ("location", "rotation_euler", "rotation_quaternion",
@@ -2482,10 +2501,14 @@ def catch_up(rig, data=None, reframe=True):
     else:
         # A seat kept by 0.19.0 is the rig object's matrix: measured against
         # that this once, then kept on the Root bone.
-        where = now if data.seat_on_root else rig.matrix_world
-        shift = where @ as_matrix(data.seat).inverted_safe()
-        if not same_matrix(shift, Matrix.Identity(4), 1e-6):
+        where, was = now if data.seat_on_root else rig.matrix_world, as_matrix(data.seat)
+        shift = where @ was.inverted_safe()
+        # The rounding of a rig far from the origin is not a move: carried, it
+        # would be carried again at every button, and pile up in what is kept.
+        near = max(where.translation.length, was.translation.length)
+        if not same_place(shift, Matrix.Identity(4), near):
             carry_stored(data, shift)
+            data.far = max(data.far, near)
             store_seat(rig, data)
         elif not data.seat_on_root:
             store_seat(rig, data)

@@ -8795,6 +8795,136 @@ class TestAnAnimatedRigIsLeftWhereItIs(ChestCase):
         self.check_lid()
 
 
+class TestAModelCarriedFarFromTheOrigin(ChestCase):
+    """A model carried a few hundred metres, and turned. Every Before and After
+    is carried with it as a single-precision matrix, which keeps seven digits: a
+    hair over 1e-5 out there. An untouched part read as dragged by that, so Set
+    Pivot, Ride Along and Ring refused with "has been moved and not recorded",
+    and Record wrote "moved by hand, read as a pose"; and catch_up took the
+    rounding of the rig's own matrix for a move, and carried it again and again."""
+
+    PLACES = ((287.123457, 311.3141592, 0.4), (301.7777771, 268.1234563, 0.7),
+              (322.0000123, 290.9999877, 0.1), (279.5432101, 305.2718282, 0.9),
+              (314.1592653, 297.8765432, 0.3), (296.0123456, 318.5551212, 0.6))
+    TURNS = (37.0, 11.0, 63.0, 29.0, 48.0, 75.0)
+
+    def carry_the_model(self, rounds=6):
+        """Select everything and carry it to each place in turn, with a turn,
+        pressing the eye between."""
+        for place, turn in list(zip(self.PLACES, self.TURNS))[:rounds]:
+            bpy.ops.object.select_all(action="SELECT")
+            self.assertEqual(bpy.ops.transform.translate(
+                value=Vector(place) - self.lid.matrix_world.translation), {"FINISHED"})
+            self.assertEqual(bpy.ops.transform.rotate(value=math.radians(turn),
+                                                      orient_axis="Z"), {"FINISHED"})
+            bpy.context.view_layer.update()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.show(index=0, which="BEFORE"), {"FINISHED"})
+
+    def test_set_pivot_and_record_after_six_far_carries_see_no_drag(self):
+        self.carry_the_model()
+        self.assertGreater(self.lid.matrix_world.translation.length, 250.0)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertNotIn("moved by hand", rig().rigmoves.report)
+
+    def test_the_rounding_a_far_trip_leaves_is_allowed_for_back_near_the_origin(self):
+        # What carrying a model out to 300 m and home again leaves in what it
+        # keeps: its places are a hair off the object's own, by up to a few 1e-5.
+        # That is rounding where the rig has been that far, and a drag where it
+        # has not.
+        part = self.move.parts["Lid"]
+        left = rigmoves.as_matrix(part.before)
+        left.translation.x += 3.5e-5
+        part.before = rigmoves.flat(left)
+        self.assertIsNotNone(rigmoves.hand_moved(part)[1])
+        rig().rigmoves.far = 320.0
+        self.assertIsNone(rigmoves.hand_moved(part)[1])
+        # And a real drag is still one.
+        self.lid.location.z += 0.01
+        bpy.context.view_layer.update()
+        self.assertIsNotNone(rigmoves.hand_moved(part)[1])
+
+    def test_set_pivot_is_not_refused_back_near_the_origin_after_a_far_trip(self):
+        self.carry_the_model(3)
+        for place in ((1.2345678, 0.8765432, 0.0), (2.7182818, 1.4142135, 0.5)):
+            bpy.ops.object.select_all(action="SELECT")
+            self.assertEqual(bpy.ops.transform.translate(
+                value=Vector(place) - self.lid.matrix_world.translation), {"FINISHED"})
+            bpy.context.view_layer.update()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.show(index=0, which="BEFORE"), {"FINISHED"})
+        self.assertLess(self.lid.matrix_world.translation.length, 5.0)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_ring_and_ride_along_are_not_refused_far_out(self):
+        self.carry_the_model(1)
+        bpy.context.scene.cursor.location = self.lid.matrix_world.translation
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_a_rig_standing_still_is_not_carried_again_for_its_rounding(self):
+        self.carry_the_model(2)
+        with mock.patch.object(rigmoves, "carry_stored", wraps=rigmoves.carry_stored) as carried:
+            for _ in range(3):
+                self.assertEqual(rigmoves.catch_up(rig()), "")
+            self.assertEqual(carried.call_count, 0)
+
+    def test_the_farthest_the_rig_has_stood_is_remembered(self):
+        self.assertEqual(rig().rigmoves.far, 0.0)
+        self.carry_the_model(1)
+        rigmoves.catch_up(rig())
+        self.assertGreater(rig().rigmoves.far, 250.0)
+
+    def test_a_real_move_far_out_is_still_carried(self):
+        self.carry_the_model(1)
+        rigmoves.catch_up(rig())
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(0.0, 0.05, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        with mock.patch.object(rigmoves, "carry_stored", wraps=rigmoves.carry_stored) as carried:
+            self.assertEqual(rigmoves.catch_up(rig()), "")
+            self.assertEqual(carried.call_count, 1)
+
+    def test_a_part_a_hand_off_its_before_is_still_a_drag_far_out(self):
+        self.carry_the_model(1)
+        rigmoves.catch_up(rig())
+        self.lid.location.z += 0.3
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"CANCELLED"})
+        self.assertIn("moved and not recorded", rig().rigmoves.report)
+
+
+class TestAnAnimatedRigAlongALongPath(ChestCase):
+    """A rig keyed along a path of some 214 metres, and a button pressed at
+    several frames, the last near the start again: the rounding of the far
+    frames stays in the matrices the move keeps, and the rig back near the
+    origin was refused for it (4.7e-5, at 1 metre)."""
+
+    def test_set_pivot_is_not_refused_at_any_frame(self):
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        rig().keyframe_insert("location", frame=1)
+        rig().keyframe_insert("rotation_euler", frame=1)
+        rig().location = rig().location + Vector((213.7, 118.2, 0.0))
+        rig().rotation_euler.z = math.radians(37.0)
+        rig().keyframe_insert("location", frame=50)
+        rig().keyframe_insert("rotation_euler", frame=50)
+        for frame in (12, 25, 38, 3):
+            scene.frame_set(frame)
+            bpy.context.view_layer.update()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"FINISHED"},
+                             "frame {:d}: {:s}".format(frame, rig().rigmoves.report))
+            self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+
 class TestRigidFit(unittest.TestCase):
     """The fit of three marks onto three others, which tells a part that was
     framed another way from one that was moved."""
