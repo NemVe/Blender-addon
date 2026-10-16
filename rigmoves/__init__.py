@@ -1112,6 +1112,64 @@ def own_actions(rig, data):
                 pass
 
 
+def own_armature(rig):
+    """A rig that shares its Armature with another takes a copy of it for itself.
+
+    Alt+D of a whole model links the Armature as well as the meshes: the rig and
+    its copy had one set of bones, so building, ringing or removing the copy's
+    move added to, moved and took away the original's. (Shift+D copies the
+    Armature, and there is nothing to do.) The pose, its constraints and its
+    drivers belong to the rig and find their bones again by name. The copy is
+    named as an Action's is (own_actions), and whichever rig is caught up first
+    gets it. Returns whether it was made.
+    """
+    armature = rig.data
+    # A fake user alone does not make it shared; nor can one from a library be.
+    if (armature is None or armature.library is not None
+            or armature.users - int(armature.use_fake_user) < 2 or rig.mode == "EDIT"):
+        return False
+    fresh = armature.copy()
+    fresh.name = "{:s} {:s}".format(armature.name, rig.name)
+    rig.data = fresh
+    return True
+
+
+def own_curves(rig, data):
+    """The path curves and drawn path lines a rig shares with another rig get
+    copies for this one.
+
+    They are objects of their own, and not selected with "the rig and its
+    parts", so a copy of a whole model went on pointing at the original's: its
+    Build pinned the original's curve to its own ends, removing its move deleted
+    the original's curve, and its Build deleted the original's drawn path. A
+    curve is copied with its data, into the same collections and named as an
+    Action's copy is; the only thing that points at one is the part's pointer.
+    A drawn line is let go of: the next Build or Show Paths draws this rig's
+    own, and nothing here deletes the other's.
+    """
+    others = [o for o in bpy.data.objects
+              if o.type == "ARMATURE" and o is not rig and len(o.rigmoves.moves)]
+    curves = {p.path_curve for o in others for m in o.rigmoves.moves for p in m.parts
+              if p.path_curve is not None}
+    lines = {m.paths_object for o in others for m in o.rigmoves.moves
+             if m.paths_object is not None}
+    for move in data.moves:
+        if move.paths_object is not None and move.paths_object in lines:
+            move.paths_object = None
+        for part in move.parts:
+            curve = part.path_curve
+            if curve is None or curve not in curves:
+                continue
+            fresh = curve.copy()
+            fresh.name = "{:s} {:s}".format(curve.name, rig.name)
+            if curve.data is not None:
+                fresh.data = curve.data.copy()
+                fresh.data.name = fresh.name
+            for collection in curve.users_collection:
+                collection.objects.link(fresh)
+            part.path_curve = fresh
+
+
 @bpy.app.handlers.persistent
 def follow_renames_handler(*_arguments):
     """Called after each update of the scene: parts follow a rename at once.
@@ -1704,6 +1762,12 @@ def unbind_object(rig, part):
             obj.modifiers.remove(modifier)
     group = obj.vertex_groups.get(part.bone_name)
     if group is not None:
+        # The groups live on the mesh: one that is shared (Alt+D) is made the
+        # object's own first, or the group comes off the other's too.
+        if (obj.type == "MESH" and obj.data is not None
+                and obj.data.users - int(obj.data.use_fake_user) > 1):
+            obj.data = obj.data.copy()
+            group = obj.vertex_groups.get(part.bone_name)
         obj.vertex_groups.remove(group)
     if obj.parent is rig or obj.get(FOLLOW_MARK):
         obj.parent = None
@@ -2362,6 +2426,8 @@ def catch_up(rig, data=None):
     follow_renames(rig, data)
     point_at_objects(rig, data)
     own_actions(rig, data)
+    own_armature(rig)
+    own_curves(rig, data)
     now = rig.matrix_world.copy()
     if not data.seated:
         # A new rig, or one from before this was kept: it stands where it

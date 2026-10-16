@@ -4557,6 +4557,235 @@ class TestABigSceneStaysQuick(CopyThatCase):
         self.assertEqual(rig().rigmoves.moves[0].parts[3].name, "Renamed")
 
 
+class CopiedModel(CopyThatCase):
+    """A built model, and copies made of it by the rig and its parts being
+    selected and duplicated, then moved 6 m. (ChestCase, further down, is a
+    chest too; these classes have to come before it.)"""
+
+    OFF = Matrix.Translation((6.0, 0.0, 0.0))
+
+    def chest(self):
+        """A lid hinged on its back edge, swung 100 degrees, built."""
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        home = self.lid.matrix_world.copy()
+        hinge = Vector((0.0, 0.6, 1.0))
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        bpy.context.scene.cursor.location = hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.lid.matrix_world = turn_about(hinge, "X", -100.0) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.keep(self.lid)
+
+    def keep(self, part):
+        """Remember the model as it is: the part (the original) and its rig,
+        how the part plays, and what the rig is made of."""
+        self.part, self.rig1 = part, rig()
+        self.plays = self.play(self.rig1, part)
+        self.made = self.made_of()
+
+    def play(self, owner, part):
+        """Where the part is at the ends and half way."""
+        move = owner.rigmoves.moves[0]
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            owner.pose.bones[move.handle_name].location.y = move.rail * share
+            bpy.context.view_layer.update()
+            out[share] = world_points(part)
+        owner.pose.bones[move.handle_name].location.y = 0.0
+        bpy.context.view_layer.update()
+        return out
+
+    def made_of(self):
+        """The original rig's bones, the part's groups and the constraints."""
+        return (sorted(b.name for b in self.rig1.data.bones),
+                [g.name for g in self.part.vertex_groups],
+                sorted((pb.name, c.name) for pb in self.rig1.pose.bones for c in pb.constraints))
+
+    def copy_everything(self, linked):
+        """Duplicate the rig and its part, as Alt+D (linked) or Shift+D does,
+        and move the copy off. Returns the copy's rig and part."""
+        for obj in bpy.context.view_layer.objects:
+            obj.select_set(False)
+        self.rig1.select_set(True)
+        self.part.select_set(True)
+        bpy.context.view_layer.objects.active = self.rig1
+        if linked:
+            self.assertEqual(bpy.ops.object.duplicate_move_linked(
+                TRANSFORM_OT_translate={"value": (6.0, 0.0, 0.0)}), {"FINISHED"})
+        else:
+            self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
+            self.assertEqual(bpy.ops.transform.translate(value=(6.0, 0.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        rig2 = next(o for o in bpy.context.selected_objects if o.type == "ARMATURE")
+        part2 = next(o for o in bpy.context.selected_objects if o.type == "MESH")
+        self.assertIsNot(rig2, self.rig1)
+        bpy.context.scene.rigmoves_rig = rig2
+        return rig2, part2
+
+    def check_original(self):
+        """The original is made of what it was and plays as it did."""
+        self.assertEqual(self.made_of(), self.made)
+        now = self.play(self.rig1, self.part)
+        for share, points in self.plays.items():
+            self.assertLess(max((a - b).length for a, b in zip(now[share], points)), TOLERANCE,
+                            "the original at {:.0%}".format(share))
+
+    def check_copy(self, rig2, part2):
+        """The copy plays what the original does, 6 m along."""
+        now = self.play(rig2, part2)
+        for share, points in self.plays.items():
+            wanted = [self.OFF @ p for p in points]
+            self.assertLess(max((a - b).length for a, b in zip(now[share], wanted)), TOLERANCE,
+                            "the copy at {:.0%}".format(share))
+
+
+class TestAnAltDCopyOfAWholeModelIsAModelOfItsOwn(CopiedModel):
+    """Alt+D of the rig and its parts links the Armature as well as the meshes,
+    so the copy and the original had one set of bones: building the copy, ringing
+    its lid or removing its move changed the original, which ended up a metre
+    off, or lost its bone, its group and its constraints."""
+
+    def setUp(self):
+        super().setUp()
+        self.chest()
+        self.rig2, self.part2 = self.copy_everything(linked=True)
+        self.assertIs(self.rig2.data, self.rig1.data)
+        self.assertIs(self.part2.data, self.part.data)
+
+    def test_the_copy_takes_an_armature_of_its_own_and_keeps_its_pose_constraints_and_drivers(self):
+        def made_of(owner):
+            return ([(pb.name, [c.name for c in pb.constraints]) for pb in owner.pose.bones],
+                    sorted(d.data_path for d in owner.animation_data.drivers),
+                    {pb.name: sorted(pb.keys()) for pb in owner.pose.bones},
+                    {b.name: sorted(b.keys()) for b in owner.data.bones},
+                    owner.pose.bones["Move 1 handle"].location.y)
+
+        self.rig2.pose.bones["Move 1 handle"].location.y = 0.05
+        bpy.context.view_layer.update()
+        before = made_of(self.rig2)
+        rigmoves.catch_up(self.rig2)
+        self.assertIsNot(self.rig2.data, self.rig1.data)
+        self.assertEqual(self.rig1.data.users, 1)
+        self.assertIn(self.rig2.name, self.rig2.data.name)
+        self.assertEqual(made_of(self.rig2), before)
+        self.assertEqual(made_of(self.rig1)[:4], before[:4])
+        # Once is enough.
+        own = self.rig2.data
+        rigmoves.catch_up(self.rig2)
+        self.assertIs(self.rig2.data, own)
+
+    def test_building_the_copy_with_another_part_leaves_the_original_alone(self):
+        coin = cube("Coin", (6.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        select(coin, self.part2)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=self.rig2.name),
+                         {"FINISHED"})
+        coin.location.z += 1.0
+        bpy.context.view_layer.update()
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_original()
+        self.check_copy(self.rig2, self.part2)
+        self.assertIn("Coin", self.rig2.data.bones)
+        self.assertIsNot(self.rig2.data, self.rig1.data)
+
+    def test_a_ring_on_the_copy_leaves_the_original_alone(self):
+        bpy.context.scene.cursor.location = (6.0, 4.0, 0.0)
+        select(self.part2)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        self.assertEqual(len(self.rig2.rigmoves.moves[0].parts), 4)
+        self.check_original()
+        self.check_copy(self.rig2, self.part2)
+
+    def test_removing_the_copys_move_leaves_the_original_its_bones_groups_and_constraints(self):
+        select(self.part2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertEqual(len(self.rig2.rigmoves.moves), 0)
+        self.assertEqual([g.name for g in self.part2.vertex_groups], [])
+        self.check_original()
+
+
+class TestACopyOfAWholeModelHasPathCurvesOfItsOwn(CopiedModel):
+    """A path curve and the line Show Paths draws are objects of their own, and
+    are not selected with "the rig and its parts": the copy's parts pointed at
+    the original's. Building the copy pinned the original's curve to the copy's
+    ends, removing the copy's move deleted it, and the copy's Build deleted the
+    original's path line."""
+
+    def setUp(self):
+        super().setUp()
+        coin = cube("Coin", (3.0, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        home = coin.matrix_world.copy()
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        coin.matrix_world = Matrix.Translation((0.0, -2.2, 0.0)) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        curve = rig().rigmoves.moves[0].parts["Coin"].path_curve
+        middle = curve.data.splines[0].bezier_points[1]
+        for point in (middle.co, middle.handle_left, middle.handle_right):
+            point.z += 1.5
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.curve_name = curve.name
+        self.keep(coin)
+        # Bent: half way along it is well above where a straight path goes.
+        self.assertGreater(self.plays[0.5][0].z - rest_points(coin)[0].z, 1.0)
+
+    def where_the_curve_is(self):
+        curve = bpy.data.objects[self.curve_name]
+        return [tuple(round(c, 5) for c in p) for p in rigmoves.curve_line(curve)]
+
+    def test_building_the_copy_leaves_the_original_s_curve_where_it_is(self):
+        before = self.where_the_curve_is()
+        rig2, part2 = self.copy_everything(linked=False)
+        # The curve is an object of its own, not selected: the copy shares it.
+        self.assertEqual(rig2.rigmoves.moves[0].parts[0].path_curve.name, self.curve_name)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotEqual(rig2.rigmoves.moves[0].parts[0].path_curve.name, self.curve_name)
+        self.assertEqual(self.where_the_curve_is(), before)
+        self.check_original()
+        self.check_copy(rig2, part2)
+
+    def test_removing_the_copy_leaves_the_original_s_curve_and_path(self):
+        rig2, part2 = self.copy_everything(linked=False)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIn(self.curve_name, bpy.data.objects)
+        bpy.context.scene.rigmoves_rig = self.rig1
+        select(self.part)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.rig1.rigmoves.moves[0].parts[0].path_curve.name, self.curve_name)
+        self.check_original()
+
+    def test_the_copys_build_leaves_the_original_s_path_line(self):
+        select(self.part)
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=True), {"FINISHED"})
+        line_name = self.rig1.rigmoves.moves[0].paths_object.name
+        rig2, part2 = self.copy_everything(linked=False)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIn(line_name, bpy.data.objects)
+        self.assertIs(self.rig1.rigmoves.moves[0].paths_object, bpy.data.objects[line_name])
+        own = rig2.rigmoves.moves[0].paths_object
+        self.assertIsNotNone(own)
+        self.assertNotEqual(own.name, line_name)
+
+
 class TestMakeChainOrder(CopyThatCase):
     """The order follows how a joint is built, at the far end of the part before
     it: not whichever pivot happens to be nearest."""
