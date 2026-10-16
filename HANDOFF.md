@@ -143,6 +143,14 @@ Features, in the order the user asked for them:
   other ID uses the action (`bpy.data.user_map`) the object gets `action.copy()`,
   without the other slots and without a fake user, and the same slot, and the keys
   come out of the copy only (`drop_empty_action` then drops the empty copy).
+- **Motion Build cannot lift** (0.19): `fighting_parts(data)` names the parts whose
+  transform an unmuted NLA strip (`moved_by_nla`: the strip's own slot, tracks muted
+  or put aside by a solo skipped, `use_nla` off skipped, meta strips followed) or an
+  unmuted driver (`moved_by_driver`) works. They are the user's work: the panel's
+  box (`_draw_own_keys`) says what to do, with no Lift button for them, Build adds
+  `fighting_words` to its report and is a WARNING while any are left, and
+  `clear_autokey` / Lift Those Keyframes never touch them. `has_own_motion` (Ring's
+  "may it be taken up") is the wider test: any NLA track at all.
 - **Drivers must stay "simple expressions"** so they run with Auto Run
   Python Scripts off, and must stay under 256 characters, or Blender cuts
   them short.

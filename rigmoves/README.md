@@ -663,6 +663,14 @@ when Paths is pressed again.
 - **Pause** switches the move off so the bones can be posed by hand again;
   Build puts it back. Recording does this for you.
 - **To Before** returns every control to its start.
+- **The box at the top of the panel** appears when something would make the rig
+  play the wrong move. Auto Keying on, which leaves a keyframe behind with every
+  drag. Parts with keys of their own on their location, rotation or scale: **Lift
+  Those Keyframes** takes them off (Build does too), only the keys the part itself
+  plays. And parts moved by an NLA strip or a driver of their own. Those two are
+  your work, so nothing lifts them: the box says to mute or remove the strip in the
+  NLA editor, or to remove the driver in the Drivers editor, and then to Build.
+  Build names them as well, and is a warning, not a success, until they are gone.
 
 ## What it does underneath
 
@@ -1250,6 +1258,17 @@ and one lifted 1 m:
   petal with a child like that is now left out, and named: "'Petal 4' cannot be
   re-framed safely (has a child with keys or drivers of its own ('Bee'))". A child
   with nothing of its own is held where it is, as before.
+- **A part moved by an NLA strip or a driver played the wrong move, and nothing said
+  so.** The warning looked only at keys in the part's own action, so a part whose
+  animation had been pushed down into the NLA, or that had a driver on its location,
+  rotation or scale, was not named anywhere, and played the wrong move by up to
+  two units. The box at the top of the panel, and Build, now name those parts and
+  say what to do: "'Gear' is moved by an NLA strip of its own, which fights the rig:
+  mute or remove it in the NLA editor, then Build", or "... by a driver on its
+  transform: remove it in the Drivers editor, then Build". They are your work, so
+  Lift Those Keyframes does not touch them, and Build is a warning, not a success,
+  until they are gone. A muted strip, a muted track and a muted driver play nothing,
+  and are not named.
 
 ## Known rough edges
 

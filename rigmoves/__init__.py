@@ -1625,6 +1625,102 @@ def keyed_parts(data, move=None):
     return out
 
 
+def moved_by_driver(obj):
+    """Whether a driver that is not muted works an object's transform: it is
+    worked out again on every frame, so the rig plays against it."""
+    animation = obj.animation_data
+    return animation is not None and any(
+        curve.data_path in TRANSFORM_PATHS and not curve.mute for curve in animation.drivers)
+
+
+def clip_strips(strips):
+    """The NLA strips among these that play an action and are not muted, those
+    inside a meta strip too."""
+    for strip in strips:
+        if strip.mute:
+            continue
+        if strip.type == "META":
+            yield from clip_strips(strip.strips)
+        elif strip.action is not None:
+            yield strip
+
+
+def moved_by_nla(obj):
+    """Whether an NLA strip that is not muted works an object's transform: one
+    that plays an action with a curve on it, for the slot the strip plays.
+
+    The NLA is evaluated under the object's own action, and the rig plays
+    against it all the same. A track muted, or put aside by another that is
+    soloed, plays nothing.
+    """
+    animation = obj.animation_data
+    if animation is None or not animation.use_nla:
+        return False
+    tracks = list(animation.nla_tracks)
+    if any(track.is_solo for track in tracks):
+        tracks = [track for track in tracks if track.is_solo]
+    for track in tracks:
+        if track.mute:
+            continue
+        for strip in clip_strips(track.strips):
+            if any(curve.data_path in TRANSFORM_PATHS
+                   for _bag, curve in slot_curves(strip.action, strip.action_slot)):
+                return True
+    return False
+
+
+def fighting_parts(data):
+    """The parts whose transform something of their own works against the rig,
+    that this add-on cannot take away: (names moved by NLA strips, names moved
+    by drivers), each sorted. Keys in the object's own action are the other
+    fault (keyed_parts), and those Build lifts. An NLA strip or a driver is the
+    user's work, and is not touched."""
+    nla, driven = set(), set()
+    for move in data.moves:
+        for part in move.parts:
+            obj = bpy.data.objects.get(part.name) if part.kind == "OBJECT" else None
+            if obj is None:
+                continue
+            if moved_by_nla(obj):
+                nla.add(obj.name)
+            if moved_by_driver(obj):
+                driven.add(obj.name)
+    return sorted(nla), sorted(driven)
+
+
+def named(names, shown=3):
+    """These names for a sentence: 'A', then 'A' and 'B', then 'A', 'B' and 'C',
+    and past that 'A', 'B', 'C' and 2 more."""
+    out = ["'{:s}'".format(short(name, 18)) for name in names[:shown]]
+    if len(names) > shown:
+        out.append("{:d} more".format(len(names) - shown))
+    return out[0] if len(out) == 1 else "{:s} and {:s}".format(", ".join(out[:-1]), out[-1])
+
+
+def fighting_words(nla, driven):
+    """What to tell somebody about parts moved by an NLA strip or a driver of
+    their own (see fighting_parts), as a sentence for each: what is wrong and
+    what to do about it."""
+    said = []
+    if nla:
+        one = len(nla) == 1
+        said.append("{:s} {:s} moved by {:s} of {:s} own, which {:s} the rig: mute or "
+                    "remove {:s} in the NLA editor, then Build.".format(
+                        named(nla), "is" if one else "are",
+                        "an NLA strip" if one else "NLA strips",
+                        "its" if one else "their", "fights" if one else "fight",
+                        "it" if one else "them"))
+    if driven:
+        one = len(driven) == 1
+        said.append("{:s} {:s} moved by {:s} on {:s}: remove {:s} in the Drivers editor, "
+                    "then Build.".format(
+                        named(driven), "is" if one else "are",
+                        "a driver" if one else "drivers",
+                        "its transform" if one else "their transforms",
+                        "it" if one else "them"))
+    return said
+
+
 def posed_away(rig, name):
     """Whether this bone is sitting somewhere other than its rest."""
     pose_bone = rig.pose.bones.get(name)
@@ -5346,6 +5442,11 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += (" {:d} stray keyframe track(s) on the parts and "
                             "{:d} on the rig were lifted, or the rig could not "
                             "move them.".format(keyed_objects, keyed_bones))
+        # An NLA strip or a driver on a part is somebody's work, not Build's to
+        # lift: it is named, with what to do, and the build is not called done.
+        fights = fighting_words(*fighting_parts(data))
+        if fights:
+            data.report += " " + " ".join(fights)
         if healed:
             data.report += (" {:d} part(s) copied from another were being moved "
                              "by its bone as well as their own; now only by their "
@@ -5364,7 +5465,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += " {:d} turned about a new pivot.".format(pivoted)
         if laid:
             data.report += " {:d} path(s) laid along a curve.".format(laid)
-        warn = warn_parents
+        warn = warn_parents or bool(fights)
         if still_keyed:
             data.report += (" {:s} is animated by hand and was left as it is."
                             .format(", ".join(still_keyed[:3])))
@@ -7796,7 +7897,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         auto = context.scene.tool_settings.use_keyframe_insert_auto
         names = sorted({obj.name for _m, _p, obj in keyed_parts(data)})
         ours = len(stray_curves(rig, data, auto))
-        if not (names or ours or auto):
+        fights = fighting_words(*fighting_parts(data))
+        if not (names or ours or auto or fights):
             return
         box = layout.box().column(align=True)
 
@@ -7831,6 +7933,16 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             for line in wrapped("Build does this too. Handles you have really "
                                 "animated are left alone."):
                 note.label(text=line)
+
+        # An NLA strip or a driver is somebody's work: Lift Those Keyframes
+        # leaves it alone, so there is no button, only what to do about it.
+        for number, sentence in enumerate(fights):
+            if auto or names or ours or number:
+                box.separator(factor=0.5)
+            told = box.column(align=True)
+            told.alert = True
+            for line in wrapped(sentence, most=8):
+                told.label(text=line)
 
     def _draw_newcomers(self, layout, context, rig, data):
         """What to do with objects this rig has never been told about.

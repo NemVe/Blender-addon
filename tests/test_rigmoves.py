@@ -6126,6 +6126,231 @@ def drift_of(points, expected):
     return max((a - b).length for a, b in zip(points, expected))
 
 
+class TestPartsMovedByTheirOwn(CopyThatCase):
+    """A part whose transform is worked by an NLA strip or a driver of its own
+    plays the wrong move: the rig is measured from where it stands, and what it
+    stands on is worked out again on every frame. Build cannot lift those, as it
+    lifts keys - they are somebody's work - so it names them, and says what to
+    do."""
+
+    NLA = ("'Lid' is moved by an NLA strip of its own, which fights the rig: mute or "
+           "remove it in the NLA editor, then Build.")
+    DRIVER = ("'Lid' is moved by a driver on its transform: remove it in the Drivers "
+              "editor, then Build.")
+
+    def keyed(self, obj):
+        bpy.context.scene.frame_set(1)
+        obj.keyframe_insert("location", frame=1)
+        obj.location.z = 3.0
+        obj.keyframe_insert("location", frame=20)
+
+    def in_the_nla(self, obj):
+        self.keyed(obj)
+        action = obj.animation_data.action
+        track = obj.animation_data.nla_tracks.new()
+        self.strip = track.strips.new("Idle", 1, action)
+        self.track = track
+        obj.animation_data.action = None
+
+    @staticmethod
+    def by_a_driver(obj):
+        curve = obj.driver_add("location", 2)
+        curve.driver.type = "SCRIPTED"
+        curve.driver.expression = "1 + frame / 10"
+        return curve
+
+    def lid_with(self, how, name="Lid", where=(0.0, 0.0, 1.0)):
+        lid = cube(name, where)
+        how(lid)
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        return lid
+
+    def start(self, *lids):
+        select(*lids)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for lid in lids:
+            lid.rotation_euler.x = math.radians(90.0)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+
+    @staticmethod
+    def said_by_the_panel():
+        return " ".join(text for _where, kind, text in drawn_panel()
+                        if kind.startswith("label"))
+
+    @staticmethod
+    def build_and_hear():
+        """Run what Build does, and keep how it reported: (kinds, text) of the
+        last. Blender hands an operator's reports to the Info editor and does
+        not let a script ask for them, so it is run against a stand-in that
+        keeps them."""
+        heard = []
+        stand_in = types.SimpleNamespace(
+            report=lambda kinds, text: heard.append((set(kinds), text)))
+        assert rigmoves.RIGMOVES_OT_build.execute(stand_in, bpy.context) == {"FINISHED"}
+        return heard[-1]
+
+    def lift_button(self):
+        return [text for _where, idname, text in drawn_buttons()
+                if idname == "rigmoves.free_keys"]
+
+    # -- named in the panel -------------------------------------------------
+
+    def test_a_part_moved_by_an_nla_strip_is_named_in_the_panel(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(self.lid)
+        self.assertIn(self.NLA, self.said_by_the_panel())
+        # Nothing to lift: no button that would not do anything.
+        self.assertEqual(self.lift_button(), [])
+
+    def test_a_part_moved_by_a_driver_is_named_in_the_panel(self):
+        self.lid = self.lid_with(self.by_a_driver)
+        self.start(self.lid)
+        self.assertIn(self.DRIVER, self.said_by_the_panel())
+        self.assertEqual(self.lift_button(), [])
+
+    def test_a_part_with_keys_in_its_action_has_the_box_it_always_had(self):
+        self.lid = self.lid_with(self.keyed)
+        self.start(self.lid)
+        said = self.said_by_the_panel()
+        self.assertIn("'Lid' keyed on its own transform", said)
+        self.assertEqual(self.lift_button(), ["Lift Those Keyframes"])
+        self.assertNotIn("fights the rig", said)
+        self.assertNotIn("Drivers editor", said)
+
+    def test_keys_and_an_nla_strip_on_different_parts_are_each_said(self):
+        keyed = self.lid_with(self.keyed, "Keyed", (0.0, 3.0, 1.0))
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(keyed, self.lid)
+        said = self.said_by_the_panel()
+        self.assertIn("'Keyed' keyed on its own transform", said)
+        self.assertIn(self.NLA, said)
+        self.assertEqual(self.lift_button(), ["Lift Those Keyframes"])
+
+    def test_a_part_that_is_both_is_said_both_ways(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.by_a_driver(self.lid)
+        self.start(self.lid)
+        said = self.said_by_the_panel()
+        self.assertIn(self.NLA, said)
+        self.assertIn(self.DRIVER, said)
+
+    def test_several_parts_are_named_together(self):
+        lids = [self.lid_with(self.in_the_nla, "Lid {:d}".format(n), (0.0, 3.0 * n, 1.0))
+                for n in range(4)]
+        self.start(*lids)
+        self.assertIn("'Lid 0', 'Lid 1', 'Lid 2' and 1 more are moved by NLA strips of "
+                      "their own, which fight the rig: mute or remove them in the NLA "
+                      "editor, then Build.", self.said_by_the_panel())
+
+    def test_nothing_is_said_of_what_plays_nothing(self):
+        # A muted strip, a muted track, the NLA switched off, a muted driver, a
+        # strip with no transform in it: none of them moves the part.
+        cases = []
+        lid = self.lid_with(self.in_the_nla, "Muted Strip", (0.0, 0.0, 1.0))
+        self.strip.mute = True
+        cases.append(lid)
+        lid = self.lid_with(self.in_the_nla, "Muted Track", (0.0, 3.0, 1.0))
+        self.track.mute = True
+        cases.append(lid)
+        lid = self.lid_with(self.in_the_nla, "No NLA", (0.0, 6.0, 1.0))
+        lid.animation_data.use_nla = False
+        cases.append(lid)
+        lid = self.lid_with(self.by_a_driver, "Muted Driver", (0.0, 9.0, 1.0))
+        lid.animation_data.drivers[0].mute = True
+        cases.append(lid)
+
+        def hidden_only(obj):
+            obj.hide_render = False
+            obj.keyframe_insert("hide_render", frame=1)
+            obj.animation_data.nla_tracks.new().strips.new(
+                "Hide", 1, obj.animation_data.action)
+            obj.animation_data.action = None
+
+        cases.append(self.lid_with(hidden_only, "Hide Only", (0.0, 12.0, 1.0)))
+        self.start(*cases)
+        said = self.said_by_the_panel()
+        self.assertNotIn("fights the rig", said)
+        self.assertNotIn("Drivers editor", said)
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), ([], []))
+
+    def test_only_the_part_whose_own_slot_has_the_transform_is_named(self):
+        # One action holds a slot for the lid (a keyed visibility) and one for
+        # the lamp (its height); each has a strip of it. The lid's strip plays
+        # the lid's slot, which moves nothing.
+        lid = cube("Lid", (0.0, 0.0, 1.0))
+        lamp = cube("Lamp", (4.0, 0.0, 1.0))
+        bpy.context.scene.frame_set(1)
+        lid.keyframe_insert("hide_render", frame=1)
+        action = lid.animation_data.action
+        lamp.animation_data_create()
+        lamp.animation_data.action = action
+        lamp.keyframe_insert("location", index=2, frame=1)
+        for obj in (lid, lamp):
+            obj.animation_data.nla_tracks.new().strips.new("Play", 1, action)
+            obj.animation_data.action = None
+        self.assertEqual(rigmoves.moved_by_nla(lid), False)
+        self.assertEqual(rigmoves.moved_by_nla(lamp), True)
+        self.start(lid, lamp)
+        said = self.said_by_the_panel()
+        self.assertIn("'Lamp' is moved by an NLA strip of its own", said)
+        self.assertNotIn("'Lid' is moved", said)
+
+    # -- named by Build -----------------------------------------------------
+
+    def test_build_names_a_part_moved_by_an_nla_strip_and_is_not_a_success(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(self.lid)
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"WARNING"})
+        self.assertIn(self.NLA, text)
+        self.assertIn(self.NLA, rig().rigmoves.report)
+
+    def test_build_names_a_part_moved_by_a_driver_and_is_not_a_success(self):
+        self.lid = self.lid_with(self.by_a_driver)
+        self.start(self.lid)
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"WARNING"})
+        self.assertIn(self.DRIVER, text)
+
+    def test_build_of_keys_lifts_them_and_is_a_success_as_it_was(self):
+        self.lid = self.lid_with(self.keyed)
+        self.start(self.lid)
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"INFO"})
+        self.assertIn("3 stray keyframe track(s) on the parts", text)
+        self.assertNotIn("fights the rig", text)
+        self.assertEqual(rigmoves.own_transform_curves(self.lid), [])
+
+    def test_build_keeps_saying_so_until_the_strip_is_muted(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        self.start(self.lid)
+        self.assertEqual(self.build_and_hear()[0], {"WARNING"})
+        self.strip.mute = True
+        kinds, text = self.build_and_hear()
+        self.assertEqual(kinds, {"INFO"})
+        self.assertNotIn("fights the rig", text)
+
+    # -- left alone ---------------------------------------------------------
+
+    def test_lifting_keyframes_leaves_the_strip_and_the_driver_alone(self):
+        self.lid = self.lid_with(self.in_the_nla)
+        curve = self.by_a_driver(self.lid)
+        self.start(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"CANCELLED"})
+        self.assertIn("Nothing is carrying stray keyframes", rig().rigmoves.report)
+        animation = self.lid.animation_data
+        self.assertEqual(len(animation.nla_tracks), 1)
+        self.assertEqual(len(animation.nla_tracks[0].strips), 1)
+        self.assertEqual(len(animation.drivers), 1)
+        self.assertEqual(animation.drivers[0].data_path, curve.data_path)
+        # Nor does Build.
+        self.build_and_hear()
+        self.assertEqual(len(animation.nla_tracks[0].strips), 1)
+        self.assertEqual(len(animation.drivers), 1)
+
+
 class TestCombined(CopyThatCase):
 
     def test_combined_control_plays_members_in_order(self):
