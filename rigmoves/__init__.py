@@ -2700,9 +2700,13 @@ def seat_rig(rig, data=None):
     would otherwise drag the whole rig half way to them.
 
     Skipped on a rig somebody has turned or scaled, where "move the object and
-    shift the bones back" is no longer a plain subtraction.
+    shift the bones back" is no longer a plain subtraction. And on a rig that
+    moves itself - keys on its transform, a driver, an NLA strip: they put the
+    object back where it was on the next frame, and the bones, shifted the
+    other way, would stay shifted, and the whole model with them. (A rig on a
+    parent that moves is no such rig: its own transform stays as it is set.)
     """
-    if not len(rig.data.bones):
+    if not len(rig.data.bones) or has_own_motion(rig):
         return False
     turn = rig.matrix_world.to_3x3()
     if (turn - turn.Identity(3)).median_scale > 1e-6:

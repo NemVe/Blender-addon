@@ -8679,6 +8679,122 @@ class TestApplyScaleOnABuiltChain(CopyThatCase):
             self.assertTrue(rigmoves.same_matrix(now, before, 1e-5))
 
 
+class TestAnAnimatedRigIsLeftWhereItIs(ChestCase):
+    """A rig whose own location is keyed - a car driving off with its model -
+    and a Build. Build moves the armature object onto the middle of its bones,
+    and moves the bones back by the same amount; the keys put the object back on
+    the next frame and the bones stayed moved, so the whole model was off by that
+    much at every frame (half a metre, once a coin was added)."""
+
+    FRAMES = (1, 20, 40)
+
+    def key_the_rig(self):
+        scene = bpy.context.scene
+        base = rig().location.copy()
+        for frame, where in zip(self.FRAMES, (base, base + Vector((3.0, 0.0, 0.0)),
+                                              base + Vector((3.0, 4.0, 0.0)))):
+            scene.frame_set(frame)
+            rig().location = where
+            rig().keyframe_insert("location", frame=frame)
+        scene.frame_set(20)
+        bpy.context.view_layer.update()
+
+    def seen(self, objects):
+        """Where each object is at each frame, with the slider at 0, and where the
+        rig is."""
+        out = {}
+        for frame in self.FRAMES:
+            bpy.context.scene.frame_set(frame)
+            bpy.context.view_layer.update()
+            drive(self.move, 0.0)
+            out[frame] = ({obj.name: world_points(obj) for obj in objects},
+                          rig().matrix_world.copy())
+        bpy.context.scene.frame_set(20)
+        bpy.context.view_layer.update()
+        return out
+
+    def coin_at_frame_20(self):
+        coin = cube("Coin", (3.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        return coin
+
+    def check_everything(self, was, coin_was, coin):
+        """The lid where it was at every frame, and the coin carried by the rig
+        from where it was put at frame 20."""
+        now = self.seen([self.lid, coin])
+        for frame in self.FRAMES:
+            self.assertLess(drift_of(now[frame][0]["Lid"], was[frame][0]["Lid"]), TOLERANCE,
+                            "Lid at frame {:d}".format(frame))
+            carry = was[frame][1] @ was[20][1].inverted()
+            self.assertLess(drift_of(now[frame][0][coin.name], [carry @ p for p in coin_was]),
+                            TOLERANCE, "Coin at frame {:d}".format(frame))
+
+    def test_a_coin_added_at_frame_20_and_a_build_leave_everything_where_it_was(self):
+        self.key_the_rig()
+        was = self.seen([self.lid])
+        coin = self.coin_at_frame_20()
+        coin_was = world_points(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_everything(was, coin_was, coin)
+
+    def test_set_pivot_on_an_animated_rig_leaves_everything_where_it_was(self):
+        self.key_the_rig()
+        was = self.seen([self.lid])
+        coin = self.coin_at_frame_20()
+        coin_was = world_points(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        # The hinge, where it is at frame 20.
+        bpy.context.scene.cursor.location = was[20][1] @ was[1][1].inverted() @ self.hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.check_everything(was, coin_was, coin)
+
+    def test_a_rig_that_does_not_move_itself_is_still_seated(self):
+        # The rig is moved onto the middle of what it drives, as ever.
+        where = rig().location.copy()
+        coin = cube("Coin", (6.0, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        coin_was = world_points(coin)
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertGreater((rig().location - where).length, 0.5)
+        self.assertLess(drift(coin, coin_was), TOLERANCE)
+        self.check_lid()
+
+    def test_a_rig_on_an_animated_parent_is_still_seated(self):
+        # The rig's own transform is not animated, only what it hangs from.
+        hand = bpy.data.objects.new("Hand", None)
+        bpy.context.scene.collection.objects.link(hand)
+        bpy.context.view_layer.update()
+        select(hand, rig())
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=True),
+                         {"FINISHED"})
+        hand.keyframe_insert("location", frame=1)
+        hand.location.x += 3.0
+        hand.keyframe_insert("location", frame=20)
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        where = rig().location.copy()
+        coin = cube("Coin", (6.0, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        coin_was = world_points(coin)
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertGreater((rig().location - where).length, 0.5)
+        self.assertLess(drift(coin, coin_was), TOLERANCE)
+        self.check_lid()
+
+
 class TestRigidFit(unittest.TestCase):
     """The fit of three marks onto three others, which tells a part that was
     framed another way from one that was moved."""
