@@ -9,8 +9,10 @@ Then it helps with everything that makes a move look designed instead of slid ac
 Everything is explained below, step by step. You do not need to know rigging.
 
 - Author: **NemVe3D** (https://creators.sa/nemve)
-- Licence: **GPL-3.0-or-later**
+- Licence: **GPL-3.0-or-later** (the GNU General Public License, version 3 or any later version)
 - Needs: **Blender 4.5 or newer**
+- In the download: one `.zip` file, `CopyThat-0.18.3.zip`, which is the Blender extension (see Installation)
+- Support: through this product's page on Superhive, or at https://creators.sa/nemve (see Support and credits at the end)
 - Where it lives: the 3D Viewport sidebar (press **N**), tab **CopyThat**
 
 ## What you can make
@@ -24,7 +26,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 ## Requirements
 
-- Blender 4.5 or newer. CopyThat is tested on Blender 4.5 LTS, 5.0 and 5.2.
+- Blender 4.5 or newer. CopyThat is tested on Blender 4.5 LTS, 5.0 and 5.2. Blender will not install it on an older version.
 - Mesh objects, or the bones of an armature you already have. Other object types (curves, text and so on) need converting to mesh first.
 - Nothing else. It does not need the internet, other add-ons, or **Auto Run Python Scripts** to be switched on.
 
@@ -32,27 +34,29 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.18.3.zip`).
 
+**What is in the download.** One file: that `.zip`, which is the extension itself. Inside it are the add-on (plain Python, so it is also the full source code), its manifest, the user guide (`README.md`) and the licence (`LICENSE`).
+
 ### Removing an older version first (RigMoves or an old CopyThat)
 
 Older versions of this add-on (called **RigMoves**, or an earlier **CopyThat**) were installed under **Add-ons** as a "legacy" add-on. The old and new versions cannot be switched on together, so take the old one out first. If you have never installed it before, skip to "First install".
 
 1. In Blender, open **Edit > Preferences > Add-ons**.
 2. Type **CopyThat** in the search box, and look for any entry with that name. Then search **RigMoves**.
-3. For each entry you find, untick its box to switch it off, click the small arrow on its left to open it, and press **Remove**.
+3. For each entry you find, untick its box to switch it off, click the small arrow on its left to open it, and press **Uninstall**.
 4. Close Blender completely and open it again.
 
-If there is no Remove button, delete the folder called `rigmoves` from Blender's add-ons folder instead and restart Blender.
+If there is no Uninstall button, delete the folder called `rigmoves` from Blender's add-ons folder instead and restart Blender. On Windows that folder is `C:\Users\<your name>\AppData\Roaming\Blender Foundation\Blender\<version>\scripts\addons`, on macOS it is `~/Library/Application Support/Blender/<version>/scripts/addons`, and on Linux it is `~/.config/blender/<version>/scripts/addons`.
 
 ### First install
 
 1. Open **Edit > Preferences** and click **Get Extensions** on the left.
-2. Click the small **drop-down menu** (the arrow) at the top right of the window.
+2. Click the small **drop-down menu** (the arrow at the far right of the top row of that tab).
 3. Choose **Install from Disk...**
 4. Pick the `CopyThat` zip and confirm.
 
-**Or drag and drop:** drag the zip file from your file browser and drop it anywhere on the Blender window, then confirm the pop-up that appears. Leave its default choices as they are.
+**Or drag and drop:** drag the zip file from your file browser and drop it anywhere on the Blender window, then confirm the pop-up that appears. Leave its default choices as they are. On Superhive, a product with a valid extension zip is marked **Extension**, and you can drag it from your receipt straight into the Blender window to install it.
 
-You do not need to turn on online access: Install from Disk works offline. When it is done, CopyThat is in the list with its box ticked.
+You do not need to turn on online access: Install from Disk works offline. (If Blender shows an **Online Extensions** box, press **Continue Offline**.) When it is done, CopyThat is in the **Add-ons** list with its box ticked.
 
 ### Find the panel
 
@@ -66,13 +70,13 @@ If you do not see the tab, check that the sidebar is open (View > Sidebar), that
 1. Download the new zip.
 2. Install it the same way as the first time: **Edit > Preferences > Get Extensions > drop-down menu > Install from Disk...**, or drag and drop the zip into Blender.
 3. **Close Blender and open it again.** This matters: until you restart, Blender may keep running the old code, and you will not see the new buttons.
-4. To check which version you have, open **Edit > Preferences > Get Extensions**, find CopyThat and open its entry.
+4. To check which version you have, open **Edit > Preferences > Get Extensions**, find CopyThat and click the small arrow on its left to open its entry: the **Version** is listed there.
 
 Your scenes are not touched by an update: everything CopyThat makes is saved inside your `.blend` file.
 
 ### Uninstalling
 
-Open **Edit > Preferences > Get Extensions**, find CopyThat and press **Uninstall**. Scenes you made keep their animation (see the FAQ).
+Open **Edit > Preferences > Get Extensions**, find CopyThat, click the small drop-down arrow at the right end of its row and choose **Uninstall**. Scenes you made keep their animation (see the FAQ).
 
 ### Files made with older versions
 
@@ -86,7 +90,7 @@ Files made with RigMoves or earlier CopyThat versions keep working. You will sti
 4. With the mouse over the 3D Viewport, move and turn the cube to where it should end up. For example: **G**, **X**, type **3**, **Enter** to slide it, then **R**, **Z**, type **90**, **Enter** to turn it.
 5. In the Move 1 box, on the **After** row, press **Record**. The dot becomes a tick.
 6. Press the big **Build Sliders** button at the bottom.
-7. A **Play** slider appears, 0 to 100%. Drag it. The cube goes from where it started to where you put it.
+7. A **Play** slider appears, 0 to 100%. It carries the move's name, so here it reads **Move 1**. Drag it. The cube goes from where it started to where you put it.
 8. To animate it on the timeline: set **Frames** (under Play) to 48, make sure the timeline is on the frame you want it to start, and press **Animate**. Press **Space** to play.
 
 That is the whole idea. Everything below is what you can add on top.
@@ -206,7 +210,7 @@ The handle stands at the middle of the parts it drives, and the rig is drawn in 
 
 ### 5. Ease
 
-**What it is.** The **Ease** menu under the After row shapes the whole move: **Even speed**, **Smooth**, **Slow start** or **Slow stop**. It sits on top of whatever path you recorded, so a hand-shaped path with Smooth on it eases into and out of your own curve.
+**What it is.** The **Ease** menu under the After row (the drop-down that reads **Even speed** until you change it) shapes the whole move: **Even speed**, **Smooth**, **Slow start** or **Slow stop**. It sits on top of whatever path you recorded, so a hand-shaped path with Smooth on it eases into and out of your own curve.
 
 **When to use it.** Smooth for almost everything that should feel soft. Slow start or Slow stop when only one end should be gentle.
 
@@ -230,7 +234,7 @@ For exact control of each stretch use the Speed sliders instead, with Ease left 
 3. Type a **Delay** from 0 to 0.99 in its box.
 4. Drag **Play** to see it.
 
-It takes effect at once. Riders are not listed here: their **Lead** does the same job (see Ride Along). **Spread...** in the Timing header fills all the Delays in at once (see Spread). A combined control has the same box for each move it plays.
+It takes effect at once. Riders are not listed here: their **Lead** does the same job (see Ride Along). **Spread…** in the Timing header fills all the Delays in at once (see Spread). A combined control has the same box for each move it plays.
 
 ### 7. Ride Along, with Lead and Mirror
 
@@ -254,11 +258,11 @@ A rider turns about its leader's pivot, carried over to where the rider stands. 
 - Below 0 it follows behind. -25 sets off when the leader is half way. -50 sets off only once the leader has finished.
 - Above 0 it goes first. 50 has finished before the leader starts.
 
-Either way it travels at the leader's speed, for as long as the leader does: only *when* changes. A lead takes effect as soon as you change it. The Play slider always covers the whole of it, so a rider sent ahead has somewhere to go: the leader simply starts later along the control. Petals at -8, -16, -24 and on round the flower open one after another in a wave. **Spread...** in the **Riding along** header fills these in for you.
+Either way it travels at the leader's speed, for as long as the leader does: only *when* changes. A lead takes effect as soon as you change it. The Play slider always covers the whole of it, so a rider sent ahead has somewhere to go: the leader simply starts later along the control. Petals at -8, -16, -24 and on round the flower open one after another in a wave. **Spread…** in the **Riding along** header fills these in for you.
 
 **Mirror.** A rider that is a mirrored copy of its leader (negative scale, the way **Ctrl+M** leaves one) mirrors its leader's move by itself: the left wing does the mirror image of what the right one does. A rider that only *faces* the other way, such as the second of a pair of doors turned round to fit, has a **Mirror** button on its row. Each press steps it on: **-** (none), **X**, **Y**, **Z**, and rebuilds. X, Y or Z mirrors the leader's move across that axis of the rider, so what is the leader's left becomes the rider's right.
 
-**Taking one out.** The **x** on a rider's row takes it out again and leaves it where it stands.
+**Taking one out.** The **x** on a rider's row takes it out again and leaves it where it stands. A rider copies its leader from where it stood when it joined, so to move one somewhere else, take it out and add it again. A rider cannot lead other riders.
 
 **Copies of a whole finger.** If the leader has followers (a finger of three segments), select every segment of the other fingers, in any order, and last any segment of the recorded finger. Press **Ride Along With '...'**. Each copy is matched to the recorded finger joint for joint, by where its pieces stand, and curls from where it stands. A copied finger is one row under Riding along, marked **+2** for the joints that come with it. Its Lead sends the whole finger ahead or behind with its joints in step: fingers at 0, -10, -20 and -30 close one after another.
 
@@ -293,7 +297,7 @@ You can pick a pivot before the first Build or any time after. On a built move t
 
 The part's pivot now travels along the curve, evenly by distance, and turns from pose to pose as it did before.
 
-The two ends of the curve always belong to Before and After. Every Build puts them back there: drag an end away, or record After again, and the curve's ends follow the part, not the other way round. The **x** beside the curve (**Straighten**) deletes it and the path goes straight again. Riders follow a curved leader along the same curve, carried over to their own place.
+The two ends of the curve always belong to Before and After. Every Build puts them back there: drag an end away, or record After again, and the curve's ends follow the part, not the other way round. The **x** beside the curve (**Straighten**) deletes it and the path goes straight again. A curve takes over the in-between locations of its part, steps included, so going back to straight also drops the locations of its steps. Riders follow a curved leader along the same curve, carried over to their own place.
 
 **Good to know.** A follower goes where it is carried, so its path is not curved: curve the part it follows instead. Only a curve's first spline is followed (Bezier or Poly).
 
@@ -360,7 +364,7 @@ It replaces the links the chosen parts already have to one another, so a chain m
 5. Press **Record** on the After row (or a Step's Record) to keep it.
 6. If the finger has copies riding along, press **Build Sliders** too.
 
-**Each next joint x.** Right after pressing Curl, open the **Adjust Last Operation** panel at the bottom left of the viewport. **Each next joint x** says how much of the bend each joint keeps from the one before it. The default is 1: every joint bends as much as the first. At 0.5 a 20 degree bend runs 20, 10, 5, 2.5, 1.25 down the root and four followers, so the tip curls least.
+**Each next joint ×.** Right after pressing Curl, open the **Adjust Last Operation** panel: it is the small panel at the bottom left of the 3D Viewport, and it is also under **Edit > Adjust Last Operation...** (or press **F9**). **Each next joint ×** says how much of the bend each joint keeps from the one before it. The default is 1: every joint bends as much as the first. Blender remembers the last value you used until you close Blender, so the next Curl starts from that one: set it back to 1 for an even curl. At 0.5 a 20 degree bend runs 20, 10, 5, 2.5, 1.25 down the root and four followers, so the tip curls least.
 
 **When Curl says no.** Curl works from rest. It refuses while any joint is showing a pose (the eye on After, or Play above 0) and tells you to drag Play to 0, building first if the sliders are paused. It also refuses when nothing follows the part, when the part rides along, and when the part has not been turned. It puts every part below the root where its bend says, replacing whatever bend it had.
 
@@ -375,7 +379,7 @@ It replaces the links the chosen parts already have to one another, so a chain m
 1. Record the part's move (built or not).
 2. Put the 3D cursor on the centre of the ring. (Or use **World Origin** in the dialog, if the centre is the world origin.)
 3. Select the part so it is the active object.
-4. In the move's box, press **Ring...** (in the row under **Curve the Path**). It is greyed out until the active object is a part of the move that is not a rider.
+4. In the move's box, press **Ring…** (in the row under **Curve the Path**). It is greyed out until the active object is a part of the move that is not a rider.
 5. Pick **Use**, set **Count**, and press **OK**.
 
 **The three Use choices**
@@ -386,17 +390,19 @@ It replaces the links the chosen parts already have to one another, so a chain m
 
 **The other fields**
 
-- **Count:** how many places round the ring, including the original. 6 means the part and five more.
+- **Count:** how many places round the ring, including the original. 6 means the part and five more (the dialog first opens at 6).
 - **Round:** the **3D Cursor** or the **World Origin**.
 - **About:** **World Z** (a ring lying flat, the default), **World X**, **World Y**, or the **3D Cursor's Z** for a ring that is tipped. Take care with the last one: placing the cursor with Shift+right-click turns it to face the view, and a ring made about its Z then faces the view too.
 - **Linked copies** (on by default): the copies share the original's mesh, so editing one in Edit Mode edits them all. They share it until Build, which gives each part a mesh of its own. Untick it to give copies their own meshes from the start.
 - **Lead step:** if you set anything but 0, the Leads are stepped from the original both ways round the ring, so the blades open one after another. 0 sends all the copies together. (Spread, below, can also do this later.)
 
+The defaults named here are what the dialog shows the first time. Blender remembers your last choices in it until you close Blender, so the next time it opens with those: check the fields before you press **OK**.
+
 **How it picks up what is already modelled**
 
 Ring takes an object up, or stands it on a new frame, only when that is provably safe. Anything else is left exactly as it is, and the report says why.
 
-- **It has to be a copy of the part's mesh.** The same number of vertices, and every vertex of one within a fiftieth of the part's size of a vertex of the other, once it stands in the place. The numbering does not matter, so a half of a flower made with Ctrl+M, or the teeth of a gear copied with Shift+D and moved with G and never turned, are taken. A mirror image of a petal that is not the same on both sides is not a copy, and nor is a different petal with the same vertex count.
+- **It has to be a copy of the part's mesh.** The same number of vertices, and every vertex of one within a fiftieth of the part's size of a vertex of the other, both ways round, once it stands in the place. The numbering does not matter, so a half of a flower made with Ctrl+M, or the teeth of a gear copied with Shift+D and moved with G and never turned, are taken. A mirror image of a petal that is not the same on both sides is not a copy, and nor is a different petal with the same vertex count.
 - **Who may be taken.** A mesh object that is visible, free to select (a collection with selection switched off counts), local and editable, in no move yet, and with no keys, drivers or NLA of its own. Left alone, and named in the report: "has keys or drivers of its own", "is linked from a library", "cannot be edited", "is hidden", "cannot be selected", "is already part of a move".
 - **Standing an object on a new frame.** A rider copies its leader's move from its own origin and axes, so a petal modelled with its origin somewhere else, or its rotation or scale applied, would swing about the wrong point. Such an object is stood on the frame a copy would have, and its mesh is moved the other way. It gets a mesh of its own, so objects that shared the old one stay as they were. This is done only to plain objects. An object with constraints, instancing, particles, other objects depending on it (a Child Of, a Shrinkwrap target, a child hung from its vertices), or a modifier that reads its frame (anything but Subdivision, Triangulate, Edge Split, Weighted Normal or an Armature of another rig; Bevel and Solidify only at a scale of 1) is left alone.
 - **Then it is checked.** After the change the result is compared with what it was: where every vertex is in the world, and which way every face faces. If anything differs, the object is put back exactly and left alone: "cannot be re-framed safely (re-framing it would change how it looks): set its origin and rotation like the leader's, or use Make copies". The report says how many were re-framed. Textures that use an object's own or generated coordinates are not checked.
@@ -409,7 +415,7 @@ Ring takes an object up, or stands it on a new frame, only when that is provably
 **What Ring makes**
 
 - Copies are named "Petal 2" and on, and put in the same collections. Objects picked up keep their names.
-- Nothing that bound or hung the original comes with a copy: no Armature modifier, no bone group, no Follows, no parent, no keys on the transform.
+- Nothing that bound or hung the original comes with a copy: no Armature modifier, no vertex group for the original's bone, no Follows, no parent, no keys on the transform.
 - The copies and the objects picked up ride along with the part, exactly as if you had pressed Ride Along on them.
 - A part is ringed with the parts that follow it, never the ones it follows. Ring a finger's first joint and every finger comes whole, each curling from where it stands. Ring a fan blade that follows a hub, and the hub is not copied: every copy hangs from the hub as the blade does.
 - A second Ring over the first, or a bigger one, adds only the missing places. Ring 4 then Ring 8 adds the 4 missing ones.
@@ -423,22 +429,24 @@ Ring takes an object up, or stands it on a new frame, only when that is provably
 
 **Steps**
 
-1. Press **Spread...** in the header of **Riding along** (to set Leads) or of **Timing** (to set Delays).
-2. Pick an **Order** (below).
+1. Press **Spread…** in the header of **Riding along** (to set Leads) or of **Timing** (to set Delays).
+2. Pick an **Order** (below). For Leads the dialog opens on **Around a ring**. For Delays it opens on **Down a chain** if the move has Follows links, and on **Along an axis** if not.
 3. Pick **By**: **Step** or **Range**.
 4. Set the values and press **OK**.
 
 It writes once for all of them, and a built move plays the new values at once. No Build. If any value hits the limit (Leads are whole numbers from -50 to 50, Delays from 0 to 0.99), the report says how many were held at the limit.
 
-**By Step (the default).** You give a **Start** and a **Step** (the dialog calls them "Start Lead" and "Lead step", or "Start Delay" and "Delay step"). Every part takes a place in the order, and gets Start + Step x its place, counting from 0. The dialog opens with a Step of -10 for Leads and 0.1 for Delays, made smaller when the last place would run past 40 of the 50 a Lead can be (0.9 of the 0.99 a Delay can be): a wave held at the limit stops dead there. Twelve spikes one way round get -3, both ways -6, and eight petals both ways keep -10. For Leads, **Around a ring** opens with **Both ways** on. A Step you type is kept as you typed it, and what it holds at the limit is still counted. For Leads, below 0 each rider waits more than the one before it; above 0 each goes earlier. For Delays, each waits that much longer. It is a *step*, so adding a petal later gives it the next value and leaves the rest as they were: a Step of -10 gives -10, -20, -30 whether there are four petals or forty.
+The dialog works out its Order, Start, Step, First and Last afresh every time. Blender remembers your last **By**, **Both ways**, **Only the selected**, **Axis** and **Seed** until you close Blender.
 
-**By Range.** You give a **First** and a **Last**, and the parts between are spread evenly from one to the other, however many there are. Handy when it is the last that matters: the last petal opens at -40 and whatever is between is shared out. (A part added later changes the share of the others.)
+**By Step (the default).** You give a **Start** and a **Step** (the dialog calls them "Start Lead" and "Lead step", or "Start Delay" and "Delay step"). Every part takes a place in the order, and gets Start + Step x its place, counting from 0. The dialog opens with a Step of -10 for Leads and 0.1 for Delays, made smaller when the last place would run past 40 of the 50 a Lead can be (0.9 of the 0.99 a Delay can be): a wave held at the limit stops dead there. Twelve spikes one way round get -3, both ways -6, and eight petals both ways keep -10. For Leads, **Around a ring** first opens with **Both ways** on. A Step you type is kept as you typed it, and what it holds at the limit is still counted. For Leads, below 0 each rider waits more than the one before it; above 0 each goes earlier. For Delays, each waits that much longer. It is a *step*, so adding a petal later gives it the next value and leaves the rest as they were: a Step of -10 gives -10, -20, -30 whether there are four petals or forty.
+
+**By Range.** You give a first and a last value (the dialog calls them "First Lead" and "Last Lead", or "First Delay" and "Last Delay"), and the parts between are spread evenly from one to the other, however many there are. Handy when it is the last that matters: the last petal opens at -40 and whatever is between is shared out. (A part added later changes the share of the others.)
 
 **The orders.** Parts the order cannot tell apart share a place and get the same value.
 
-- **Around a ring:** the further round the ring a part stands from the start, one way round, the later it comes. Tick **Both ways** to fold the ring in half, so the two sides match: the parts either side of the start go together. The ring is wherever the parts lie, so a tipped ring works.
+- **Around a ring:** the further round the ring a part stands from the start, one way round, the later it comes. Tick **Both ways** to fold the ring in half, so the two sides match: the parts either side of the start go together. The ring is wherever the parts lie, so a tipped ring works. Parts scattered over a field are not a ring: for those use **By distance** or **Along an axis**.
 - **By distance:** the further a part is from the start, the later it comes. A ripple.
-- **Along an axis:** the further along world **X**, **Y** or **Z**. Dominoes, a wave across a grid.
+- **Along an axis:** the further along world **X**, **Y** or **Z** (you pick which under **Axis**). Dominoes, a wave across a grid.
 - **Down a chain:** the further down a Follows chain it hangs. A finger or a tentacle. Delays only, because riders have no Follows chain of their own.
 - **Random:** no order, but the same every time for the same **Seed**. The places are dealt out, none shared.
 
@@ -518,16 +526,16 @@ One petal, recorded once, becomes a bud of eight petals that open one after anot
 4. **Open the petal.** Select **Petal Base** alone and tilt it outward about its hinge: press **R**, press the axis key the hinge runs along, type an angle such as **60**, and press Enter. The tip comes along on screen. Now select **Petal Tip** and bend it further out about its own hinge in the same way (an angle such as **40**).
 5. **Record After.** Press **Record** on the **After** row.
 6. **Build Sliders.** Drag **Play** from 0 to 100%. One petal opens. Fix anything that looks wrong before you multiply it.
-7. **Ring.** Put the 3D cursor on the flower's centre (Shift+S > Cursor to World Origin if the flower is at the origin). Click **Petal Base** so it is the only selected object and the active one. Press **Ring...** and set: **Use** Fill the gaps, **Count** 8, **Round** 3D Cursor, **About** World Z, **Linked copies** on, **Lead step** 0. Press **OK**.
+7. **Ring.** Put the 3D cursor on the flower's centre (Shift+S > Cursor to World Origin if the flower is at the origin). Click **Petal Base** so it is the only selected object and the active one. Press **Ring…** and set: **Use** Fill the gaps, **Count** 8, **Round** 3D Cursor, **About** World Z, **Linked copies** on, **Lead step** 0. Press **OK**. (The first time, the dialog already opens with all of these except **Count**, which opens at 6.)
    - Seven more petals appear round the centre, named "Petal Base 2" and so on (and "Petal Tip 2"). They are whole petals: Ring copied the tip too, because it follows the base.
-   - A **Riding along (7)** section appears, one row per petal.
-8. **Spread.** Press **Spread...** in the **Riding along** header. Set **Order** to **Around a ring**, tick **Both ways**, set **By** to **Step**, **Start Lead** 0 and **Lead step** -10. Press **OK**. The Leads become -10, -20, -30, -40, -30, -20, -10. Nothing needs a Build.
+   - A **Riding along (7)** section appears, one row per petal, marked **+1** for the tip that comes with it.
+8. **Spread.** Press **Spread…** in the **Riding along** header. Set **Order** to **Around a ring**, tick **Both ways**, set **By** to **Step**, **Start Lead** 0 and **Lead step** -10. Press **OK**. (The first time, for a ring of eight, the dialog already opens with all of these.) The Leads become -10, -20, -30, -40, -30, -20, -10. Nothing needs a Build.
 9. **Ease and animate.** Set **Ease** to **Smooth**. Under **Play**, set **Frames** to 120, put the timeline on frame 1, press **Animate** and **Space**. The recorded petal opens first, the petals either side follow, and the opposite petal is last.
 
 **Variations.**
 
 - If the other petals are already modelled, leave **Use** on **Fill the gaps** (or pick **Use what's there**): Ring takes them up and makes nothing new.
-- A second ring of smaller inner petals: select the inner petal, press **Ring...** again with another **Count** and **Lead step**.
+- A second ring of smaller inner petals: select the inner petal, press **Ring…** again with another **Count** and **Lead step**.
 - Stagger the leaf or the core with **Timing**: type a **Delay** such as 0.3 so they open after the petals have started.
 
 ## Worked example 2: a curling finger (Make Chain + Curl)
@@ -538,14 +546,14 @@ You need three segments, **Seg1**, **Seg2** and **Seg3**, laid end to end like a
 2. **Pivots.** With the origins on the knuckles, leave **Pivot** on **Origin**. (Otherwise, put the 3D cursor on each knuckle and press **Pivot > Cursor** for that segment.)
 3. **Make Chain.** Select all three, clicking **Seg1** last. Open **Follows** and press **Make Chain**. The report says "Chain: Seg1 > Seg2 > Seg3".
 4. **Bend the first joint.** Select **Seg1** alone and turn it about its knuckle by hand: press **R**, press the axis key the knuckle bends around, type an angle such as **40**, and press Enter. The others come along on screen. Keep **Seg1** the active object.
-5. **Curl.** Press **Curl**, next to **Make Chain** at the top of **Follows**. **Seg2** and **Seg3** bend by the same amount, each about its own knuckle, carried by the one before it. To taper the curl so the tip bends least, open **Adjust Last Operation** (bottom left of the viewport) and set **Each next joint x** to 0.8.
+5. **Curl.** Press **Curl**, next to **Make Chain** at the top of **Follows**. **Seg2** and **Seg3** bend by the same amount, each about its own knuckle, carried by the one before it. To taper the curl so the tip bends least, open **Adjust Last Operation** (bottom left of the viewport, or **Edit > Adjust Last Operation...**) and set **Each next joint ×** to 0.8.
 6. **Record After.** Press **Record** on the **After** row.
 7. **Build Sliders.** Drag **Play**. The finger curls from the base to the tip together.
 
 **Make it feel like a finger.**
 
-- Open **Timing**, press **Spread...**, choose **Down a chain**, **By** Step, and a small **Delay step** such as 0.1. Each segment now waits a little longer than the one before.
-- Add the other fingers. Model them with the same segments. Select every segment of the other fingers, then click a segment of the recorded finger last, and press **Ride Along With '...'**. Each finger copies the curl from where it stands. Then press **Spread...** in the **Riding along** header, choose **By distance** (the further a finger is from the recorded one, the later it closes) with a Lead step such as -10, so the fingers close one after another.
+- Open **Timing**, press **Spread…**, choose **Down a chain**, **By** Step, and a small **Delay step** such as 0.1. Each segment now waits a little longer than the one before.
+- Add the other fingers. Model them with the same segments. Select every segment of the other fingers, then click a segment of the recorded finger last, and press **Ride Along With '...'**. Each finger copies the curl from where it stands. Then press **Spread…** in the **Riding along** header, choose **By distance** (the further a finger is from the recorded one, the later it closes) with a Lead step such as -10, so the fingers close one after another.
 
 ## Tips for good results
 
@@ -575,7 +583,7 @@ Work down this list.
 6. Is After the same as Before? If you did not move anything, there is nothing to play.
 
 **I see no new buttons after updating. What do I do?**
-Close Blender completely and open it again; until then it may be running the old code. Then check that only one copy of CopyThat is installed (remove any legacy RigMoves or CopyThat entry under Add-ons) and that the version is what you expect (Edit > Preferences > Get Extensions). Some buttons only show when they make sense: **Spread...** is in the headers of **Riding along** (which appears once a move has riders) and **Timing**; **Make Chain** and **Curl** are at the top of **Follows** (which appears when a move has two or more parts); **Ring...** is under **Curve the Path** and is greyed out until the active object is a part of the move.
+Close Blender completely and open it again; until then it may be running the old code. Then check that only one copy of CopyThat is installed (remove any legacy RigMoves or CopyThat entry under Add-ons) and that the version is what you expect (Edit > Preferences > Get Extensions). Some buttons only show when they make sense: **Spread…** is in the headers of **Riding along** (which appears once a move has riders) and **Timing**; **Make Chain** and **Curl** are at the top of **Follows** (which appears when a move has two or more parts); **Ring…** is under **Curve the Path** and is greyed out until the active object is a part of the move.
 
 **Can I use my own rig's bones?**
 Yes. Go into Pose Mode, select the bones, and press **New Move**. Everything else works the same. See "Using the bones of your own rig". Pivots, curves, Paths and the Ring, Make Chain and Curl tools are for objects; bones turn about their own heads.
@@ -593,7 +601,7 @@ A Lead is measured in "a whole trip by the leader". At -50 a rider sets off only
 Yes. After a Build your parts are ordinary meshes deformed by an ordinary armature, so any render engine works: Cycles, EEVEE or Workbench. To render an animation, key the control first (press **Animate**, or key the Play slider or the handle), so the timeline plays the move. The rig, the handles and the Paths lines are helpers and do not appear in a render.
 
 **What happens to my modelled petals when I use Ring?**
-It depends on the **Use** choice in the dialog. **Make copies** makes new petals whatever is there. **Use what's there** takes up the petals you already modelled and makes nothing. **Fill the gaps** (the default) takes up the ones that are there and copies only into the places that are empty; it never puts a copy on top of a petal that is there. A modelled petal is taken up only if it is an exact copy of the part (same vertices in the same order, standing where a copy would). Ones that are not are left alone and named in the report. If a petal's origin is somewhere else, its mesh is moved the other way so nothing is seen to move. Your modelled petals keep their names.
+It depends on the **Use** choice in the dialog. **Make copies** makes new petals whatever is there. **Use what's there** takes up the petals you already modelled and makes nothing. **Fill the gaps** (the default) takes up the ones that are there and copies only into the places that are empty; it never puts a copy on top of a petal that is there. A modelled petal is taken up only if it is a copy of the part: the same number of vertices, each within a fiftieth of the part's size of a vertex of the part, once it stands where a copy would. The numbering of the vertices does not matter. Ones that are not are left alone and named in the report. If a petal's origin is somewhere else, its mesh is moved the other way so nothing is seen to move. Your modelled petals keep their names.
 
 **How do I undo?**
 Press Ctrl+Z. Every CopyThat button is a normal Blender undo step. Ring, Spread, Make Chain and Curl are each exactly one Ctrl+Z, and a Ring that cannot be finished puts everything back as it found it. **Edit > Undo History** lists the steps.
@@ -602,7 +610,7 @@ Press Ctrl+Z. Every CopyThat button is a normal Blender undo step. Ring, Spread,
 Blender 4.5 and newer. It is tested on Blender 4.5 LTS, 5.0 and 5.2. It does not work on versions older than 4.5.
 
 **The New Move button is greyed out.**
-Select one or more **mesh objects** in Object Mode, or bones in Pose Mode on a rig. Other object types (curves, text, empties) need converting to mesh first.
+Select one or more **mesh objects** in Object Mode, or bones in Pose Mode on a rig. Other object types (curves and text, for example) need converting to mesh first.
 
 **The Step in between button is greyed out.**
 Both Before and After must be recorded, and for loose objects you must have pressed **Build Sliders** at least once, so the parts have bones.
@@ -637,7 +645,7 @@ CopyThat is plain Python with nothing to compile, so it does not depend on your 
 ## Troubleshooting
 
 **The CopyThat tab is missing from the sidebar.**
-Open the sidebar with N while the mouse is over a 3D Viewport. Make sure CopyThat is switched on in Edit > Preferences > Get Extensions. If you also have a legacy RigMoves or CopyThat add-on, remove it (see Installation) and restart Blender.
+Open the sidebar with N while the mouse is over a 3D Viewport. Make sure CopyThat is ticked in Edit > Preferences > Add-ons. If you also have a legacy RigMoves or CopyThat add-on, remove it (see Installation) and restart Blender.
 
 **The panel says "Select the objects that move, or an armature to work on."**
 Nothing usable is selected. Select the mesh objects that move together in Object Mode, or pick the rig it offers.
@@ -673,10 +681,10 @@ You pressed it twice, or the ring is already full. Nothing was added. To add mor
 The **Round** point is probably not where you thought. Press Ctrl+Z, check where the 3D cursor is (or use **World Origin**), and set **About** to **World Z**. Placing the cursor with Shift+right-click turns it to face the view, which tips a ring made about the cursor's Z.
 
 **Use what's there says nothing is an exact copy.**
-The petals must have the same number of vertices, in the same order, as the part, standing where a copy would. A petal whose vertices were renumbered by editing, or one sculpted a little off, is not a copy; the report names what was left out. Choose **Fill the gaps** to copy into empty places instead.
+The petals must have the same number of vertices as the part, each within a fiftieth of the part's size of a vertex of the part, once they stand where a copy would. The numbering of the vertices does not matter. A petal with a vertex more or fewer, or one sculpted further off than that, is not a copy; the report names what was left out. Choose **Fill the gaps** to copy into empty places instead.
 
 **Spread says there are no riders to spread Leads over.**
-Leads belong to riders. Select the objects to ride along, then the part they copy, and press **Ride Along** first. Or use **Spread...** in the **Timing** header to spread Delays instead.
+Leads belong to riders. Select the objects to ride along, then the part they copy, and press **Ride Along** first. Or use **Spread…** in the **Timing** header to spread Delays instead.
 
 **A rider does the move the wrong way round (a door opens inward).**
 Press the **Mirror** button on its row until it reads X, Y or Z and the motion is right. A rider that is a Ctrl+M mirrored copy needs no setting; leave it at **-**.
@@ -721,7 +729,7 @@ Each release also fixes the bugs found while testing it. The full list is in the
 - what you pressed, in order;
 - if you can, a small `.blend` file that shows the problem.
 
-**Credits.** CopyThat is made by **NemVe3D** (https://creators.sa/nemve). It was called RigMoves until version 0.15.0.
+**Credits.** CopyThat is made by **NemVe3D** (https://creators.sa/nemve). It was called RigMoves before version 0.15.0, which renamed it.
 
 **Licence.** CopyThat is free software under the **GNU General Public License, version 3 or (at your option) any later version (GPL-3.0-or-later)**. The licence text is included in the download. You may use, study, change and share it under those terms. The scenes and animations you make with it are yours.
 
