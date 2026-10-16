@@ -1916,6 +1916,10 @@ def own_action(obj):
     it takes them from every one of them. An object whose action is played by
     another ID too is given a copy of it - with its own slot, and nobody else's
     - to take its keys out of; the others keep theirs.
+
+    One of the object's own NLA strips that plays the action is another user,
+    muted or not, in a meta strip or not (Action Stash and Push Down leave
+    them): the keys came out of the strip too, and an NLA is never touched.
     """
     animation = obj.animation_data
     action = animation.action if animation is not None else None
@@ -1925,7 +1929,9 @@ def own_action(obj):
     others = [user for user in bpy.data.user_map(subset={action}, key_types={"ACTION"})
               .get(action, ())
               if not (isinstance(user, bpy.types.Object) and user.name == obj.name)]
-    if not others:
+    in_a_strip = any(strip.action is action for track in animation.nla_tracks
+                     for strip in clip_strips(track.strips, muted=True))
+    if not others and not in_a_strip:
         return
     identifier = slot.identifier
     mine = action.copy()
@@ -2143,14 +2149,15 @@ def moved_by_driver(obj):
         curve.data_path in TRANSFORM_PATHS and not curve.mute for curve in animation.drivers)
 
 
-def clip_strips(strips):
-    """The NLA strips among these that play an action and are not muted, those
-    inside a meta strip too."""
+def clip_strips(strips, muted=False):
+    """The NLA strips among these that play an action and are not muted - or,
+    with `muted`, every one that plays an action - those inside a meta strip
+    too."""
     for strip in strips:
-        if strip.mute:
+        if strip.mute and not muted:
             continue
         if strip.type == "META":
-            yield from clip_strips(strip.strips)
+            yield from clip_strips(strip.strips, muted)
         elif strip.action is not None:
             yield strip
 

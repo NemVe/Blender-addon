@@ -4860,6 +4860,70 @@ class TestAPartIsHungBackOnTheObjectItHungFrom(CopiedModel):
                          "standing free.")
 
 
+class TestAnNlaStripThatPlaysThePartsOwnKeys(CopyThatCase):
+    """A part keyed on its location whose action is also played by a strip of its
+    own NLA - Action Stash and Push Down both leave one. Build lifts the stray
+    keys of the action the part plays, and that was the strip's action: "3 stray
+    keyframe track(s)" emptied the strip, which the guide says is never touched."""
+
+    def keyed_and_stashed(self, muted):
+        scene = bpy.context.scene
+        gear = cube("Gear", (0.0, 0.0, 1.0))
+        scene.frame_set(1)
+        gear.keyframe_insert("location", frame=1)
+        gear.location.z = 2.0
+        gear.keyframe_insert("location", frame=10)
+        gear.location.z = 1.0
+        action = gear.animation_data.action
+        track = gear.animation_data.nla_tracks.new()
+        strip = track.strips.new("Gear keys", 1, action)
+        if strip.action_slot is None:
+            strip.action_slot = action.slots[0]
+        track.mute = muted
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+        return gear
+
+    def build_it(self, gear):
+        select(gear)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        gear.rotation_euler.x = math.radians(90.0)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def check_the_strip(self, gear):
+        strip = gear.animation_data.nla_tracks[0].strips[0]
+        curves = rigmoves.slot_curves(strip.action, strip.action_slot)
+        self.assertEqual([len(curve.keyframe_points) for _bag, curve in curves], [2, 2, 2])
+        # The part's own keys came out of a copy, which is gone with them.
+        self.assertEqual(rigmoves.own_transform_curves(gear), [])
+        self.assertIsNone(gear.animation_data.action)
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+
+    def test_build_lifts_the_keys_the_part_plays_and_leaves_a_stashed_strip_its_own(self):
+        gear = self.keyed_and_stashed(muted=True)
+        self.build_it(gear)
+        self.check_the_strip(gear)
+
+    def test_the_same_with_the_track_not_muted(self):
+        gear = self.keyed_and_stashed(muted=False)
+        self.build_it(gear)
+        self.check_the_strip(gear)
+
+    def test_the_strips_that_are_looked_at_can_include_muted_ones_and_those_in_a_meta_strip(self):
+        action = object()
+        inside = types.SimpleNamespace(mute=True, type="CLIP", strips=[], action=action)
+        meta = types.SimpleNamespace(mute=False, type="META", strips=[inside], action=None)
+        plain = types.SimpleNamespace(mute=False, type="CLIP", strips=[], action=action)
+        muted = types.SimpleNamespace(mute=True, type="CLIP", strips=[], action=action)
+        empty = types.SimpleNamespace(mute=False, type="CLIP", strips=[], action=None)
+        everything = [meta, plain, muted, empty]
+        self.assertEqual(list(rigmoves.clip_strips(everything)), [plain])
+        self.assertEqual(list(rigmoves.clip_strips(everything, muted=True)),
+                         [inside, plain, muted])
+
+
 class TestMakeChainOrder(CopyThatCase):
     """The order follows how a joint is built, at the far end of the part before
     it: not whichever pivot happens to be nearest."""
