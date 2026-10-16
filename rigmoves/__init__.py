@@ -25,6 +25,7 @@ so whatever constraints the bone already carries still run afterwards, and a
 hand-built rig can be given a slider without being taken apart first.
 """
 
+import functools
 import json
 import math
 import random
@@ -925,6 +926,13 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     bone_name: bpy.props.StringProperty()
     before: bpy.props.FloatVectorProperty(size=16)
     after: bpy.props.FloatVectorProperty(size=16)
+    # Where three of the object's vertices were in the world at Before, and how
+    # many it has: enough to tell an object whose origin, scale or rotation
+    # was changed after it was bound - its mesh did not move - from one that
+    # was dragged. Nothing when there are fewer than three, or in a file from
+    # before it was kept.
+    rest_marks: bpy.props.FloatVectorProperty(size=9)
+    rest_count: bpy.props.IntProperty(default=0)
     has_before: bpy.props.BoolProperty(default=False)
     has_after: bpy.props.BoolProperty(default=False)
     start: bpy.props.FloatProperty(
@@ -1617,6 +1625,162 @@ def reseat_bound(data, move=None):
     return count
 
 
+# What catch_up did for the operator that is running. Said once, when the
+# outermost operator is done: an operator writes its own report over whatever
+# was said before it, and a Build that another operator runs is not the one
+# that was pressed.
+HEARD = {"depth": 0, "notes": []}
+
+
+def tell(operator):
+    """Add to each rig's report what catch_up did, and say it to the operator."""
+    notes, HEARD["notes"] = HEARD["notes"], []
+    for name, said in notes:
+        rig = bpy.data.objects.get(name)
+        if rig is not None and rig.type == "ARMATURE":
+            rig.rigmoves.report = (rig.rigmoves.report + " " + said).strip()
+        operator.report({"INFO"}, said)
+
+
+def mentioning(run):
+    """For an operator's execute: when the outermost of them is done, put what
+    catch_up did for it in the report. (Blender counts the arguments of what it
+    registers, so this and the one for invoke are not one function.)"""
+    @functools.wraps(run)
+    def wrapped(self, context):
+        HEARD["depth"] += 1
+        try:
+            return run(self, context)
+        finally:
+            HEARD["depth"] -= 1
+            if not HEARD["depth"]:
+                tell(self)
+    return wrapped
+
+
+def mentioning_invoke(run):
+    """The same for an operator's invoke."""
+    @functools.wraps(run)
+    def wrapped(self, context, event):
+        HEARD["depth"] += 1
+        try:
+            return run(self, context, event)
+        finally:
+            HEARD["depth"] -= 1
+            if not HEARD["depth"]:
+                tell(self)
+    return wrapped
+
+
+def marked_vertices(count):
+    """The three vertices a part is told by: the first, a third of the way
+    through and two thirds."""
+    return (0, count // 3, 2 * count // 3)
+
+
+def note_rest(part, obj):
+    """Remember where three of an object's vertices are in the world at the
+    part's Before, so that an object framed differently later - its origin set,
+    its scale applied - can be told from one that was dragged: the first has
+    its vertices where they were."""
+    count = len(obj.data.vertices) if obj.type == "MESH" else 0
+    if count < 3:
+        part.rest_count = 0
+        return
+    world = as_matrix(part.before)
+    marks = []
+    for index in marked_vertices(count):
+        marks.extend(world @ obj.data.vertices[index].co)
+    part.rest_marks = marks
+    part.rest_count = count
+
+
+def take_before(part, obj, place=None):
+    """Take where an object stands as its Before."""
+    part.before = flat(obj.matrix_world if place is None else place)
+    part.has_before = True
+    note_rest(part, obj)
+
+
+def reach_of(obj):
+    """How big an object is across, in the world."""
+    return max(diagonal([obj.matrix_world @ c for c in corners_of(obj)]), 1e-6)
+
+
+def was_reframed(part, obj):
+    """Whether an object that is off its Before only has its mesh framed in
+    another way: the same number of vertices, and the ones the part is told by
+    exactly where they were."""
+    if not part.rest_count or obj.type != "MESH" or len(obj.data.vertices) != part.rest_count:
+        return False
+    slack = 1e-5 * reach_of(obj)
+    world = obj.matrix_world
+    for number, index in enumerate(marked_vertices(part.rest_count)):
+        mark = Vector(part.rest_marks[3 * number:3 * number + 3])
+        if (world @ obj.data.vertices[index].co - mark).length > slack:
+            return False
+    return True
+
+
+def take_back_reframed(rig, data):
+    """Put objects whose origin, scale or rotation was changed after they were
+    bound back on the frame their move was recorded in, the mesh moved the
+    other way, so that nothing is seen to move. Returns why it cannot, or "".
+
+    Set Origin, or Apply Scale or Rotation, changes the object's own transform
+    and the numbers in its mesh by the same amount. The rig measures from the
+    transform the object had at Before, so it read this as a part dragged off
+    its place and put it back there: the mesh, now framed differently, ended
+    up somewhere else. Done by the machinery Ring uses to stand an object on a
+    new frame, and checked the same way: what Blender shows is compared before
+    and after, and anything that differs is put back exactly.
+    """
+    jobs = []
+    for move in data.moves:
+        for part in follow_order(move, bound_parts(move)):
+            obj, world = hand_moved(part)
+            if obj is not None and world is not None and was_reframed(part, obj):
+                jobs.append((part, obj))
+    if not jobs:
+        return ""
+
+    def refuse(part):
+        return ("'{:s}' was given a new origin, scale or rotation after it was "
+                "bound, and cannot be put back safely: press Ctrl+Z to undo "
+                "that, or take it out of its move (x) and add it again."
+                .format(short(part.name, 18)))
+
+    users = bpy.data.user_map(subset={obj for _part, obj in jobs}, value_types={"OBJECT"})
+    for part, obj in jobs:
+        if reframe_blocker(obj, as_matrix(part.before), None, users):
+            return refuse(part)
+    view_layer = bpy.context.view_layer
+    view_layer.update()
+    looks = {obj.name: look_of(obj) for _part, obj in jobs}
+    framed = [reframe(obj, as_matrix(part.before)) for part, obj in jobs]
+    view_layer.update()
+    for part, obj in jobs:
+        points = looks[obj.name][0]
+        far = max([abs(c) for p in points for c in p] or [0.0])
+        if not looks_the_same(looks[obj.name], look_of(obj), 1e-5 * reach_of(obj) + 1e-6 * far):
+            put_back(framed)
+            view_layer.update()
+            return refuse(part)
+    settle(framed)
+    if len(jobs) == 1:
+        said = ("'{:s}' had its origin, scale or rotation changed after it was bound; "
+                "it was put back on the frame its move was recorded in - its mesh did "
+                "not move. To change where it turns, use Pivot."
+                .format(short(jobs[0][0].name, 18)))
+    else:
+        said = ("{:d} parts had their origin, scale or rotation changed after they were "
+                "bound; they were put back on the frame their move was recorded in - "
+                "their meshes did not move. To change where a part turns, use Pivot."
+                .format(len(jobs)))
+    HEARD["notes"].append((rig.name, said))
+    return ""
+
+
 def curve_start(obj):
     """Where a path curve begins, in the world."""
     spline = obj.data.splines[0]
@@ -1651,6 +1815,11 @@ def carry_stored(data, shift):
                 part.before = flat(shift @ as_matrix(part.before))
             if part.has_after:
                 part.after = flat(shift @ as_matrix(part.after))
+            if part.rest_count:
+                marks = []
+                for number in range(3):
+                    marks.extend(shift @ Vector(part.rest_marks[3 * number:3 * number + 3]))
+                part.rest_marks = marks
 
 
 def catch_up(rig, data=None):
@@ -1673,12 +1842,12 @@ def catch_up(rig, data=None):
         # A new rig, or one from before this was kept: it stands where it
         # stands, and what it remembers is taken to be true of that.
         data.seat, data.seated = flat(now), True
-        return ""
-    shift = now @ as_matrix(data.seat).inverted_safe()
-    if not same_matrix(shift, Matrix.Identity(4), 1e-6):
-        carry_stored(data, shift)
-        data.seat = flat(now)
-    return ""
+    else:
+        shift = now @ as_matrix(data.seat).inverted_safe()
+        if not same_matrix(shift, Matrix.Identity(4), 1e-6):
+            carry_stored(data, shift)
+            data.seat = flat(now)
+    return take_back_reframed(rig, data)
 
 
 def ready(operator, rig, data):
@@ -2147,6 +2316,7 @@ def bind_loose(context, rig, data):
             obj = bpy.data.objects.get(part.name)
             if obj is not None:
                 obj.matrix_world = as_matrix(part.before)
+                note_rest(part, obj)
     context.view_layer.update()
 
     if not activate(context, rig):
@@ -4263,6 +4433,7 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
             return rig_of(context) is not None
         return any(o.type == "MESH" for o in context.selected_objects)
 
+    @mentioning
     def execute(self, context):
         forget_dead_rig(context)
         # Bones if some are selected in pose mode; otherwise the objects that
@@ -4420,6 +4591,7 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
         description="The rig holding the group to join. Empty means the one "
                     "the panel is showing")
 
+    @mentioning
     def execute(self, context):
         rig = bpy.data.objects.get(self.rig_name) if self.rig_name else None
         if rig is None:
@@ -4448,8 +4620,7 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
             part = move.parts.add()
             part.name = obj.name
             part.kind = "OBJECT"
-            part.before = flat(obj.matrix_world)
-            part.has_before = True
+            take_before(part, obj)
         # A joint modelled hanging from a part of this move, or from another
         # newcomer, follows it here too, as New Move does.
         for obj in fresh:
@@ -4510,6 +4681,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
     # joint and its tip - that look just like a copy of the first two.
     pairing: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
+    @mentioning
     def execute(self, context):
         rig = bpy.data.objects.get(self.rig_name) if self.rig_name else None
         if rig is None:
@@ -4578,8 +4750,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             part.kind = "OBJECT"
             part.leader = joint
             part.rides_on = rides
-            part.before = flat(obj.matrix_world)
-            part.has_before = True
+            take_before(part, obj)
             # A joint modelled hanging from another is hung there again if it
             # stops riding along - unless that was this add-on's own hanging,
             # which a copy of a follower brings with it.
@@ -4625,6 +4796,7 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
     part: bpy.props.IntProperty()
     axis: bpy.props.EnumProperty(items=MIRRORS, default="NONE")
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         if not here(context, rig):
@@ -4693,6 +4865,7 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
     index: bpy.props.IntProperty()
     part: bpy.props.IntProperty()
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         if not here(context, rig):
@@ -4784,6 +4957,7 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
                       "and every other object, are left alone")
     bl_options = {"REGISTER", "UNDO"}
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         if not here(context, rig):
@@ -4826,6 +5000,7 @@ class RIGMOVES_OT_use_selected(bpy.types.Operator):
     def poll(cls, context):
         return bool(context.selected_pose_bones)
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         data = rig.rigmoves
@@ -4869,6 +5044,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
                ("STEP", "Step", "")], default="BEFORE")
     step: bpy.props.IntProperty(default=-1)
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         data = rig.rigmoves
@@ -4944,8 +5120,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
             if place is None:
                 continue
             if self.which == "BEFORE":
-                part.before = flat(place)
-                part.has_before = True
+                take_before(part, bpy.data.objects[part.name], place)
             else:
                 part.after = flat(place)
                 part.has_after = True
@@ -5103,6 +5278,7 @@ class RIGMOVES_OT_show(bpy.types.Operator):
                ("STEP", "Step", "")], default="BEFORE")
     step: bpy.props.IntProperty(default=-1)
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         data = rig.rigmoves
@@ -5198,6 +5374,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                       "recorded path, each with its own delay")
     bl_options = {"REGISTER", "UNDO"}
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         if not here(context, rig):
@@ -5211,6 +5388,13 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             return {"CANCELLED"}
         if not ready(self, rig, data):
             return {"CANCELLED"}
+        # A part bound before this was kept has no fingerprint: one is taken
+        # now for every part that is standing on its Before.
+        for move in data.moves:
+            for part in bound_parts(move):
+                obj, world = hand_moved(part)
+                if obj is not None and world is None and not part.rest_count:
+                    note_rest(part, obj)
 
         # Loose objects first: each gets a bone, gets bound to it, and has its
         # two recorded placements written into the move's path. After this a
@@ -5448,9 +5632,11 @@ class RIGMOVES_OT_build(bpy.types.Operator):
 
 
 def unrecorded(data):
-    """Bound parts dragged off their Before and not recorded yet."""
+    """Bound parts dragged off their Before and not recorded yet. One that has
+    only had its origin, scale or rotation changed was not dragged."""
     return [part.name for move in data.moves for part in bound_parts(move)
-            if not part.leader and hand_moved(part)[1] is not None]
+            if not part.leader and hand_moved(part)[1] is not None
+            and not was_reframed(part, hand_moved(part)[0])]
 
 
 def keeps_drags(operator, data):
@@ -5498,6 +5684,7 @@ class RIGMOVES_OT_set_pivot(bpy.types.Operator):
     index: bpy.props.IntProperty()
     kind: bpy.props.EnumProperty(items=PIVOTS, default="ORIGIN")
 
+    @mentioning
     def execute(self, context):
         rig, data, move = move_at(context, self.index, self)
         if move is None:
@@ -5546,6 +5733,7 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
     index: bpy.props.IntProperty()
 
+    @mentioning
     def execute(self, context):
         rig, data, move = move_at(context, self.index, self)
         if move is None:
@@ -5631,6 +5819,7 @@ class RIGMOVES_OT_drop_curve(bpy.types.Operator):
     index: bpy.props.IntProperty()
     part: bpy.props.IntProperty()
 
+    @mentioning
     def execute(self, context):
         _rig, data, move = move_at(context, self.index, self)
         if move is None or not 0 <= self.part < len(move.parts):
@@ -5663,6 +5852,7 @@ class RIGMOVES_OT_show_paths(bpy.types.Operator):
     index: bpy.props.IntProperty()
     show: bpy.props.BoolProperty(default=True)
 
+    @mentioning
     def execute(self, context):
         rig, data, move = move_at(context, self.index, self)
         if move is None:
@@ -5777,6 +5967,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
             return None
         return rig, data, move, groups
 
+    @mentioning_invoke
     def invoke(self, context, event):
         found = self.plan(context)
         if found is None:
@@ -5826,6 +6017,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
             column.prop(self, "first", text="First " + noun)
             column.prop(self, "last", text="Last " + noun)
 
+    @mentioning
     def execute(self, context):
         found = self.plan(context)
         if found is None:
@@ -5965,6 +6157,7 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
         self.report({"WARNING"}, said)
         return {"CANCELLED"}
 
+    @mentioning
     def execute(self, context):
         rig, data, move = move_at(context, self.index, self)
         if move is None:
@@ -6152,6 +6345,7 @@ class RIGMOVES_OT_curl(bpy.types.Operator):
         self.report({"WARNING"}, said)
         return {"CANCELLED"}
 
+    @mentioning
     def execute(self, context):
         rig, data, move = move_at(context, self.index, self)
         if move is None:
@@ -7012,6 +7206,7 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             return None
         return rig, data, move, part, members, chain_of(move, part)
 
+    @mentioning_invoke
     def invoke(self, context, event):
         if self.plan(context) is None:
             return {"CANCELLED"}
@@ -7032,6 +7227,7 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         copying.prop(self, "linked")
         layout.prop(self, "lead_step")
 
+    @mentioning
     def execute(self, context):
         found = self.plan(context)
         if found is None:
@@ -7473,6 +7669,7 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
     index: bpy.props.IntProperty()
 
+    @mentioning
     def execute(self, context):
         rig = rig_of(context)
         data = rig.rigmoves

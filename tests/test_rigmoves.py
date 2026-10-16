@@ -5971,6 +5971,114 @@ class TestAModelMovedAsAWhole(ChestCase):
         self.check_lid()
 
 
+class TestAReframedPart(ChestCase):
+    """The origin of a built part is set, or its scale or rotation applied.
+    Nothing moves on screen, but the object's own transform and the numbers
+    in its mesh both change, and the rig - measuring from the transform the
+    object had at Before - read that as a part dragged and put it back: the
+    mesh ended up somewhere else, with "moved and not recorded" for an answer."""
+
+    SAID = "had its origin, scale or rotation changed after it was bound"
+
+    def reframe_with_the_cursor(self):
+        bpy.context.scene.cursor.location = Vector((0.7, 0.3, 1.4))
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def apply(self, **kinds):
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.transform_apply(**kinds), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_set_origin_to_the_cursor_is_put_back_on_the_frame_and_nothing_moves(self):
+        self.reframe_with_the_cursor()
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+        self.assertIn(self.SAID, rig().rigmoves.report)
+        self.assertIn("To change where it turns, use Pivot.", rig().rigmoves.report)
+        # On the frame it was recorded in again.
+        self.assertTrue(rigmoves.same_matrix(
+            self.lid.matrix_world, rigmoves.as_matrix(self.move.parts["Lid"].before), 1e-5))
+
+    def test_applying_the_scale_is_put_back_on_the_frame_and_nothing_moves(self):
+        self.apply(location=False, rotation=False, scale=True)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_applying_location_rotation_and_scale_together(self):
+        self.apply(location=True, rotation=True, scale=True)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_set_pivot_after_a_set_origin_is_not_refused_as_a_part_moved(self):
+        # What the refusal used to say, and what it asked for: record it first.
+        self.reframe_with_the_cursor()
+        bpy.context.scene.cursor.location = self.hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+        self.check_lid()
+
+    def test_a_record_after_a_set_origin_keeps_the_move_as_it_was(self):
+        self.reframe_with_the_cursor()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertNotIn("moved by hand", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_a_reframe_and_a_move_of_the_whole_model_together(self):
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        bpy.context.scene.cursor.location = Vector((5.7, 2.3, 1.4))
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation((5.0, 2.0, 0.0)))
+
+    def test_a_drag_is_still_read_as_a_drag(self):
+        # Moved, its mesh not moved the other way: nobody framed anything.
+        self.lid.location.z += 0.5
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"CANCELLED"})
+        self.assertIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_what_cannot_be_checked_is_refused_with_the_mesh_left_as_it_was(self):
+        # A constraint reads the frame an object stands in: its look cannot be
+        # told in advance to stay the same.
+        self.lid.constraints.new("COPY_LOCATION")
+        self.reframe_with_the_cursor()
+        was = (self.lid.matrix_world.copy(), rigmoves.mesh_points(self.lid), self.lid.data.name)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        self.assertIn("was given a new origin, scale or rotation after it was bound, and "
+                      "cannot be put back safely: press Ctrl+Z to undo that, or take it "
+                      "out of its move (x) and add it again.", rig().rigmoves.report)
+        self.assertEqual(self.lid.data.name, was[2])
+        self.assertTrue(rigmoves.same_matrix(self.lid.matrix_world, was[0], 1e-9))
+        self.assertEqual(rigmoves.mesh_points(self.lid), was[1])
+        # And taking it out is never held up by it.
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+
+    def test_a_part_bound_before_the_fingerprint_was_kept_gets_one_at_the_next_build(self):
+        part = self.move.parts["Lid"]
+        self.assertEqual(part.rest_count, 8)
+        part.rest_count = 0
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(part.rest_count, 8)
+        # And with one it is told when it is next framed another way.
+        self.reframe_with_the_cursor()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):

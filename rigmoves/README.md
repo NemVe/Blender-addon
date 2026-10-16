@@ -104,6 +104,12 @@ time after; on a built move the path is re-keyed so every recorded pose -
 Before, After and every step - stays exactly where it was. Riders turn about
 their leader's pivot, carried over to where each one stands.
 
+If an origin is moved anyway - Set Origin, or Apply Scale or Rotation, on a part
+that is already built - nothing moves on screen, and CopyThat sees that the mesh
+did not move: it puts the object back on the frame its move was recorded in, the
+mesh moved the other way, and says so in the report. That is not a drag, so it is
+never recorded as one. To change where a part turns, use Pivot.
+
 ### Moving the finished model
 
 A built model can be moved as a whole: select everything - the rig and its
@@ -1241,6 +1247,14 @@ and one lifted 1 m:
   not recorded", and doing as that said - Record After - baked the move into the
   animation. The rig now remembers where it stood, and carries what it recorded
   along when it has been moved, however it was moved.
+- **Set Origin, or Apply Scale, on a built part broke its move.** Nothing moved on
+  screen, but the next Build left the part up to a metre off, and Set Pivot and the
+  rest refused with "has been moved and not recorded", which was not true: it had
+  been given a new origin, not dragged. A part keeps where three of its vertices
+  were; when the object is off its place but they are not, it was only framed
+  differently, and it is put back on its frame with the mesh moved the other way.
+  If that cannot be done safely - a constraint, a modifier that reads the frame -
+  the button says so by name and changes nothing.
 
 ## Known rough edges
 
@@ -1281,6 +1295,10 @@ and one lifted 1 m:
 - An object parented to something outside the rig - a finger to a hand that
   is not in the move - is taken off that parent while it is bound, so moving
   the hand leaves it behind. Parent the rig to the hand instead.
+- A part whose origin, scale or rotation was changed after it was bound is put
+  back on its frame only if what Blender shows is the same before and after. With
+  a constraint on it, or a modifier that measures from its frame, it is not: undo
+  the change, or take the part out of its move and add it again.
 - A rider copies its leader from where it stood when it joined. To move one,
   take it out and add it again. A rider cannot lead others, and only objects
   can lead - a bone of a hand-built rig is not offered.

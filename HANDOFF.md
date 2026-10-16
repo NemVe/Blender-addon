@@ -230,6 +230,21 @@ Features, in the order the user asked for them:
   only noted. An animated rig is caught up at the current frame. Remove, Use Selected
   and the `x` on a rider catch up too but never refuse. Loose parts are carried like
   bound ones: nothing says whether a loose object was moved with the rig.
+- **A part framed differently (0.19):** Set Origin, or Apply Scale or Rotation, on a
+  bound part changes its transform and its mesh by the same amount, and `hand_moved`
+  read that as a drag. Each part keeps `rest_marks` (the world places at Before of
+  vertices 0, n//3 and 2n//3) and `rest_count`, taken by `take_before` whenever a
+  Before is taken (New Move, Add To This Group ... Ride Along, bind) and at the next
+  Build for a part from an older file that is on its Before; `carry_stored` carries
+  them with the rest. `was_reframed(part, obj)`: same count, same three places. Then
+  `take_back_reframed`, run by `catch_up` after the rig's shift, stands the object on
+  its Before again with Ring's `reframe` (new mesh, old kept) and keeps it only if
+  `look_of` is the same before and after (else `put_back`, and `catch_up` returns the
+  refusal). `unrecorded` skips such a part, so `x` on a rider is never held up by it.
+  What `catch_up` did is said through `HEARD` and the `mentioning` decorators on the
+  operators' `execute` (and `invoke` of the two dialogs): the outermost operator
+  appends it to the rig's report when it is done, so no report written after it
+  loses it. Blender counts the arguments of what it registers, hence two decorators.
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in
