@@ -828,9 +828,11 @@ def part_object(part):
     Else whatever its name finds that no other rig has taken.
 
     An object that is in no collection is deleted as far as anyone can tell: the
-    pointer a part keeps is why Blender has not freed it.
+    pointer a part keeps is why Blender has not freed it. And a part whose
+    object was deleted and let go of is none at all: its name may be a new
+    object's by now, and that is not it.
     """
-    if part.kind != "OBJECT":
+    if part.kind != "OBJECT" or part.gone:
         return None
     rig = part.id_data
 
@@ -865,6 +867,24 @@ def part_for(move, obj):
     return None
 
 
+def part_held(move, index):
+    """What the part at this place in a move's list is, to find it again.
+
+    A button drawn a moment ago says where in the list its part was. By the
+    time it does its work catch_up may have taken deleted parts out of the
+    list, and the places after them have moved up: the button would work on
+    the part next door.
+    """
+    part = move.parts[index]
+    return part_object(part), part.name
+
+
+def part_again(move, held):
+    """The part a button meant (see part_held), or None when it is gone."""
+    obj, name = held
+    return part_for(move, obj) if obj is not None else move.parts.get(name)
+
+
 def objects_in_moves():
     """Every object that is a part of a move, on any rig of ours."""
     found = set()
@@ -876,6 +896,22 @@ def objects_in_moves():
                     if obj is not None:
                         found.add(obj)
     return found
+
+
+def rename_parts(move, wanted):
+    """Give these parts of a move new names - wanted is [(part, new name)] - and
+    point everything in the move that names one of them at the new name."""
+    renamed = {part.name: new for part, new in wanted}
+    for part, new in wanted:
+        part.name = new
+    for other in move.parts:
+        for field in ("leader", "rides_on", "follows_kept", "home_parent"):
+            if getattr(other, field) in renamed:
+                setattr(other, field, renamed[getattr(other, field)])
+        # Written straight in: through the property it would be asked if it
+        # were a choice that can be, and put back where it was.
+        if other.follows in renamed:
+            other["follows"] = renamed[other.follows]
 
 
 def follow_renames(rig, data):
@@ -898,17 +934,7 @@ def follow_renames(rig, data):
         wanted = [(p, n) for p, n in wanted if [m for _q, m in wanted].count(n) == 1]
         if not wanted:
             continue
-        renamed = {part.name: new for part, new in wanted}
-        for part, new in wanted:
-            part.name = new
-        for other in move.parts:
-            for field in ("leader", "rides_on", "follows_kept", "home_parent"):
-                if getattr(other, field) in renamed:
-                    setattr(other, field, renamed[getattr(other, field)])
-            # Written straight in: through the property it would be asked if it
-            # were a choice that can be, and put back where it was.
-            if other.follows in renamed:
-                other["follows"] = renamed[other.follows]
+        rename_parts(move, wanted)
         count += len(wanted)
     return count
 
@@ -937,12 +963,21 @@ def let_go_of_deleted(data):
     holds it, and the pointer a part keeps does: it stays in the file, in no
     scene, keeping its name for itself, so that a new object called Lid was
     called Lid.001. The part lets go of it, and it goes if nothing else wants it.
+
+    The part is marked gone for good: the name it has may be given to a new
+    object, which is not it (see part_object). And what hung from the object is
+    hung from what the object hung from, standing where it stands: Blender frees
+    an object's children from it without keeping them where they are, and a
+    follower jumped when its leader went.
     """
     for move in data.moves:
         for part in move.parts:
             obj = part.object
             if obj is not None and not obj.users_collection:
+                for child in list(obj.children):
+                    keep_world(child, obj.parent)
                 part.object = None
+                part.gone = True
                 if obj.users == 0:
                     bpy.data.objects.remove(obj)
 
@@ -960,6 +995,75 @@ def let_deleted_go():
             let_go_of_deleted(rig.rigmoves)
     except Exception:
         pass
+
+
+# What a part that leads riders is called once its object is deleted and it stays.
+DELETED = " (deleted)"
+
+
+def take_out_gone(rig, data):
+    """Take the parts whose objects were deleted out of their moves.
+
+    A part is its object, and once that is deleted and let go of there is
+    nothing left of it to move. Left in its move it was counted in reports,
+    refused Ring, and kept the name a new object may be given. The parts that
+    follow it follow nothing from now on, standing where they stand; its
+    constraints, its drivers and its bone's curves go with it, and its bone at
+    the next Build.
+
+    One that leads riders stays: its bone still plays the path they copy. It
+    is given a name that is free for a new object, "Hand (deleted)", and
+    everything in its move that named it names that. Said through HEARD, as
+    the rest of what catch_up does is.
+    """
+    for move in data.moves:
+        gone = [p.name for p in move.parts if p.gone]
+        if not gone:
+            continue
+        leading = {p.leader for p in move.parts if p.leader}
+        keep = [name for name in gone if name in leading]
+        out = [name for name in gone if name not in leading]
+        said = []
+        if out:
+            one = len(out) == 1
+            said.append("{:s} {:s} deleted, so {:s} {:s} taken out of '{:s}'.".format(
+                named(out), "was" if one else "were", "it" if one else "they",
+                "was" if one else "were", move.name))
+        taken, renamed = {p.name for p in move.parts}, []
+        for name in keep:
+            # Kept, and renamed, by an earlier catch-up.
+            if name.endswith(DELETED):
+                continue
+            new, number = name + DELETED, 2
+            while new in taken:
+                new, number = "{:s}{:s} {:d}".format(name, DELETED, number), number + 1
+            taken.add(new)
+            riders = sum(1 for p in move.parts if p.leader == name)
+            said.append("'{:s}' was deleted, but {:s} {:s} its move, so it is kept as "
+                        "'{:s}': take {:s} out and it goes too.".format(
+                            short(name, 18), counted(riders, "rider"),
+                            "copies" if riders == 1 else "copy", short(new, 28),
+                            "it" if riders == 1 else "them"))
+            renamed.append((move.parts[name], new))
+        rename_parts(move, renamed)
+        # What followed a part that is going follows nothing now, standing where
+        # it stands. What followed one that stays keeps following it - its bone
+        # is still there - but its object no longer hangs from one that is not.
+        going = set(out)
+        ghosts = {p.name for p in move.parts if p.gone}
+        for other in move.parts:
+            if other.follows in going:
+                other["follows"] = ""
+                other.follows_kept = ""
+                hang(other)
+            elif other.follows in ghosts:
+                hang(other)
+            if other.rides_on in going:
+                other.rides_on = ""
+        if out:
+            take_riders_out(rig, move, out)
+        for text in said:
+            HEARD["notes"].append((rig.name, text))
 
 
 def played_elsewhere(rig, action):
@@ -1033,6 +1137,8 @@ def _follows_changed(self, context):
     why = ""
     if target is None or target.name == self.name:
         why = "pick another part of this move"
+    elif target.gone:
+        why = "that part was deleted"
     elif self.leader or target.leader:
         why = "riders copy their leader instead"
     elif self.kind != "OBJECT" or target.kind != "OBJECT":
@@ -1219,6 +1325,10 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # The object this one hung from before the first Build took it over, so
     # taking it out of the rig can hang it there again.
     home_parent: bpy.props.StringProperty()
+    # Set when the part's object was deleted and let go of. The name above may
+    # be given to a new object at once, and that is not this part: a part that
+    # is gone has no object, whatever stands under its name. See part_object.
+    gone: bpy.props.BoolProperty(default=False)
     # The part this one hangs from, like the joints of a finger: it moves
     # with that part and plays its own move on top. Empty for none. Put
     # into effect at the next Build, which hangs the bone from that part's.
@@ -2223,6 +2333,7 @@ def catch_up(rig, data=None):
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
     let_go_of_deleted(data)
+    take_out_gone(rig, data)
     follow_renames(rig, data)
     point_at_objects(rig, data)
     own_actions(rig, data)
@@ -5386,10 +5497,14 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
+        meant = part_held(move, self.part)
         if not ready(self, rig, data) or not keeps_drags(self, data):
             return {"CANCELLED"}
+        rider = part_again(move, meant)
+        if rider is None:
+            return {"CANCELLED"}
         # A copied finger mirrors as one, by the setting on its first joint.
-        rider = copy_root(move, move.parts[self.part])
+        rider = copy_root(move, rider)
         rider.mirror = self.axis
         bpy.ops.rigmoves.build()
         data.report = ("'{:s}' mirrors its leader across {:s}.".format(
@@ -5402,7 +5517,8 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
 def take_riders_out(rig, move, names):
     """Take these riders out of a move: their constraints and drivers, their
     bones' curves, their binding, and the parts themselves. The bones are
-    swept by the next Build.
+    swept by the next Build. Any part can be taken out this way, a rider or
+    not: a deleted one is (take_out_gone).
 
     Their constraints, and with them their drivers, go before the bones do: a
     driver left on a bone that is gone is one Blender warns about on every
@@ -5455,12 +5571,14 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
+        meant = part_held(move, self.part)
         catch_up(rig, data)
-        if not keeps_drags(self, data):
+        rider = part_again(move, meant)
+        if rider is None or not keeps_drags(self, data):
             return {"CANCELLED"}
         # The joints riding on it go with it: left behind they would hang
         # from a bone about to be swept, and play only half a finger.
-        names = [p.name for p in copy_of(move, move.parts[self.part])]
+        names = [p.name for p in copy_of(move, rider)]
         take_riders_out(rig, move, names)
         # The build sweeps the bones, now that nothing claims them.
         bpy.ops.rigmoves.build()
@@ -6424,12 +6542,19 @@ class RIGMOVES_OT_drop_curve(bpy.types.Operator):
 
     @mentioning
     def execute(self, context):
+        # Which part is meant, kept to find it again once the rig is caught up
+        # (see part_held).
+        shown = rig_of(context)
+        moves = shown.rigmoves.moves if here(context, shown) else []
+        meant = None
+        if 0 <= self.index < len(moves) and 0 <= self.part < len(moves[self.index].parts):
+            meant = part_held(moves[self.index], self.part)
         _rig, data, move = move_at(context, self.index, self)
-        if move is None or not 0 <= self.part < len(move.parts):
+        part = part_again(move, meant) if move is not None and meant is not None else None
+        if part is None:
             return {"CANCELLED"}
         if not keeps_drags(self, data):
             return {"CANCELLED"}
-        part = move.parts[self.part]
         obj = part.path_curve
         part.path_curve = None
         if obj is not None:
@@ -8439,8 +8564,10 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
                 unhang(part)
             if part.kind != "OBJECT" or not part.bone_name:
                 continue
-            if unbind_object(rig, part):
-                gone.append(part.bone_name)
+            # Its bone goes with it whether or not its object is still there: a
+            # deleted part that leads riders stays for its bone.
+            unbind_object(rig, part)
+            gone.append(part.bone_name)
         # The handle's driver goes with the slider it writes. Left behind it
         # points at a property that is gone and a handle about to be, and
         # Blender complains about it on every update from then on.
