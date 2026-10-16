@@ -1864,15 +1864,20 @@ def same_place(one, other, near, far=0.0):
 
     A matrix keeps seven digits, so one that stands a few hundred metres from the
     world's origin is only right to a hair over 1e-5, and one carried there and
-    back is a little less right than that for good. Its turn and scale are not
-    out by more than 1e-5 whatever the distance; its position is by 1e-5 of
-    1 + `near`, how far from the origin the two stand, and 2e-6 of `far`, the
-    farthest the rig has been carried (see RIGMOVES_Rig.far).
+    back is a little less right than that for good. So is one of a big scale: its
+    seven digits are of its biggest entry, `size` (1 at the least), and a float
+    near 200 steps by 1.5e-5, so a part scaled by 200, or a model made 200 times
+    the size, is never quite where it was put. Its turn and scale are not out by
+    more than 1e-5 of `size`, whatever the distance; its position is by 1e-5 of
+    `size` + `near`, how far from the origin the two stand, and 2e-6 of `far`,
+    the farthest the rig has been carried (see RIGMOVES_Rig.far), taken `size`
+    times over: a model scaled up has the rounding of its places scaled with them.
     """
-    turn = max(abs(a - b) for row_a, row_b in zip(one.to_3x3(), other.to_3x3())
-               for a, b in zip(row_a, row_b))
+    ours, theirs = one.to_3x3(), other.to_3x3()
+    size = max(1.0, max(abs(a) for row in (*ours, *theirs) for a in row))
+    turn = max(abs(a - b) for row_a, row_b in zip(ours, theirs) for a, b in zip(row_a, row_b))
     shift = max(abs(a - b) for a, b in zip(one.translation, other.translation))
-    return turn <= 1e-5 and shift <= 1e-5 * (1.0 + near) + 2e-6 * far
+    return turn <= 1e-5 * size and shift <= 1e-5 * (size + near) + 2e-6 * far * size
 
 
 def hand_moved(part, shift=None):

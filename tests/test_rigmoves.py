@@ -10413,6 +10413,131 @@ class TestRigidFit(unittest.TestCase):
         self.assertGreater(miss, 0.5)
 
 
+class TestAModelScaledUpAsAWhole(CopyThatCase):
+    """A built model of three parts is made 200 times the size, the rig and its
+    parts selected - as a model drawn in centimetres is. A float near 200 steps
+    by 1.5e-5, so a part's matrix was a step out of the one kept for it, and
+    that was read as a drag: Build "put back" all three, Record After "read them
+    as a pose", and the travel of the move, 200 metres, was lost."""
+
+    # Each with a drag the add-on must still notice: a centimetre of a part a
+    # hundred metres across, and ten of one a kilometre across.
+    SCALES = {200.0: 0.01, 1000.0: 0.1}
+
+    def make_model(self):
+        """Three cubes in a row, each lifted a metre: built."""
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.parts = [cube(name, (x, 0.0, 0.5))
+                      for name, x in (("A", 0.0), ("B", 3.0), ("C", 6.0))]
+
+        def pose():
+            for part in self.parts:
+                part.location.z += 1.0
+
+        record_move(self.parts, pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def scale_everything(self, scale):
+        select(rig(), *self.parts)
+        self.assertEqual(bpy.ops.transform.resize(value=(scale, scale, scale)), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def travel(self, part):
+        """How far the middle of a part's mesh goes between the two ends of its slider."""
+        drive(self.move, 0.0)
+        start = centre(part)
+        drive(self.move, 1.0)
+        end = centre(part)
+        drive(self.move, 0.0)
+        return end - start
+
+    def test_build_and_record_see_no_drag_in_a_model_made_bigger(self):
+        for scale in self.SCALES:
+            with self.subTest(scale=scale):
+                self.make_model()
+                self.scale_everything(scale)
+                for _ in range(2):
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                    self.assertNotIn("put back", rig().rigmoves.report)
+                self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+                self.assertNotIn("moved by hand", rig().rigmoves.report)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertNotIn("put back", rig().rigmoves.report)
+
+    def test_the_travel_of_the_move_is_kept_through_record_and_build(self):
+        for scale in self.SCALES:
+            with self.subTest(scale=scale):
+                self.make_model()
+                self.scale_everything(scale)
+                for _ in range(2):
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                for part in self.parts:
+                    # Each part rose a metre, and the model is `scale` times the size.
+                    gone = self.travel(part) - Vector((0.0, 0.0, scale))
+                    self.assertLess(gone.length, TOLERANCE * scale, part.name)
+
+    def test_a_real_drag_of_a_part_is_still_read_as_one_and_only_that_part(self):
+        for scale, drag in self.SCALES.items():
+            with self.subTest(scale=scale):
+                self.make_model()
+                self.scale_everything(scale)
+                rigmoves.catch_up(rig())
+                dragged = self.parts[1].matrix_world.copy()
+                dragged.translation.z += drag
+                self.parts[1].matrix_world = dragged
+                bpy.context.view_layer.update()
+                self.assertEqual(rigmoves.unrecorded(rig().rigmoves), ["B"])
+                select(self.parts[1])
+                self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"),
+                                 {"CANCELLED"})
+                self.assertIn("'B' has been moved and not recorded", rig().rigmoves.report)
+
+
+class TestAPartWithAnUnappliedScaleOf200(CopyThatCase):
+    """A door modelled small and given the object scale an import leaves, 200,
+    never applied, and turned 25 degrees: its matrix has entries of 181 and 85,
+    a float there steps by 1.5e-5, and the matrix Build set was a step out of
+    the one kept - the door read as dragged. Set Pivot, Ring and Curve the Path
+    all refused it with "has been moved and not recorded"."""
+
+    def setUp(self):
+        super().setUp()
+        self.door = cube("Door", (3.3, 1.7, 2.1))
+        self.door.data.transform(Matrix.Scale(0.01, 4))
+        self.door.scale = (200.0, 200.0, 200.0)
+        self.door.rotation_euler.z = math.radians(25.0)
+        bpy.context.view_layer.update()
+
+        def pose():
+            self.door.location.z += 1.0
+
+        record_move([self.door], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        select(self.door)
+
+    def test_the_door_stands_on_its_before(self):
+        self.assertIsNone(rigmoves.hand_moved(self.move.parts["Door"])[1])
+
+    def test_set_pivot_is_not_refused(self):
+        bpy.context.scene.cursor.location = self.door.matrix_world.translation
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_ring_is_not_refused(self):
+        bpy.context.scene.cursor.location = (self.door.matrix_world.translation
+                                             + Vector((4.0, 0.0, 0.0)))
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=3), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_curve_the_path_is_not_refused(self):
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+
 if __name__ == "__main__":
     # Inside a Blender binary sys.argv is Blender's own command line; only what
     # follows "--" is meant for the tests.
