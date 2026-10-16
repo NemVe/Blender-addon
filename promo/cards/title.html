@@ -5,6 +5,15 @@
 <title>CopyThat title card</title>
 <meta name="viewport" content="width=1920">
 <style>
+  /* The cards must look the same on any machine, and Inter is not installed on Windows by default, so the faces ship in fonts/. */
+  @font-face {
+    font-family: "Inter Display"; font-style: normal; font-weight: 300;
+    src: url("fonts/InterDisplay-Light.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 500;
+    src: url("fonts/Inter-Medium.woff2") format("woff2");
+  }
   /* Title card, 1920x1080, 3.5 s at 30 fps. Everything is posed by
      setTime(t); nothing here animates on its own. */
   :root {
