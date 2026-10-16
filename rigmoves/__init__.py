@@ -1304,10 +1304,14 @@ def home_of(part):
     return held if held is not None and held.users_collection else None
 
 
+def plain_name(name):
+    """A name without the mark of something deleted that is still named."""
+    return name[:-len(DELETED)] if name.endswith(DELETED) else name
+
+
 def home_name(part):
     """What the object a part hung from was called, in words."""
-    name = part.home_parent
-    return name[:-len(DELETED)] if name.endswith(DELETED) else name
+    return plain_name(part.home_parent)
 
 
 def hang(part):
@@ -8196,7 +8200,15 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         members = [part] + [p for p, _steps in chain_below(move, part)]
         for joint in members:
             obj = part_object(joint)
-            if not joint.has_before or obj is None or obj.type != "MESH":
+            # Each is said for what it is: a part from an older file can be left
+            # in its move with no object to stand for it.
+            if obj is None:
+                return self.refuse(data, "'{:s}' was deleted, so the chain cannot be "
+                                         "ringed.".format(short(plain_name(joint.name), 18)))
+            if obj.type != "MESH":
+                return self.refuse(data, "'{:s}' is not a mesh, so it cannot be ringed."
+                                         .format(short(joint.name, 18)))
+            if not joint.has_before:
                 return self.refuse(data, "'{:s}' has no Before recorded yet.".format(
                     short(joint.name, 18)))
         # Riding along on a built move is a Build, and Build puts a dragged

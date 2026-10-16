@@ -4282,11 +4282,9 @@ class TestANewObjectTakesTheNameOfADeletedPart(CopyThatCase):
         self.assertEqual([p.name for p in rig().rigmoves.moves[0].parts], ["Cube"])
 
 
-class TestADeletedPartLeavesItsMove(CopyThatCase):
-    """A part whose object was deleted stayed in its move for good: Ring said it
-    "has no Before recorded yet", the reports counted it, a part that followed
-    it was left hung from nothing, and every call for the part's object looked
-    through the whole file for it."""
+class FingerCase(CopyThatCase):
+    """A finger of three segments, built. (TestFollowers makes one too; these
+    classes come before it.)"""
 
     KNUCKLES = (Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)))
 
@@ -4319,6 +4317,13 @@ class TestADeletedPartLeavesItsMove(CopyThatCase):
         self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
         self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
         self.assertLess(drift(self.segments[2], self.rest[2]), TOLERANCE)
+
+
+class TestADeletedPartLeavesItsMove(FingerCase):
+    """A part whose object was deleted stayed in its move for good: Ring said it
+    "has no Before recorded yet", the reports counted it, a part that followed
+    it was left hung from nothing, and every call for the part's object looked
+    through the whole file for it."""
 
     def petals(self):
         """One petal that moves outwards, ringed four times round the world's
@@ -4996,6 +5001,57 @@ class TestMutingAnNlaStrip(CopyThatCase):
         self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), ([], []))
         self.assertNotIn("fights the rig", self.build())
         self.plays_the_move_at_every_frame()
+
+
+class TestRingSaysWhyAPartStopsIt(FingerCase):
+    """Ring turned a chain down with "has no Before recorded yet" whatever was
+    wrong with the part below: a part with no Before, a part that was deleted -
+    an older file can leave one in its move, with nothing to stand for it - and
+    one that is no mesh."""
+
+    def refusal(self):
+        bpy.context.scene.cursor.location = (0.0, 0.0, -3.0)
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=3), {"CANCELLED"})
+        return rig().rigmoves.report
+
+    def deleted(self):
+        # As an older file has it: the pointer let go of and nothing marked gone.
+        delete_in_the_viewport(self.segments[2])
+        self.move.parts["Seg3"].gone = False
+
+    def unrecorded(self):
+        self.move.parts["Seg3"].has_before = False
+
+    def no_mesh(self):
+        lamp = bpy.data.objects.new("Lamp", None)
+        bpy.context.scene.collection.objects.link(lamp)
+        self.move.parts["Seg3"].object = lamp
+
+    def test_each_thing_that_stops_a_ring_has_a_sentence_of_its_own(self):
+        for how, sentence in (
+                (self.deleted, "'Seg3' was deleted, so the chain cannot be ringed."),
+                (self.unrecorded, "'Seg3' has no Before recorded yet."),
+                (self.no_mesh, "'Lamp' is not a mesh, so it cannot be ringed.")):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            self.finger()
+            how()
+            self.assertEqual(self.refusal(), sentence, how.__name__)
+
+    def test_a_deleted_leader_kept_for_its_riders_is_named_as_it_was(self):
+        self.finger()
+        bpy.context.scene.cursor.location = (0.0, 0.0, -3.0)
+        # A rider of the middle joint keeps it when it is deleted.
+        rider = cube("Rider", (1.5, 4.0, 0.0))
+        rider.scale = (1.0, 0.3, 0.3)
+        bpy.context.view_layer.update()
+        select(rider, self.segments[1])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg2",
+                                                     rig_name=rig().name), {"FINISHED"})
+        delete_in_the_viewport(self.segments[1])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.move.parts[1].name, "Seg2 (deleted)")
+        self.assertEqual(self.refusal(), "'Seg2' was deleted, so the chain cannot be ringed.")
 
 
 class TestNewMoveDoesNotRememberNewRig(CopyThatCase):
