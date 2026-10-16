@@ -9189,6 +9189,155 @@ class TestARigSwitchedOffInTheViewport(ChestCase):
         self.assertEqual(owner.rigmoves.report, said[0])
 
 
+class StretchedParentCase(CopyThatCase):
+    """A built model whose rig hangs from an Empty that is then scaled unevenly,
+    turned and moved. Everything the move recorded goes with the model, so every
+    evaluated mesh must be the Empty's matrix on what it was before - at the ends
+    of the slider and half way."""
+
+    SHARES = (0.0, 0.5, 1.0)
+
+    def hang_the_rig_from_an_empty(self):
+        self.hand = bpy.data.objects.new("Hand", None)
+        bpy.context.scene.collection.objects.link(self.hand)
+        bpy.context.view_layer.update()
+        select(self.hand, rig())
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=True),
+                         {"FINISHED"})
+
+    def seen(self, objects):
+        out = {}
+        for share in self.SHARES:
+            drive(rig().rigmoves.moves[0], share)
+            out[share] = {obj.name: world_points(obj) for obj in objects}
+        drive(rig().rigmoves.moves[0], 0.0)
+        return out
+
+    def stretch_and_build(self, objects, scale, turn=25.0):
+        was = self.seen(objects)
+        stood = self.hand.matrix_world.copy()
+        self.hand.scale = scale
+        self.hand.rotation_euler.z = math.radians(turn)
+        self.hand.location = (7.0, 3.0, 0.0)
+        bpy.context.view_layer.update()
+        # What the model was carried by, from where the Empty stood before.
+        matrix = self.hand.matrix_world @ stood.inverted()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        now = self.seen(objects)
+        worst = {}
+        for share in self.SHARES:
+            for name, points in now[share].items():
+                gap = drift_of(points, [matrix @ p for p in was[share][name]])
+                worst[name] = max(worst.get(name, 0.0), gap)
+        return worst
+
+
+class TestRingCopiesUnderAStretchedParent(StretchedParentCase, ChestCase):
+    """Ring(4) on a lid, the rig hung from an Empty scaled (1, 2, 1), turned 25
+    degrees and moved: 'Lid 2' and 'Lid 4' stood 0.92 m off at every share of the
+    slider, 'Lid' and 'Lid 3' exactly where they belong. Build worked out the
+    seats of the riders again from their carried world matrices, which a parent
+    that stretches shears, and a shear is not a place a bone can stand."""
+
+    def ring_the_lid(self):
+        bpy.context.scene.cursor.location = Vector((0.0, 0.0, 0.0))
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        self.copies = [bpy.data.objects[name] for name in ("Lid 2", "Lid 3", "Lid 4")]
+        self.hang_the_rig_from_an_empty()
+
+    def test_the_copies_turn_the_leaders_move_about_the_ring_before_any_stretch(self):
+        # The oracle: a copy is the leader turned about the ring's axis.
+        self.ring_the_lid()
+        was = self.seen([self.lid] + self.copies)
+        for number, copy in enumerate(self.copies, start=1):
+            turn = turn_about(Vector((0.0, 0.0, 0.0)), "Z", 90.0 * number)
+            for share in self.SHARES:
+                self.assertLess(drift_of(was[share][copy.name],
+                                         [turn @ p for p in was[share]["Lid"]]), TOLERANCE,
+                                "{:s} at {:.0%}".format(copy.name, share))
+
+    def test_every_copy_stays_where_the_model_puts_it_when_the_empty_is_stretched_in_y(self):
+        self.ring_the_lid()
+        worst = self.stretch_and_build([self.lid] + self.copies, (1.0, 2.0, 1.0))
+        for name, gap in worst.items():
+            self.assertLess(gap, TOLERANCE, name)
+
+    def test_and_in_x_and_in_z_and_evenly(self):
+        for scale in ((2.0, 1.0, 1.0), (1.0, 1.0, 3.0), (2.0, 2.0, 2.0)):
+            with self.subTest(scale=scale):
+                bpy.ops.wm.read_factory_settings(use_empty=True)
+                ChestCase.setUp(self)
+                self.ring_the_lid()
+                worst = self.stretch_and_build([self.lid] + self.copies, scale)
+                for name, gap in worst.items():
+                    self.assertLess(gap, TOLERANCE, name)
+
+    def test_the_rider_bones_are_not_moved_by_the_build(self):
+        self.ring_the_lid()
+        was = {b.name: b.matrix_local.copy() for b in rig().data.bones}
+        self.stretch_and_build([self.lid] + self.copies, (1.0, 2.0, 1.0))
+        for bone in rig().data.bones:
+            if bone.name in was:
+                self.assertTrue(rigmoves.same_matrix(bone.matrix_local, was[bone.name], 1e-4),
+                                bone.name)
+
+
+class TestMirroredRidersUnderAStretchedParent(StretchedParentCase):
+    """A wing that moves out and tips, a copy of it mirrored the way Ctrl+M leaves
+    one, and a second that faces the other way and plays the move with Mirror X:
+    under an Empty scaled (1, 2, 1), turned and moved they too have to stay where
+    the model puts them."""
+
+    def setUp(self):
+        super().setUp()
+        self.wing = cube("Wing", (1.5, 0.0, 0.0))
+        self.wing.rotation_euler.z = math.radians(20.0)
+        bpy.context.view_layer.update()
+        self.home = self.wing.matrix_world.copy()
+
+        def pose():
+            self.wing.matrix_world = (self.home @ Matrix.Translation((1.0, 0.0, 0.0))
+                                      @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
+
+        record_move([self.wing], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        across = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        self.mirrored = cube("Mirrored", (0.0, 0.0, 0.0))
+        self.mirrored.matrix_world = Matrix.Translation((0.0, 3.0, 0.0)) @ across @ self.home
+        self.door = cube("Door", (-1.5, 4.0, 0.0))
+        self.door.rotation_euler.z = math.radians(160.0)
+        bpy.context.view_layer.update()
+        for other in (self.mirrored, self.door):
+            select(other, self.wing)
+            bpy.context.view_layer.objects.active = self.wing
+            self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Wing",
+                                                         rig_name=rig().name), {"FINISHED"})
+        position = list(self.move.parts).index(self.move.parts["Door"])
+        self.assertEqual(bpy.ops.rigmoves.set_mirror(index=0, part=position, axis="X"),
+                         {"FINISHED"})
+        self.everything = [self.wing, self.mirrored, self.door]
+        self.hang_the_rig_from_an_empty()
+
+    def test_the_riders_play_the_leaders_move_before_any_stretch(self):
+        # The mirrored copy plays the move mirrored across the plane it was put
+        # by; the door, mirrored across its own X and turned by where it stands.
+        across = Matrix.Translation((0.0, 3.0, 0.0)) @ Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            expected = [across @ p for p in world_points(self.wing)]
+            self.assertLess(drift(self.mirrored, expected), TOLERANCE, share)
+
+    def test_every_rider_stays_where_the_model_puts_it_when_the_empty_is_stretched(self):
+        for scale in ((1.0, 2.0, 1.0), (2.0, 1.0, 1.0)):
+            with self.subTest(scale=scale):
+                worst = self.stretch_and_build(self.everything, scale)
+                for name, gap in worst.items():
+                    self.assertLess(gap, TOLERANCE, name)
+
+
 class TestRigidFit(unittest.TestCase):
     """The fit of three marks onto three others, which tells a part that was
     framed another way from one that was moved."""

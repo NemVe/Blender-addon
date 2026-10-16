@@ -3206,12 +3206,18 @@ def frame_of(matrix):
 
 
 def leader_frame(rig, leader):
-    """The frame a leader's move is measured in, in world space, and whether
-    the leader is a mirror image."""
+    """The frame a leader's move is measured in, in the rig's own space, and
+    whether the leader is a mirror image.
+
+    In the rig's space, not the world's: a rig that hangs from something
+    stretched stands in a world that is sheared, and the shear is not a frame a
+    bone can stand in. Seen from the rig, which is what the bones are, the model
+    is as it was built.
+    """
     if leader.kind == "OBJECT":
-        return standing(as_matrix(leader.before))
+        return standing(rig.matrix_world.inverted_safe() @ as_matrix(leader.before))
     bone = rig.data.bones.get(part_bone(leader))
-    return standing(rig.matrix_world @ bone.matrix_local)
+    return standing(bone.matrix_local)
 
 
 def leader_of(move, rider):
@@ -3315,7 +3321,7 @@ def rider_reflection(rig, move, leader, rider):
     setting is the copy's, so every joint of a copied finger mirrors across
     the same plane."""
     lead_mirrored = leader_frame(rig, leader)[1]
-    mirrored = standing(as_matrix(rider.before))[1]
+    mirrored = standing(rig.matrix_world.inverted_safe() @ as_matrix(rider.before))[1]
     local = Matrix.Identity(3)
     if mirrored != lead_mirrored:
         local = local @ reflection("X")
@@ -3342,7 +3348,7 @@ def rider_turn(rig, move, leader, rider):
         return None
     lead_frame = leader_frame(rig, leader)[0]
     bone = rig.data.bones[part_bone(leader)]
-    rest = (rig.matrix_world @ bone.matrix_local).to_3x3().normalized()
+    rest = bone.matrix_local.to_3x3().normalized()
     into_bone = rest.transposed() @ lead_frame.to_3x3()
     return into_bone @ local @ into_bone.transposed()
 
@@ -3381,9 +3387,13 @@ def bind_riders(context, rig, data):
     riders are turned from. A rider's own pivot is its leader's, carried over.
     Its bone hangs where rider_holder says: from the root, or for a copied
     finger from the copy of the joint before it.
+
+    All in the rig's own space, where the bones are: a model carried by something
+    stretched has world matrices that are sheared, and standing() of a shear is
+    not where a rider's bone was - the seats of the riders already there moved,
+    and the copies with them.
     """
-    world = rig.matrix_world
-    into = world.inverted_safe()
+    into = rig.matrix_world.inverted_safe()
     fresh, moved, riders = [], [], []
     for move in data.moves:
         for _index, rider in riders_of(move):
@@ -3394,18 +3404,16 @@ def bind_riders(context, rig, data):
                 continue
             bone = rig.data.bones[part_bone(leader)]
             # The leader's bone as the leader sees it, then stood on the rider.
-            own_frame = frame_of(as_matrix(rider.before))
+            own_frame = frame_of(into @ as_matrix(rider.before))
             lead_frame = leader_frame(rig, leader)[0].inverted_safe()
-            carried = own_frame @ lead_frame @ world @ bone.matrix_local
-            seat = frame_of(into @ carried)
+            seat = frame_of(own_frame @ lead_frame @ bone.matrix_local)
             # A mirrored rider turns about the mirror image of its leader's
             # pivot, not the pivot carried straight over: off the mirror's
             # plane the two are apart, and the rider swung about the wrong
             # point and ended up out of place.
             local = rider_reflection(rig, move, leader, rider)
             if local is not None:
-                seat.translation = into @ (own_frame @ local.to_4x4() @ lead_frame
-                                           @ world @ bone.head_local)
+                seat.translation = own_frame @ local.to_4x4() @ lead_frame @ bone.head_local
             riders.append((move, rider))
             own = rig.data.bones.get(rider.bone_name) if rider.bone_name else None
             if own is None:
@@ -4853,12 +4861,15 @@ DELAY_LIMITS = (0.0, 0.99)
 def rider_spot(rig, move, leader, rider):
     """Where a rider turns, in the world, standing where it stands at Before:
     its leader's pivot carried over to it, the way its bone is stood on it -
-    through the frames the two stand in, and mirrored if it mirrors."""
-    own = frame_of(as_matrix(rider.before))
+    through the frames the two stand in (the rig's, as bind_riders has them),
+    and mirrored if it mirrors."""
+    world = rig.matrix_world
+    into = world.inverted_safe()
+    own = frame_of(into @ as_matrix(rider.before))
     back = leader_frame(rig, leader)[0].inverted_safe()
     local = rider_reflection(rig, move, leader, rider)
     mirror = local.to_4x4() if local is not None else Matrix.Identity(4)
-    return own @ mirror @ back @ pivot_world(leader)
+    return world @ (own @ mirror @ back @ (into @ pivot_world(leader)))
 
 
 def part_spot(rig, move, part, middle=False):
