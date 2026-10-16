@@ -61,7 +61,12 @@ the core, one leaf of three segments - FLOWER_FAST.md's file and steps):
 - Shot 4 is recorded separately: the finished rig (built by the script, no
   captions), the slider dragged slowly 0 to 1 over about 3 s.
 
-## The edit (an assembly script, ffmpeg)
+## The edit
+
+Now made in After Effects, with the project kept for NemVe3D: see
+`edit/PLAN.md`. The first plan, an ffmpeg assembly, is kept below for the record.
+
+### First plan (an assembly script, ffmpeg)
 
 From: the hook renders (the outro's 1440p frames, or a separate close-up render),
 the recording(s) with their timeline JSON, the card PNG sequences (title, lower
