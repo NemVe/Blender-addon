@@ -2334,19 +2334,31 @@ def take_back_reframed(rig, data):
     if not jobs:
         return ""
 
-    def refuse(part):
-        return ("'{:s}' was given a new origin, scale or rotation after it was "
-                "bound, and cannot be put back safely: press Ctrl+Z to undo "
-                "that, or take it out of its move (x) and add it again."
-                .format(short(part.name, 18)))
+    def refuse(part, obj, why):
+        """The refusal, which names what stops the part being put back: the
+        reason reframe_blocker gave - or, when it was tried and looked different,
+        that. A child with keys is the one thing the panel has a button for."""
+        why = why or "re-framing it would change how it looks"
+        if why.startswith("has "):
+            why = "it " + why
+        lifted = {held for _move, _part, held in keyed_parts(data)}
+        if (why.startswith("it has a child with keys")
+                and any(kid in lifted for kid in obj.children)):
+            advice = "Lift Those Keyframes to take its keys off, or press Ctrl+Z to undo that."
+        else:
+            advice = "press Ctrl+Z to undo that, or take it out of its move (x) and add it again."
+        return ("'{:s}' was given a new origin, scale or rotation after it was bound, and "
+                "cannot be put back safely ({:s}): {:s}"
+                .format(short(part.name, 18), why, advice))
 
     users = bpy.data.user_map(subset={obj for _part, obj, _drag, _frame in jobs},
                               value_types={"OBJECT"})
     # The rig uses every part's object, by the pointer the part keeps.
     users = {obj: {user for user in found if user is not rig} for obj, found in users.items()}
     for part, obj, _drag, frame in jobs:
-        if reframe_blocker(obj, frame, None, users):
-            return refuse(part)
+        why = reframe_blocker(obj, frame, None, users)
+        if why:
+            return refuse(part, obj, why)
     view_layer = bpy.context.view_layer
     view_layer.update()
     looks = {obj.name: look_of(obj) for _part, obj, _drag, _frame in jobs}
@@ -2358,7 +2370,7 @@ def take_back_reframed(rig, data):
         if not looks_the_same(looks[obj.name], look_of(obj), 1e-5 * reach_of(obj) + 1e-6 * far):
             put_back(framed)
             view_layer.update()
-            return refuse(part)
+            return refuse(part, obj, "")
     settle(framed)
     moved = sum(1 for _part, _obj, drag, _frame in jobs if drag != Matrix.Identity(4))
     if len(jobs) == 1:
@@ -2438,12 +2450,15 @@ def store_seat(rig, data):
     data.seat, data.seated, data.seat_on_root = flat(seat_of(rig)), True, True
 
 
-def catch_up(rig, data=None):
+def catch_up(rig, data=None, reframe=True):
     """Bring what a rig remembers of where its parts stand into step with
     where the rig stands now. Run first by every operator that reads or writes
     it; never from drawing, where nothing may be written.
 
-    Returns a sentence saying why the operator must not go on, or "".
+    Returns a sentence saying why the operator must not go on, or "". With
+    `reframe` off, objects given a new origin or scale are left as they are for
+    the caller to put back (take_back_reframed) once it has done what has to come
+    first.
 
     Every part's Before and After are world matrices, true for as long as the
     rig stood where it did when they were taken. Move the rig - on its own,
@@ -2477,12 +2492,12 @@ def catch_up(rig, data=None):
     # Before anything is put back: a part whose mesh was edited since, and then
     # given a new origin, is told from a part dragged by marks that fit.
     retake_marks(data)
-    return take_back_reframed(rig, data)
+    return take_back_reframed(rig, data) if reframe else ""
 
 
-def ready(operator, rig, data):
+def ready(operator, rig, data, reframe=True):
     """Catch a rig up, and say why if the operator may not go on."""
-    refusal = catch_up(rig, data)
+    refusal = catch_up(rig, data, reframe)
     if not refusal:
         return True
     data.report = refusal
@@ -5782,17 +5797,26 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
         if not here(context, rig):
             return {"CANCELLED"}
         data = rig.rigmoves
-        if not ready(self, rig, data):
+        # Parts given a new origin or scale are put back only after the keys are
+        # gone: a child with keys of its own is what stops that, and these are
+        # the keys.
+        if not ready(self, rig, data, reframe=False):
             return {"CANCELLED"}
         objects, bones, still_keyed = clear_autokey(
             rig, data, context.scene.tool_settings.use_keyframe_insert_auto)
+        refusal = take_back_reframed(rig, data)
         if not (objects or bones):
-            data.report = "Nothing is carrying stray keyframes."
-            self.report({"INFO"}, data.report)
+            if refusal:
+                data.report = refusal
+                self.report({"WARNING"}, refusal)
+            else:
+                data.report = "Nothing is carrying stray keyframes."
+                self.report({"INFO"}, data.report)
             return {"CANCELLED"}
 
-        # With the keys gone the rest can finally be put where it belongs.
-        put_back = reseat_bound(data)
+        # With the keys gone the rest can finally be put where it belongs - but
+        # not a part that could not be put back on its frame, which would jump.
+        put_back = 0 if refusal else reseat_bound(data)
         context.view_layer.update()
         data.report = ("{:d} keyframe track(s) lifted off the parts, {:d} off "
                        "the rig.".format(objects, bones))
@@ -5803,8 +5827,11 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
             data.report += (" {:d} put back on its Before.".format(put_back)
                             if put_back == 1 else
                             " {:d} put back on their Before.".format(put_back))
-        data.report += " Build to finish."
-        self.report({"INFO"}, data.report)
+        if refusal:
+            data.report += " " + refusal
+        else:
+            data.report += " Build to finish."
+        self.report({"WARNING"} if refusal else {"INFO"}, data.report)
         return {"FINISHED"}
 
 

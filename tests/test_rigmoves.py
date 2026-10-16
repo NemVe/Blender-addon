@@ -7324,8 +7324,9 @@ class TestAReframedPart(ChestCase):
         select(self.lid)
         self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
         self.assertIn("was given a new origin, scale or rotation after it was bound, and "
-                      "cannot be put back safely: press Ctrl+Z to undo that, or take it "
-                      "out of its move (x) and add it again.", rig().rigmoves.report)
+                      "cannot be put back safely (it has constraints): press Ctrl+Z to undo "
+                      "that, or take it out of its move (x) and add it again.",
+                      rig().rigmoves.report)
         self.assertEqual(self.lid.data.name, was[2])
         self.assertTrue(rigmoves.same_matrix(self.lid.matrix_world, was[0], 1e-9))
         self.assertEqual(rigmoves.mesh_points(self.lid), was[1])
@@ -8478,6 +8479,69 @@ class TestApplyOnTheRigOfAnArm(ArmCase):
         select(self.parts["Upper"])
         self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
         self.check_arm()
+
+
+class TestAReframedForearmWithAKeyedHand(ArmCase):
+    """The origin of a built forearm is set, and a stray Auto Key is left on the
+    hand, which hangs from it. The forearm cannot be put back on its frame while
+    its child has keys of its own, and Lift Those Keyframes - the button the panel
+    offers for the key - was refused for the forearm's origin all the same, as
+    were Build and Record, none of them naming the key."""
+
+    def setUp(self):
+        super().setUp()
+        bpy.context.scene.cursor.location = Vector((2.7, 0.2, 1.3))
+        select(self.parts["Fore"])
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        self.parts["Hand"].keyframe_insert("location", frame=1)
+        bpy.context.view_layer.update()
+
+    def keyed(self):
+        return [obj.name for _move, _part, obj in rigmoves.keyed_parts(rig().rigmoves)]
+
+    def test_build_and_record_say_it_is_the_hands_keys(self):
+        for press in (lambda: bpy.ops.rigmoves.build(),
+                      lambda: bpy.ops.rigmoves.record(index=0, which="AFTER")):
+            self.assertEqual(press(), {"CANCELLED"})
+            said = rig().rigmoves.report
+            self.assertIn("'Fore' was given a new origin, scale or rotation after it was "
+                          "bound, and cannot be put back safely (it has a child with keys or "
+                          "drivers of its own ('Hand')): Lift Those Keyframes to take its keys "
+                          "off, or press Ctrl+Z to undo that.", said)
+        self.assertEqual(self.keyed(), ["Hand"])
+
+    def test_lift_those_keyframes_works_and_then_build_puts_the_forearm_back(self):
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"FINISHED"})
+        self.assertEqual(self.keyed(), [])
+        said = rig().rigmoves.report
+        self.assertIn("3 keyframe track(s) lifted off the parts", said)
+        self.assertIn("'Fore' had its origin, scale or rotation changed after it was bound", said)
+        # The forearm is on its frame again, and has not moved.
+        self.assertTrue(rigmoves.same_matrix(
+            self.parts["Fore"].matrix_world,
+            rigmoves.as_matrix(self.move.parts["Fore"].before), 1e-5))
+        self.assertLess(drift(self.parts["Fore"], self.shut["Fore"]), TOLERANCE)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_arm()
+
+    def test_a_parts_other_reason_is_named_too(self):
+        # No child with keys: a constraint on the forearm itself.
+        self.parts["Hand"].animation_data_clear()
+        self.parts["Fore"].constraints.new("COPY_LOCATION")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        self.assertIn("cannot be put back safely (it has constraints): press Ctrl+Z",
+                      rig().rigmoves.report)
+
+    def test_a_child_with_only_a_driver_is_not_told_to_lift(self):
+        # Lift Those Keyframes never takes a driver off.
+        self.parts["Hand"].animation_data_clear()
+        driver = self.parts["Hand"].driver_add("location", 2)
+        driver.driver.expression = "0.0"
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        said = rig().rigmoves.report
+        self.assertIn("(it has a child with keys or drivers of its own ('Hand')): press Ctrl+Z",
+                      said)
+        self.assertNotIn("Lift Those Keyframes", said)
 
 
 class TestRigidFit(unittest.TestCase):
