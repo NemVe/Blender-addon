@@ -839,8 +839,16 @@ def part_object(part):
     def standing(obj):
         return obj is not None and len(obj.users_collection) > 0
 
+    # The object the part points at stands when something besides the pointer
+    # holds it: each collection with it in is a user, and users_collection says
+    # the same by looking through every collection in the file, which was most
+    # of what the panel took to draw in a big scene. (An object held by two
+    # pointers and in no collection reads as standing here. The exact question
+    # is asked in let_go_of_deleted, at every button, before anything acts on
+    # the parts.)
     held = part.object
-    if standing(held) and (bound_to(held, rig) or not bound_elsewhere(held, rig)):
+    if (held is not None and held.users > 1
+            and (bound_to(held, rig) or not bound_elsewhere(held, rig))):
         return held
     named = bpy.data.objects.get(part.name)
     if not standing(named):
@@ -848,9 +856,10 @@ def part_object(part):
     if named is not None and bound_to(named, rig):
         return named
     if part.bone_name:
+        # The cheapest question first: this looks at every object in the file.
         for obj in bpy.data.objects:
-            if (obj.type == "MESH" and standing(obj) and bound_to(obj, rig)
-                    and obj.vertex_groups.get(part.bone_name) is not None):
+            if (obj.type == "MESH" and obj.vertex_groups.get(part.bone_name) is not None
+                    and bound_to(obj, rig) and standing(obj)):
                 return obj
     if named is not None and not bound_elsewhere(named, rig):
         return named
@@ -1106,13 +1115,29 @@ def own_actions(rig, data):
 @bpy.app.handlers.persistent
 def follow_renames_handler(*_arguments):
     """Called after each update of the scene: parts follow a rename at once.
-    Never raises, and does nothing for a scene with no moves in it."""
+    Never raises, and does nothing for a scene with no moves in it.
+
+    It runs on every update, so it asks the least it can: a pass over each
+    rig's parts that reads nothing but the object a part points at, its name
+    and its users, and not the collections - those are looked through for the
+    whole file at every question. Renames are followed only when a name
+    differs, and the timer is set only when an object has no user but the
+    pointer, which is what an object deleted in the viewport looks like."""
     try:
         deleted = False
         for obj in bpy.data.objects:
-            if obj.type == "ARMATURE" and len(obj.rigmoves.moves):
+            if obj.type != "ARMATURE" or not len(obj.rigmoves.moves):
+                continue
+            renamed = False
+            for move in obj.rigmoves.moves:
+                for part in move.parts:
+                    held = part.object
+                    if held is None:
+                        continue
+                    renamed = renamed or held.name != part.name
+                    deleted = deleted or held.users < 2
+            if renamed:
                 follow_renames(obj, obj.rigmoves)
-                deleted = deleted or has_deleted(obj.rigmoves)
         if deleted and not bpy.app.timers.is_registered(let_deleted_go):
             bpy.app.timers.register(let_deleted_go, first_interval=0.5)
     except Exception:

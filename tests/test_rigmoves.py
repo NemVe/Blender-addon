@@ -4485,6 +4485,78 @@ class TestADeletedPartLeavesItsMove(CopyThatCase):
         self.assertEqual([p.name for p in move.parts], ["Petal", "Petal 2", "Petal 4"])
 
 
+class TestABigSceneStaysQuick(CopyThatCase):
+    """A rig of fifty parts in a file with a thousand other meshes in sixty
+    collections. Every question about a part's object looked through the
+    collections of the whole file, and the handler that runs after every update
+    asked it of every part, so the panel and every drag slowed down - and one
+    deleted part, not yet let go of, made each of those questions look at every
+    object in the file."""
+
+    def setUp(self):
+        super().setUp()
+        scene = bpy.context.scene
+        collections = []
+        for number in range(60):
+            collection = bpy.data.collections.new("Col{:02d}".format(number))
+            scene.collection.children.link(collection)
+            collections.append(collection)
+        shape = bpy.data.meshes.new("Shape")
+        shape.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        for number in range(1000):
+            collections[number % 60].objects.link(
+                bpy.data.objects.new("Other{:04d}".format(number), shape))
+        self.parts = [cube("Part{:02d}".format(number), (number * 2.0, 0.0, 1.0))
+                      for number in range(50)]
+        select(*self.parts)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for part in self.parts:
+            part.location.z += 1.0
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def times(self):
+        """(milliseconds a handler call takes on average, milliseconds the panel
+        takes to draw). The processor's time, not the clock's: the machine may
+        be busy with something else, and the limits below are wide for the same
+        reason."""
+        import time
+        select(self.parts[1])
+        drawn_panel()
+        rigmoves.follow_renames_handler()
+        start = time.process_time()
+        for _ in range(20):
+            rigmoves.follow_renames_handler()
+        handler = (time.process_time() - start) * 1000.0 / 20
+        start = time.process_time()
+        for _ in range(3):
+            drawn_panel()
+        return handler, (time.process_time() - start) * 1000.0 / 3
+
+    def test_the_handler_and_the_panel_take_a_few_milliseconds(self):
+        handler, panel = self.times()
+        self.assertLess(handler, 30.0, "the handler took {:.1f} ms".format(handler))
+        self.assertLess(panel, 150.0, "the panel took {:.1f} ms".format(panel))
+        # With one part deleted and not yet let go of, which is for half a second
+        # after X and for as long as the timer is not run.
+        select(self.parts[0])
+        self.assertEqual(bpy.ops.object.delete(), {"FINISHED"})
+        bpy.context.view_layer.update()
+        handler, panel = self.times()
+        self.assertLess(handler, 30.0, "the handler took {:.1f} ms with a part deleted".format(handler))
+        self.assertLess(panel, 150.0, "the panel took {:.1f} ms with a part deleted".format(panel))
+
+    def test_the_handler_follows_a_rename_and_otherwise_leaves_the_parts_alone(self):
+        with mock.patch.object(rigmoves, "follow_renames", wraps=rigmoves.follow_renames) as asked:
+            rigmoves.follow_renames_handler()
+            self.assertEqual(asked.call_count, 0)
+            self.parts[3].name = "Renamed"
+            rigmoves.follow_renames_handler()
+            self.assertEqual(asked.call_count, 1)
+        self.assertEqual(rig().rigmoves.moves[0].parts[3].name, "Renamed")
+
+
 class TestMakeChainOrder(CopyThatCase):
     """The order follows how a joint is built, at the far end of the part before
     it: not whichever pivot happens to be nearest."""
