@@ -1,6 +1,9 @@
 """The outro of the CopyThat promo: the flower blooming in a dark studio.
 
-    /home/user/Blender-addon/.venv/bin/python outro.py [options]
+    blender --background --factory-startup --python promo/outro/outro.py -- [options]
+
+Run from the repo root. It uses this repo's add-on; set COPYTHAT_ADDON to a
+folder that holds another copy of rigmoves/ to use that one instead.
 
 Builds the studio, the lights and the camera move; builds the flower with
 flower.build_flower and rigs it with flower.flower_steps, run headless, so the
@@ -24,7 +27,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROMO = os.path.dirname(HERE)
-ADDON = os.environ.get("COPYTHAT_ADDON", "/home/user/Blender-addon")
+# This repo's add-on (promo/ -> the repo root), unless one is named.
+ADDON = os.environ.get("COPYTHAT_ADDON", os.path.dirname(PROMO))
 sys.path.insert(0, os.path.join(PROMO, "flower"))
 sys.path.insert(0, ADDON)
 
@@ -430,8 +434,17 @@ def parse(argv):
     return options
 
 
+def own_arguments():
+    """The options meant for this script. Inside a Blender binary sys.argv is
+    Blender's own command line, and only what follows "--" is the script's;
+    run as a plain Python script they are all of sys.argv[1:]."""
+    if "--" in sys.argv:
+        return sys.argv[sys.argv.index("--") + 1:]
+    return [] if "--python" in sys.argv else sys.argv[1:]
+
+
 def main(argv=None):
-    options = parse(sys.argv[1:] if argv is None else argv)
+    options = parse(own_arguments() if argv is None else argv)
     started = time.perf_counter()
     scene, parts, _captions = build(options["samples"], *options["res"])
     print("built in {:.1f} s".format(time.perf_counter() - started), flush=True)

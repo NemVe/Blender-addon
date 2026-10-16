@@ -1,6 +1,9 @@
 """Build the flower, rig it with CopyThat headless, and check the rig.
 
-    /home/user/Blender-addon/.venv/bin/python check_flower.py [--sweep [--step N]] [--frames N]
+    blender --background --factory-startup --python promo/flower/check_flower.py -- [--sweep [--step N]] [--frames N]
+
+Run from the repo root. It checks this repo's add-on; set COPYTHAT_ADDON to a
+folder that holds another copy of rigmoves/ to check that one instead.
 
 Asserts that
   * Build reports no cramped driver and every driver is a simple expression;
@@ -19,7 +22,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ADDON = os.environ.get("COPYTHAT_ADDON", "/home/user/Blender-addon")
+# This repo's add-on (promo/flower/ -> the repo root), unless one is named.
+ADDON = os.environ.get("COPYTHAT_ADDON", os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, HERE)
 sys.path.insert(0, ADDON)
 

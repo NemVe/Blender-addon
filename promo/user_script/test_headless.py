@@ -1,6 +1,10 @@
 """The in-Blender promo script, run against the real add-on with no screen.
 
-    /home/user/Blender-addon/.venv/bin/python test_headless.py
+    blender --background --factory-startup --python promo/user_script/test_headless.py
+
+Run from the repo root. It uses this repo's add-on; set COPYTHAT_ADDON to a
+folder that holds another copy of rigmoves/ to use that one instead. One test
+class: add `-- TestName` at the end.
 
 Every scene generator is run by the same Player the live show uses, with each
 tween jumped to its end and each wait skipped. After a scene the tests check
@@ -24,7 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROMO = os.path.dirname(HERE)
 FLOWER_PATH = os.path.join(PROMO, "flower", "flower.py")
 DIST = os.path.join(HERE, "dist", "copythat_promo.py")
-ADDON = os.environ.get("COPYTHAT_ADDON", "/home/user/Blender-addon")
+# This repo's add-on (promo/ -> the repo root), unless one is named.
+ADDON = os.environ.get("COPYTHAT_ADDON", os.path.dirname(PROMO))
 
 sys.path.insert(0, ADDON)
 sys.path.insert(0, HERE)
@@ -1629,4 +1634,11 @@ class TestBundle(Case):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    # Inside a Blender binary sys.argv is Blender's own command line; only what
+    # follows "--" is meant for the tests.
+    argv = sys.argv
+    if "--" in argv:
+        argv = [argv[0]] + argv[argv.index("--") + 1:]
+    elif not argv[0].endswith(".py"):
+        argv = [argv[0]]
+    unittest.main(argv=argv, verbosity=2)

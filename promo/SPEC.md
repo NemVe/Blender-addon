@@ -1,10 +1,9 @@
 # CopyThat promo video - production spec
 
-The add-on is CopyThat (repository `/home/user/Blender-addon`: add-on in
-`rigmoves/__init__.py`, guide in `rigmoves/README.md`, tests in
-`tests/test_rigmoves.py`), by NemVe3D (https://creators.sa/nemve). Read the
-guide to learn the features. The tests show how to drive the add-on from
-Python:
+The add-on is CopyThat (this repository: add-on in `rigmoves/__init__.py`,
+guide in `rigmoves/README.md`, tests in `tests/test_rigmoves.py`), by NemVe3D
+(https://creators.sa/nemve). Read the guide to learn the features. The tests
+show how to drive the add-on from Python:
 
 - `bpy.ops.rigmoves.new_move()`, `record(index, which)`, `build()`,
   `ride_along(...)`, `set_pivot(index, kind)`, `curve_path(index)`,
@@ -14,15 +13,17 @@ Python:
 - selection: the first object passed to the tests' `select()` is the
   active one.
 
-Blender 5.2.2 runs headless here as a Python module:
-`/home/user/Blender-addon/.venv/bin/python script.py`. Register the add-on
-with `sys.path.insert(0, "/home/user/Blender-addon"); import rigmoves;
-rigmoves.register()`. The user runs Blender 4.4 or later with CopyThat 0.15.0
-installed.
+Scripts run headless inside Blender, from the repo root:
+`blender --background --factory-startup --python promo/checks/replay_fast.py -- --no-render`
+(flags for the script go after the `--`). Register the add-on with
+`sys.path.insert(0, <the repo root>); import rigmoves; rigmoves.register()`;
+the promo scripts do it themselves, and `COPYTHAT_ADDON` names a folder that
+holds another copy of `rigmoves/` to use instead. The user runs Blender 4.4 or
+later with CopyThat 0.15.0 installed.
 
-All promo work goes under
-`/tmp/claude-0/-home-user-Blender-addon/b9831a8c-0477-5b8e-9806-eecafd2be0a8/scratchpad/promo/`
-(called PROMO below). Never modify `/home/user/Blender-addon`.
+All promo work lives in `promo/` of this repository (called PROMO below): the
+guides and the files they send are in `PROMO/files/`, the checks that follow
+the guides in `PROMO/checks/`. Never modify the add-on (`rigmoves/`) from it.
 
 ## The video (1920x1080, 30 fps, about 75 s)
 

@@ -11,11 +11,19 @@ petal or leaf opens by **typing one number** into one field.
 
 ## Before you start (once)
 
-1. **Blender 4.4 or newer**, with **CopyThat 0.15.0 or newer** turned on
-   (Edit > Preferences > Add-ons).
+1. **Install CopyThat 0.18.1 or newer.** It is a Blender **extension**, and it
+   needs **Blender 4.5 or newer** (4.4 cannot run it). If an older RigMoves or
+   CopyThat is listed under Edit > Preferences > **Add-ons**, switch it off and
+   remove it first. Then drag the zip (the newest, `CopyThat-0.18.x.zip`) into
+   Blender, or use Edit > Preferences > **Get Extensions** > the drop-down at
+   the top right > **Install from Disk**. **Restart Blender** after
+   installing. Then open Preferences > Add-ons, find **CopyThat**, and check
+   the version it shows. An older CopyThat shows **First Lead** and **Last
+   Lead** in Ring's dialog instead of **Lead step**, and step 5 would not work
+   with it.
 2. Get the flower into Blender, either way:
    - **Blender 5.2:** File > Open `CopyThat_flower_bare.blend`.
-   - **Any Blender from 4.4:** File > New > General. Open the **Scripting**
+   - **Any Blender from 4.5:** File > New > General. Open the **Scripting**
      tab, click **New**, paste all of `make_flower_bare.py`, and press
      **Run Script** (the triangle) once. It adds a scene called **CopyThat
      Flower** and switches to it. Everything else in the file is left alone.
@@ -63,7 +71,7 @@ field instead.
   appears in the Outliner. Nothing moves. Leave **Pivot** on **Origin**:
   every hinge is already its part's origin.
 - **Why these nine:** the two leaders are the petals you pose and record. The
-  other 13 petals will copy them.
+  other 13 petals will ride along with them (step 5).
 
 ## 2. Follows: the leaves hang from each other
 
@@ -107,45 +115,70 @@ their bloom pose; the other 13 petals are still shut.
   it, and the report says "'Move 1': After recorded for 9 part(s)." Nothing
   moves.
 
-## 5. Ride Along: the other petals copy the leaders
+## 5. Ring: the other petals are picked up
 
-Two rounds. The leader must be the **active** object: the one you select
-**last** (it gets the lighter outline).
+The other 13 petals are already modelled round the stem. **Ring** with **Use
+what's there** finds them, makes each one ride along with its leader, and makes
+nothing new. Two rounds, one for each ring of petals. The leader must be the
+active object: a plain click on it in the Outliner. Blender keeps the numbers
+of the last time a dialog was used, so a Ring dialog opens showing the last
+Ring you did, even one from an earlier take, until you restart Blender. Check
+every row against the table.
 
-- **Outer petals. Do:** hover over the 3D view and press **Numpad 7** (top
-  view), and scroll to zoom in. The seven closed outer petals fan round the
-  bud like wedges; the open Outer Leader is the long petal pointing down the
-  screen. Click **one** wedge (on its wide part, not the middle, which is the
-  rig), **Shift+click** the other six, then **Shift+click the far end of the
-  Outer Leader last**. Eight petals are selected, the leader with the lighter
-  outline. In the panel press **Ride Along With 'Outer Leader'**.
-- **You see:** a sub-panel **Riding along (7)**, one row per petal with a
-  **Lead** slider at 0, and the report "7 objects will ride along with 'Outer
-  Leader'. Record its After, then Build." Nothing moves yet.
-- **Inner petals. Do:** the inner ring is inside the outer one, so hide the
-  outer ring first: the eight outer petals are still selected, so press **H**
-  over the 3D view. The six inner petals show, the open Inner Leader pointing
-  down the screen. Click one closed inner wedge, Shift+click the other four,
-  then **Shift+click the Inner Leader last**. Press **Ride Along With 'Inner
-  Leader'** (check it says Inner, not Outer). Then press **Alt+H** to bring the
-  outer petals back.
-- **You see:** **Riding along (12)** and the report "5 objects will ride along
-  with 'Inner Leader'...".
-- *Fallback:* if you cannot click a petal, use the Outliner: click one rider,
-  **Ctrl+click** each other rider, then Ctrl+click the leader last (the last one
-  Ctrl+clicked is the active one).
-- Do not press "Add To This Group": that is a different button.
+- **Outer petals. Do:** In the Outliner click **Outer Leader**. In the Move 1
+  box press **Ring…** (in the row under **Curve the Path**). A dialog opens.
+  Set:
 
-## 6. Lead: send the back petals ahead
+  | Field | Set to |
+  |---|---|
+  | Use | **Use what's there** |
+  | Count | **8** |
+  | Round | **World Origin** |
+  | About | World Z (leave it) |
+  | Linked copies | greyed out (leave it) |
+  | Lead step | **9** |
 
-- **Do:** In **Riding along**, double-click each petal's **Lead** field, type the
-  number, press Enter (cheat sheet, "Lead"). The back petal (Outer 5) gets the
-  biggest.
-- **You see:** nothing moves until Build. Above 0 means "goes first", so the
-  **back** petals open first, a wave runs round both sides, and the front
-  petal, the leader, opens last.
+  Press **OK**.
+- **You see:** nothing new in the Outliner: **Outer 2** to **Outer 8** are taken
+  up as they are. The report begins "7 modelled copies of 'Outer Leader' round
+  the world origin ride along with it (nothing new made)." It then names some
+  inner petals under "Left out": Ring saw them standing near the ring, and
+  left them alone because they are not copies of the outer petal. That is
+  right; they are next. The report ends "Leads step by 9, out from it both
+  ways round." A **Riding along (7)** section appears, one row per petal, with
+  the Leads 9, 18, 27, 36, 27, 18, 9 round the ring: Ring wrote them, both
+  sides alike.
+- **Inner petals. Do:** click **Inner Leader**. Press **Ring…**. The dialog
+  opens with the numbers of the outer Ring. Set:
 
-## 7. Timing: the Delays
+  | Field | Set to |
+  |---|---|
+  | Use | Use what's there (it already says this: leave it) |
+  | Count | **6** (it shows 8: type 6) |
+  | Round | World Origin (it already says this: leave it) |
+  | About | World Z (leave it) |
+  | Linked copies | greyed out (leave it) |
+  | Lead step | **14** (it shows 9) |
+
+  Press **OK**.
+- **You see:** nothing new again. The report "5 modelled copies of 'Inner
+  Leader' round the world origin ride along with it (nothing new made). Leads
+  step by 14, out from it both ways round." **Riding along (12)**, the new
+  Leads 14, 28, 42, 28, 14.
+- **Why World Origin:** the stem stands on the world's origin, so the ring goes
+  round the flower exactly. The 3D cursor does not matter.
+- **Why Use what's there:** Ring looks at what stands where a copy of the
+  leader would stand and takes up the objects that are exact copies of the
+  leader's mesh. It leaves anything else as it is and says so. Nothing is
+  copied, so nothing is added.
+- **Why Lead step:** each petal's Lead is the Lead step times how far it is out
+  from the leader, both ways round: the two petals next to the leader get 9,
+  the two next to those 18, then 27, and the petal opposite gets 36. Above 0
+  means "goes first", so the **back** petals open first, a wave runs round both
+  sides, and the front petal, the leader, opens last. Nothing moves until
+  Build.
+
+## 6. Timing: the Delays
 
 - **Do:** Click the header **Timing** to open it. It lists the nine parts that
   are not riders. Double-click each **Delay** field, type the number, press
@@ -154,24 +187,24 @@ Two rounds. The leader must be the **active** object: the one you select
   inner petals, the core and the leaves start later, and each leaf segment
   starts after the one before.
 
-## 8. Ease
+## 7. Ease
 
 - **Do:** In the Move 1 box, the dropdown under the After row says **Even
   speed**. Choose **Smooth**.
 
-## 9. Build Sliders
+## 8. Build Sliders
 
 - **Do:** Press the big **Build Sliders** button at the bottom of the panel.
 - **You see:** the report "21 part(s) on 1 slider(s). 9 object(s) were given a
   bone and bound. 12 object(s) now ride along. 4 part(s) hung from the part
   they follow." (If it says something is too long, or not recorded, check the
-  Lead and Delay numbers and step 4.) A **Move 1** slider appears in the box,
-  with a key button, and a row **Frames [48] [Animate]**. A handle arrow
+  Lead step, the Delay numbers and step 4.) A **Move 1** slider appears in the
+  box, with a key button, and a row **Frames [48] [Animate]**. A handle arrow
   stands over the flower.
 - **Try it:** drag the **Move 1** slider from 0 to 100%. All 21 parts open as
   one: the wave round the petals, the core, the leaves. Drag it back to **0**.
 
-## 10. Frames 150 and Animate
+## 9. Frames 150 and Animate
 
 - **Do:** Timeline on **frame 1**. In the **Frames** field type **150**. Press
   **Animate**.
@@ -179,7 +212,7 @@ Two rounds. The leader must be the **active** object: the one you select
   210 hold the open flower. The camera move and the core's glow are already
   keyed in the file over the same 1 to 151.
 
-## 11. Camera view and Play
+## 10. Camera view and Play
 
 - **Do:** Over the 3D view press **Numpad 0** (camera view), then **Space** to
   play. Esc stops it; **Shift+Left** goes back to frame 1.
@@ -197,8 +230,6 @@ Every value. **Shut** is what the field says before you type.
 | Step | Select | Active (selected last) |
 |---|---|---|
 | New Move | Outer Leader, Inner Leader, Core, Leaf A1, A2, A3, Leaf B1, B2, B3 | any |
-| Ride Along, outer | 7 closed outer petals, then Outer Leader | Outer Leader |
-| Ride Along, inner | 5 closed inner petals, then Inner Leader | Inner Leader |
 
 ### Pose
 
@@ -224,7 +255,17 @@ Every value. **Shut** is what the field says before you type.
 | Leaf B2 | Leaf B1 |
 | Leaf B3 | Leaf B2 |
 
-### Lead
+### Ring
+
+Click the leader in the Outliner (a plain click), press **Ring…**, set these.
+The dialog remembers the last Ring, so check every row.
+
+| Part | Use | Count | Round | About | Lead step |
+|------|-----|-------|-------|-------|-----------|
+| Outer Leader | Use what's there | 8 | World Origin | World Z | 9 |
+| Inner Leader | Use what's there | 6 | World Origin | World Z | 14 |
+
+### Lead (Ring writes these; nothing to type)
 
 | Object | Lead |
 |--------|------|
@@ -262,8 +303,8 @@ Every value. **Shut** is what the field says before you type.
 | Ease | Smooth |
 | Frames | 150 |
 
-Order: New Move, Follows, Pose, Record After, Ride Along (outer, then inner),
-Lead, Delay, Ease, Build Sliders, frame 1, Frames, Animate, camera view, Play.
+Order: New Move, Follows, Pose, Record After, Ring (outer, then inner), Delay,
+Ease, Build Sliders, frame 1, Frames, Animate, camera view, Play.
 
 ## If something looks wrong
 
@@ -271,9 +312,10 @@ Lead, Delay, Ease, Build Sliders, frame 1, Frames, Animate, camera view, Play.
 |---|---|
 | A petal leans in, or a leaf bends the wrong way | A field has the wrong number or sign. Type the right one from the cheat sheet into the same field. |
 | The Rotation X field does not start at 0 | You rotated the part by hand before. Type 0, then the number. |
-| The Ride Along button names the wrong leader, or is missing | The leader was not the last one selected. Shift+click it once more (a second click on the active one deselects it, so check the outline). |
-| You cannot click a petal in the 3D view | Use the Outliner fallback in step 5. |
-| Outer petals stay hidden after step 5 | Hover over the 3D view and press Alt+H. |
+| **Ring…** is greyed out, or says a part "rides along" | The active object is not a leader. Click **Outer Leader** (or **Inner Leader**) in the Outliner, not "Outer 2". |
+| Ring takes up nothing, or says copies stand off the ring | **Round** was left on 3D Cursor with the cursor off the origin, or **Count** is wrong. Ctrl+Z, press **Ring…** again with **World Origin** and the right **Count**. |
+| Ring says "Every place round that ring already has a copy" | You pressed it twice. Nothing was added; carry on. |
+| Ring's dialog shows **First Lead** and **Last Lead** | An older CopyThat is loaded. Install 0.18.1 or newer, **restart Blender**, and check the version under Preferences > Add-ons > CopyThat. |
 | The report after Build says "not recorded yet" | You skipped step 4. Press Record on After, then Build again. |
 | A red box "Auto Keying is on" | Switch off the record dot in the timeline, press **Lift Those Keyframes**, Build again. |
 | The Play slider does nothing | Press Build Sliders again, after the last change. |
@@ -285,8 +327,10 @@ Lead, Delay, Ease, Build Sliders, frame 1, Frames, Animate, camera view, Play.
   on screen the whole time: the viewer follows the buttons and the numbers,
   not only the flower.
 - Pause a beat after each press and let the report line settle. Say, or write
-  on screen, what each step is for: "record where it ends up", "the others
-  copy it", "back petals go first".
+  on screen, what each step is for: "record where it ends up", "Ring picks up
+  the other petals", "back petals go first".
+- When a dialog opens, leave the mouse where it is and read the field names
+  aloud (or write them on screen): Use, Count, Round, Lead step.
 - Zoom the recording to the three areas, not the whole desktop.
 - Show the payoff twice: drag the **Move 1** slider after Build (the wave runs
   round the petals), then press Space after Animate (the camera move).

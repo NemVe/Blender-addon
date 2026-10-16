@@ -1,6 +1,6 @@
 """Build the bare CopyThat flower scene: the flower shut, ready for you to rig.
 
-For Blender 4.4 or newer. In Blender: open the Scripting tab, click New,
+For Blender 4.5 or newer. In Blender: open the Scripting tab, click New,
 paste this whole file, and press Run Script (the triangle, or Alt+P).
 
 It adds ONE new scene, "CopyThat Flower", to the file you have open and
@@ -20,7 +20,7 @@ switches to it. Nothing you already have is changed or deleted. The scene has:
     Save the file before you render, so "next to the .blend" means something.
 
 There is NO CopyThat data in it: no rig, no moves. That is your part, and it
-is in FLOWER_STEPS.md. CopyThat 0.15.0 or newer must be turned on.
+is in FLOWER_STEPS.md. CopyThat 0.18.1 or newer must be turned on.
 
 The "Studio" collection is hidden in the 3D view so the recording shows the
 flower (it still renders). Click its eye in the Outliner to see it.

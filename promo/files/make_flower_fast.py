@@ -1,6 +1,6 @@
 """Build the FAST CopyThat flower scene: the parts modelled once, ready to rig.
 
-For Blender 4.4 or newer, with CopyThat 0.17.0 or newer. In Blender: open the
+For Blender 4.5 or newer, with CopyThat 0.18.1 or newer. In Blender: open the
 Scripting tab, click New, paste this whole file, and press Run Script (the
 triangle, or Alt+P) ONCE.
 

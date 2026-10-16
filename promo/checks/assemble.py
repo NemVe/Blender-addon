@@ -1,6 +1,7 @@
-"""Assemble PROMO/outbox/make_flower_bare.py: one self-contained script.
+"""Assemble PROMO/files/make_flower_bare.py and make_flower_fast.py: each one
+self-contained script.
 
-    python3 assemble.py
+    python promo/checks/assemble.py
 
 It is flower.py, verbatim (so the flower is the very one flower_steps was
 checked on), followed by bare_tail.py: the bare scene, the studio, the camera
@@ -13,12 +14,12 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROMO = os.path.dirname(HERE)
 FLOWER = os.path.join(PROMO, "flower", "flower.py")
-OUT = os.path.join(PROMO, "outbox", "make_flower_bare.py")
-OUT_FAST = os.path.join(PROMO, "outbox", "make_flower_fast.py")
+OUT = os.path.join(PROMO, "files", "make_flower_bare.py")
+OUT_FAST = os.path.join(PROMO, "files", "make_flower_fast.py")
 
 HEADER = '''"""Build the bare CopyThat flower scene: the flower shut, ready for you to rig.
 
-For Blender 4.4 or newer. In Blender: open the Scripting tab, click New,
+For Blender 4.5 or newer. In Blender: open the Scripting tab, click New,
 paste this whole file, and press Run Script (the triangle, or Alt+P).
 
 It adds ONE new scene, "CopyThat Flower", to the file you have open and
@@ -38,7 +39,7 @@ switches to it. Nothing you already have is changed or deleted. The scene has:
     Save the file before you render, so "next to the .blend" means something.
 
 There is NO CopyThat data in it: no rig, no moves. That is your part, and it
-is in FLOWER_STEPS.md. CopyThat 0.15.0 or newer must be turned on.
+is in FLOWER_STEPS.md. CopyThat 0.18.1 or newer must be turned on.
 
 The "Studio" collection is hidden in the 3D view so the recording shows the
 flower (it still renders). Click its eye in the Outliner to see it.
@@ -48,7 +49,7 @@ flower (it still renders). Click its eye in the Outliner to see it.
 
 HEADER_FAST = '''"""Build the FAST CopyThat flower scene: the parts modelled once, ready to rig.
 
-For Blender 4.4 or newer, with CopyThat 0.17.0 or newer. In Blender: open the
+For Blender 4.5 or newer, with CopyThat 0.18.1 or newer. In Blender: open the
 Scripting tab, click New, paste this whole file, and press Run Script (the
 triangle, or Alt+P) ONCE.
 
@@ -99,7 +100,9 @@ def main():
     for path, header, call in ((OUT, HEADER, "build_bare_scene()"),
                                (OUT_FAST, HEADER_FAST, "build_bare_scene(fast=True)")):
         text = header + body + '\n\nif __name__ == "__main__":\n    {:s}\n'.format(call)
-        with open(path, "w", encoding="utf-8") as handle:
+        # newline="\n": on Windows the default would write CR LF, and every
+        # line of the file would show as changed in git.
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
         print("wrote", path, len(text.splitlines()), "lines; flower.py sha256", digest)
 

@@ -1,6 +1,6 @@
 """Make the one file the user runs: copythat_promo.py with the flower inlined.
 
-    python3 bundle.py [--flower PATH] [--out PATH]
+    python promo/user_script/bundle.py [--flower PATH] [--out PATH]
 
 Reads copythat_promo.py (next to this file) and PROMO/flower/flower.py, and
 writes dist/copythat_promo.py. The flower's source goes between the

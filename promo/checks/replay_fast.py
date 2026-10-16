@@ -1,16 +1,23 @@
-"""Do what FLOWER_FAST.md says, to the fast .blend, with CopyThat 0.17.1, and prove it.
+"""Do what FLOWER_FAST.md says, to the fast .blend, and prove it.
 
-    /home/user/Blender-addon/.venv/bin/python replay_fast.py [--no-render] [--no-sweep]
+    blender --background --factory-startup --python promo/checks/replay_fast.py -- [--no-render] [--no-sweep]
 
-The repo's CopyThat is registered (sys.path.insert(0, ADDON)). The steps are
-done literally, in the guide's order: selections by select_set with the right
+Run from the repo root. It checks this repo's add-on; set COPYTHAT_ADDON to a
+folder that holds another copy of rigmoves/ (a frozen version) to check that.
+
+The add-on is registered (sys.path.insert(0, ADDON)). The steps are done
+literally, in the guide's order: selections by select_set with the right
 object active, as a click and Ctrl+clicks in the Outliner leave them; fields
 typed as the guide says (rotation_euler, location); the operators Make Chain,
 Ring, Spread, Record, Build and Animate called with the dialog properties set
-as the guide says and the rest left at the dialog's defaults. The numbers are
-read from the guide's cheat sheet, so they cannot drift from the text.
+as the guide says and the rest left as the dialog shows them. The numbers are
+read from the guide's cheat sheet, so they cannot drift from the text. What
+counts as a click, a value typed and a button pressed is in replay_guide.py,
+which does the same for the long way.
 
 Then it checks:
+  * the guide's install text, the reports its steps quote, the tables of what
+    to set in each dialog, and the counts in the table at its top;
   * Build reports success and no driver is cramped;
   * Play 0: every part on its Before;
   * Play 1 (and frames 38, 75, 112): the 8 outer and 6 inner petals, the core
@@ -28,7 +35,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROMO = os.path.dirname(HERE)
-ADDON = os.environ.get("COPYTHAT_ADDON", "/home/user/Blender-addon")
+# This repo's add-on (promo/ -> the repo root), unless one is named.
+ADDON = os.environ.get("COPYTHAT_ADDON", os.path.dirname(PROMO))
 sys.path.insert(0, os.path.join(PROMO, "flower"))
 sys.path.insert(0, HERE)
 sys.path.insert(0, ADDON)
@@ -42,42 +50,56 @@ import replay_guide as old  # noqa: E402
 import rigmoves  # noqa: E402
 import run_headless  # noqa: E402
 
-BLEND = os.path.join(PROMO, "outbox", "CopyThat_flower_fast.blend")
-GUIDE = os.path.join(PROMO, "outbox", "FLOWER_FAST.md")
+BLEND = os.path.join(PROMO, "files", "CopyThat_flower_fast.blend")
+GUIDE = os.path.join(PROMO, "files", "FLOWER_FAST.md")
 STILL = os.path.join(HERE, "test_frame_fast_0120.png")
 FRAMES = (1, 38, 75, 112, 151)
 LIMIT = 1e-3
+RING_COLUMNS = ["Part", "Use", "Count", "Round", "About", "Linked copies", "Lead step"]
+SPREAD_COLUMNS = ["Order", "Only the selected", "By", "Start Delay", "Delay step", "Select first"]
 
-CENTRES = {"3D Cursor": "CURSOR", "World Origin": "ORIGIN"}
-AXES = {"World Z": "Z", "3D Cursor's Z": "CURSOR_Z", "World X": "X", "World Y": "Y"}
-ORDERS = {"Around a ring": "AROUND", "By distance": "DISTANCE", "Along an axis": "AXIS",
-          "Down a chain": "CHAIN", "Random": "RANDOM"}
-
-DONE = {"clicks": 0, "typed": 0, "presses": 0}
+DONE = old.DONE
+click = old.click
+press = old.press
+typed = old.typed
+rig = old.rig
 
 
 # ---------------------------------------------------------------------------
 # the guide
 
-def cheat_sheet():
-    tables = old.cheat_sheet(GUIDE)
-    return tables
-
-
 def old_counts():
     """The same count for FLOWER_STEPS.md, the long way, from its own tables:
-    object clicks, values typed or chosen, buttons pressed."""
-    sheet = old.cheat_sheet(os.path.join(PROMO, "outbox", "FLOWER_STEPS.md"))
-    poses = sheet["Pose"]
-    clicks = 9 + len({row[1] for row in poses}) + 8 + 6          # New Move, each part posed, two Ride Alongs
-    typed = (len(sheet["Follows"]) + len(poses) + len(sheet["Lead"])
-             + len([r for r in sheet["Delay"] if float(r[1]) != 0.0]) + 2)   # + Ease, Frames
-    presses = 6 + 3                       # New Move, Record, 2 x Ride Along, Build, Animate; Numpad 7, H, Alt+H
-    return clicks, typed, presses
+    (object clicks, values typed or chosen, buttons pressed, of the values the
+    Lead and Delay numbers)."""
+    return old.long_way_counts(old.cheat_sheet(os.path.join(PROMO, "files", "FLOWER_STEPS.md")))
 
 
 def names(text):
     return [n.strip() for n in text.split(",") if n.strip()]
+
+
+def report():
+    return rig().rigmoves.report
+
+
+def check_comparison(check, text, fast, long):
+    """The table at the top of the guide says what the replays counted: for
+    the long way (the first column) and for this one."""
+    head = text[:text.index("## Before you start")]
+    rows = [[c.strip() for c in line.strip().strip("|").split("|")]
+            for line in head.splitlines() if line.startswith("|")]
+    heads = rows[0]
+    check(heads[1] == "All parts modelled (`FLOWER_STEPS.md`)" and heads[2] == "This way",
+          "the table at the top is headed {} and {}".format(heads[1], heads[2]))
+    poses = len({row[1] for row in old.cheat_sheet(os.path.join(PROMO, "files", "FLOWER_STEPS.md"))["Pose"]})
+    wanted = {"Parts you select and pose": [poses, len({row[1] for row in old.cheat_sheet(GUIDE)["Pose"]})],
+              "Clicks on objects": [sum(long[:3]), sum(fast[:3])],
+              "Of those": [long[3], fast[3]]}
+    for start, numbers in wanted.items():
+        row = next((r for r in rows if r[0].startswith(start)), None)
+        said = [int(re.search(r"\d+", cell).group()) for cell in row[1:3]] if row else None
+        check(said == numbers, "the table says {} for '{}'; the replays count {}".format(said, start, numbers))
 
 
 # ---------------------------------------------------------------------------
@@ -113,42 +135,13 @@ def reference():
 # ---------------------------------------------------------------------------
 # what a user does
 
-def select(*objects, active=None):
-    DONE["clicks"] += len(objects)
-    old.select(*objects, active=active)
-
-
-def press(operator, **properties):
-    """Press a panel button, or OK in a dialog whose fields were set: only the
-    fields that differ from the dialog's own defaults were touched by the user."""
-    DONE["presses"] += 1
-    rna = operator.get_rna_type()
-    for key, value in properties.items():
-        if key == "index":
-            continue
-        default = rna.properties[key].default
-        if value != default:
-            DONE["typed"] += 1
-    result = operator(**properties)
-    assert result == {"FINISHED"}, (rna.identifier, properties, result)
-    return result
-
-
-def rig():
-    return bpy.context.scene.rigmoves_rig
-
-
-def report():
-    return rig().rigmoves.report
-
-
 def replay(tables, log):
     scene = bpy.context.scene
     objects = bpy.data.objects
     parts6 = [objects[n] for n in ("Outer Leader", "Inner Leader", "Core", "Leaf 1", "Leaf 2", "Leaf 3")]
 
     # 1. Select the six parts and press New Move.
-    select(*parts6, active=objects["Outer Leader"])
+    click(*parts6, active=objects["Outer Leader"])
     press(bpy.ops.rigmoves.new_move)
     move = rig().rigmoves.moves[0]
     log("1 New Move", report())
@@ -157,7 +150,7 @@ def replay(tables, log):
     # and press it once.
     assert len(tables["Make Chain"]) == 1, tables["Make Chain"]
     for _press, chosen, active in tables["Make Chain"]:
-        select(*[objects[n] for n in names(chosen)], active=objects[active])
+        click(*[objects[n] for n in names(chosen)], active=objects[active])
         press(bpy.ops.rigmoves.make_chain, index=0)
         log("2 Make Chain", report())
     assert move.parts["Leaf 2"].follows == "Leaf 1" and move.parts["Leaf 3"].follows == "Leaf 2", \
@@ -165,55 +158,50 @@ def replay(tables, log):
 
     # 3. Pose the flower open, one field at a time: click the part (once for
     # the core's two fields), then type.
-    last = None
-    for name, field, shut, value in old.pose_rows(tables):
-        if name != last:
-            DONE["clicks"] += 1
-        last = name
-        DONE["typed"] += 1
-        old.type_field(objects[name], field, shut, value)
+    old.pose(tables)
 
     # 4. Record After.
     press(bpy.ops.rigmoves.record, index=0, which="AFTER")
     log("4 Record After", report())
 
-    # 5. Ring: click the part, press Ring..., fill in the dialog, OK.
-    copies = {}
-    for name, count, centre, about, linked, lead_first, lead_last in tables["Ring"]:
-        select(objects[name])
+    # 5-7. Ring: click the part, press Ring..., fill in the dialog, OK.
+    copies, expected = {}, []
+    columns = old.cheat_headers(GUIDE)["Ring"]
+    for number, row in enumerate(tables["Ring"], 5):
+        name, properties, words = old.ring_properties(columns, row)
+        click(objects[name])
         before = {o.name for o in objects}
-        press(bpy.ops.rigmoves.ring, index=0, count=int(count), center=CENTRES[centre],
-              axis=AXES[about], linked=(linked.lower() == "on"),
-              lead_first=int(lead_first), lead_last=int(lead_last))
+        press(bpy.ops.rigmoves.ring, index=0, **properties)
         copies[name] = sorted(o.name for o in objects if o.name not in before)
-        log("5 Ring " + name, report())
+        expected.append(("rigmoves.ring", words))
+        log("{:d} Ring {:s}".format(number, name), report())
 
-    # 6. Delays: select the leaf, Spread... on Timing, then type the other two.
-    for order, only, first, last, chosen in tables["Spread"]:
-        select(*[objects[n] for n in names(chosen)])
-        press(bpy.ops.rigmoves.spread, index=0, what="DELAY", order=ORDERS[order],
-              only_selected=(only.lower() == "on"), first=float(first), last=float(last))
-        log("6 Spread Delays", report())
+    # 8. Delays: select the leaf, Spread... on Timing, then type the other two.
+    columns = old.cheat_headers(GUIDE)["Spread"]
+    for row in tables["Spread"]:
+        chosen, properties, words = old.spread_properties(columns, row)
+        click(*[objects[n] for n in chosen])
+        press(bpy.ops.rigmoves.spread, index=0, **properties)
+        expected.append(("rigmoves.spread", words))
+        log("8 Spread Delays", report())
     for name, delay in tables["Delay"]:
-        DONE["typed"] += 1
+        if float(delay) != 0.0:
+            typed(number=True)
         move.parts[name].start = float(delay)
 
-    # 7. Ease, Build Sliders.
+    # 9. Ease, Build Sliders, frame 1, Frames 150, Animate.
     other = dict(tables["Other"])
-    DONE["typed"] += 1
+    typed()
     move.ease = {"Smooth": "SMOOTH", "Even speed": "LINEAR"}[other["Ease"]]
-    select(objects["Outer Leader"])
     press(bpy.ops.rigmoves.build)
-    log("7 Build Sliders", report())
-
-    # 8. Frame 1, Frames 150, Animate.
+    log("9 Build Sliders", report())
     scene.frame_set(1)
-    DONE["typed"] += 1
+    typed()
     move.play_frames = int(other["Frames"])
     press(bpy.ops.rigmoves.animate, index=0)
-    log("8 Animate", report())
+    log("9 Animate", report())
     scene.frame_set(1)
-    return move, copies
+    return move, copies, expected
 
 
 # ---------------------------------------------------------------------------
@@ -273,16 +261,22 @@ def main():
     sweep = "--no-sweep" not in sys.argv
     rigmoves.register()
     version = rigmoves.bl_info["version"]
-    print("CopyThat", ".".join(str(v) for v in version))
-    assert version >= (0, 17, 1)
-    shown = ".".join(str(v) for v in version[:3])
+    print("CopyThat", ".".join(str(v) for v in version), "from", os.path.dirname(rigmoves.__file__))
+    failures = []
+
+    def check(ok, text):
+        print(("  ok   " if ok else "  FAIL ") + text)
+        if not ok:
+            failures.append(text)
+
     with open(GUIDE, encoding="utf-8") as handle:
         guide_text = handle.read()
-    flat_text = " ".join(guide_text.split())
-    assert "Version 0.17.1" in flat_text and "CopyThat-0.17.1.zip" in flat_text and shown == "0.17.1", \
-        "the guide names a version other than the add-on's {}".format(shown)
-    tables = cheat_sheet()
+    old.check_install_text(check, guide_text, version)
+    tables = old.cheat_sheet(GUIDE)
     print("cheat sheet:", {k: len(v) for k, v in tables.items()})
+    headers = old.cheat_headers(GUIDE)
+    check(headers["Ring"] == RING_COLUMNS, "the Ring table's columns are " + ", ".join(RING_COLUMNS))
+    check(headers["Spread"] == SPREAD_COLUMNS, "the Spread table's columns are " + ", ".join(SPREAD_COLUMNS))
     in_steps = old.pose_table_in_the_steps(GUIDE)
     in_sheet = [(name, field, value) for name, field, _shut, value in old.pose_rows(tables)]
     assert in_steps == in_sheet, "step 3 and the cheat sheet disagree:\n{}\n{}".format(in_steps, in_sheet)
@@ -305,20 +299,18 @@ def main():
     print("fast file against the normal flower, shut: largest difference {:.2e}".format(gap))
 
     notes = []
-    move, copies = replay(tables, lambda step, text: notes.append((step, text)))
+    move, copies, expected = replay(tables, lambda step, text: notes.append((step, text)))
     for step, text in notes:
         print("  {:22s} {:s}".format(step, text))
-    print("this guide asks for {:d} object clicks, {:d} values typed or chosen, {:d} buttons pressed = {:d}"
-          .format(DONE["clicks"], DONE["typed"], DONE["presses"], sum(DONE.values())))
+    print("this guide asks for {:d} object clicks, {:d} values typed or chosen, {:d} buttons pressed = {:d}; "
+          "{:d} of the values are Lead and Delay numbers".format(
+              DONE["clicks"], DONE["typed"], DONE["presses"],
+              DONE["clicks"] + DONE["typed"] + DONE["presses"], DONE["numbers"]))
     before = old_counts()
-    print("FLOWER_STEPS.md, the long way: {:d} object clicks, {:d} values, {:d} buttons = {:d}"
-          .format(*before, sum(before)))
-    failures = []
-
-    def check(ok, text):
-        print(("  ok   " if ok else "  FAIL ") + text)
-        if not ok:
-            failures.append(text)
+    print("FLOWER_STEPS.md, the long way: {:d} object clicks, {:d} values, {:d} buttons = {:d}; "
+          "{:d} of the values are Lead and Delay numbers".format(*before[:3], sum(before[:3]), before[3]))
+    fast = (DONE["clicks"], DONE["typed"], DONE["presses"], DONE["numbers"])
+    check_comparison(check, guide_text, fast, before)
 
     # What the Ring made: where each copy stands, and its name.
     print("copies:", {k: v for k, v in copies.items()})
@@ -328,24 +320,24 @@ def main():
           "Inner Leader made " + ", ".join(copies["Inner Leader"]))
     check(copies["Leaf 1"] == ["Leaf 1 2", "Leaf 2 2", "Leaf 3 2"],
           "Leaf 1 made " + ", ".join(copies["Leaf 1"]))
+    check([move.parts[n].lead for n in want_outer] == [9, 18, 27, 36, 27, 18, 9],
+          "the outer Leads are 9, 18, 27, 36, 27, 18, 9")
+    check([move.parts["Inner Leader {:d}".format(k)].lead for k in range(2, 7)] == [14, 28, 42, 28, 14],
+          "the inner Leads are 14, 28, 42, 28, 14")
+    check(move.parts["Leaf 1 2"].lead == 0, "the second leaf has Lead 0")
 
     chain = dict(notes)["2 Make Chain"]
     check(chain.startswith("Chain: Leaf 1 > Leaf 2 > Leaf 3"), "one Make Chain press: " + chain)
     check({p.name: p.follows for p in move.parts if p.follows} == {"Leaf 2": "Leaf 1", "Leaf 3": "Leaf 2"},
           "Leaf 2 follows Leaf 1 and Leaf 3 follows Leaf 2, nothing else follows")
 
-    # Every report the steps quote ("the report "..."") is what the add-on said.
-    steps = " ".join(guide_text[:guide_text.index("## Cheat sheet")].split())
-    said = [" ".join(text.split()) for _step, text in notes]
-    quoted = re.findall(r'[Rr]eport[^"]{0,25}"([^"]+)"', steps)
-    print("reports quoted in the steps:", len(quoted))
-    for quote in quoted:
-        check(any(quote in text for text in said), "the add-on said: " + quote)
-    check(len(quoted) >= 9, "the steps quote the reports of New Move, Make Chain, Record After, "
-          "three Rings, Spread, Build and Animate ({:d} found)".format(len(quoted)))
+    # Every report the steps quote ("the report "..."") is what the add-on
+    # said, and the table of each dialog in the steps says what it needs.
+    old.check_reports(check, guide_text, notes, 9)
+    old.check_dialogs(check, guide_text, expected)
 
     print("Build and drivers")
-    build_report = dict(notes)["7 Build Sliders"]
+    build_report = dict(notes)["9 Build Sliders"]
     check("too long" not in build_report and "cut short" not in build_report,
           "Build reports no cramped driver")
     check("not recorded" not in build_report and "animated by hand" not in build_report,
@@ -465,6 +457,8 @@ def main():
 
     print()
     print("FAILED {:d}".format(len(failures)) if failures else "ALL CHECKS PASSED")
+    for text in failures:
+        print("  " + text)
 
     if render:
         scene.frame_set(120)

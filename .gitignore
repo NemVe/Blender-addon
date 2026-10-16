@@ -3,3 +3,5 @@ dist/
 __pycache__/
 *.pyc
 *.blend1
+# The stills the promo replay checks render next to themselves
+promo/checks/test_frame*.png
