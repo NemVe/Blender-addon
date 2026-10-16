@@ -2,6 +2,14 @@
 
 - New session? Read `START_HERE.md` first (the session handoff), then
   `HANDOFF.md` and the guide.
+- Working locally (Windows, the user's own PC)? Test with their real Blender:
+  `"<path to>\blender.exe" --background --factory-startup --python tests/test_rigmoves.py`
+  (or a Python 3.13 venv with `pip install bpy==5.2.2`, then
+  `.venv\Scripts\python.exe tests\test_rigmoves.py`). The SessionStart
+  hook is for cloud sessions only and does nothing locally. Locally you can
+  also open Blender's window to check the panel and dialogs for real, and
+  render on the user's GPU. The promo scripts in `promo/` still name the old
+  cloud scratch folder; point them at `promo/` before running them.
 - The zip is a Blender extension: `rigmoves/blender_manifest.toml`, whose
   version `tools/build_zip.py` writes from bl_info. Licence GPL-3.0-or-later
   (`LICENSE`).
