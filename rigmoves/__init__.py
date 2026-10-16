@@ -8042,8 +8042,9 @@ def reframe(obj, matrix):
     Its mesh is a new one, and the old one is kept until the ring is settled:
     anything else that shares the old one stays as it was, and putting it back
     is exact. Whatever hangs from the object by its object is held where it
-    is; what hangs from a vertex follows the vertices, which have not moved.
-    Returns what put_back needs to undo it.
+    is, and hung from it again as Build hangs a follower; what hangs from a
+    vertex follows the vertices, which have not moved. Returns what put_back
+    needs to undo it.
     """
     was = obj.matrix_world.copy()
     old = obj.data
@@ -8056,10 +8057,15 @@ def reframe(obj, matrix):
     if inside.determinant() < 0.0:
         turn_faces_over(mesh)
     mesh.update()
-    kept = [(kid, kid.matrix_world.copy()) for kid in obj.children
-            if kid.parent_type == "OBJECT"]
+    kept = [(kid, kid.matrix_world.copy(), kid.matrix_parent_inverse.copy())
+            for kid in obj.children if kid.parent_type == "OBJECT"]
     obj.matrix_world = matrix
-    for kid, world in kept:
+    # Held by writing its own transform alone, a child keeps the parent inverse
+    # Blender's Apply left it, which no longer cancels the parent's matrix when
+    # the parent is stood on a frame with a non-uniform scale again: the child
+    # came out sheared, and every turn it was given after that came out wrong.
+    for kid, world, _inverse in kept:
+        kid.matrix_parent_inverse = matrix.inverted_safe()
         kid.matrix_world = world
     return obj, was, old, kept
 
@@ -8072,7 +8078,8 @@ def put_back(framed):
         if fresh.users == 0:
             bpy.data.meshes.remove(fresh)
         obj.matrix_world = was
-        for kid, world in kept:
+        for kid, world, inverse in kept:
+            kid.matrix_parent_inverse = inverse
             kid.matrix_world = world
 
 

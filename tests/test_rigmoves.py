@@ -6115,6 +6115,12 @@ class TestRingAnimatedChild(RingFlows):
         # the fault the blocker keeps away, to show the others test something.
         self.modelled_flower()
         bee = self.hang("Bee", self.petals[3])
+        # Hung before its petal was moved, as a child often is: the inverse it
+        # hangs by does not cancel the petal's matrix. (One that does is held
+        # whole when its parent is stood on a frame - hung from it anew - and
+        # keys on it, which are then the world's, play as before.)
+        bee.matrix_parent_inverse = Matrix.Translation((0.5, 0.0, 0.0)) @ bee.matrix_parent_inverse
+        bpy.context.view_layer.update()
         self.key_a_flight(bee)
         was = self.seen_at([bee])
         with mock.patch.object(rigmoves, "has_own_motion", lambda obj: False):
@@ -8542,6 +8548,135 @@ class TestAReframedForearmWithAKeyedHand(ArmCase):
         self.assertIn("(it has a child with keys or drivers of its own ('Hand')): press Ctrl+Z",
                       said)
         self.assertNotIn("Lift Those Keyframes", said)
+
+
+def fit_rigid(source, target):
+    """(angle in degrees, rms miss) of the best turn and shift that carries one
+    list of points onto another: a mesh that is only turned fits with no miss,
+    one that is sheared does not."""
+    import numpy
+    one = numpy.array([tuple(p) for p in source], dtype=float)
+    other = numpy.array([tuple(p) for p in target], dtype=float)
+    middle_one, middle_other = one.mean(axis=0), other.mean(axis=0)
+    left, _sizes, right = numpy.linalg.svd((one - middle_one).T @ (other - middle_other))
+    flip = numpy.sign(numpy.linalg.det(right.T @ left.T))
+    turn = right.T @ numpy.diag([1.0, 1.0, flip]) @ left.T
+    shift = middle_other - turn @ middle_one
+    miss = float(numpy.sqrt(((one @ turn.T + shift - other) ** 2).sum(axis=1).mean()))
+    cosine = max(-1.0, min(1.0, (numpy.trace(turn) - 1.0) / 2.0))
+    return math.degrees(math.acos(cosine)), miss
+
+
+class TestApplyScaleOnABuiltChain(CopyThatCase):
+    """Two boxes with a non-uniform scale, chained and built, and Ctrl+A Scale on
+    both. Nothing moves, and Build says so; but the forearm hung from the upper
+    arm by a parent inverse that no longer cancelled its scale, and every turn
+    it was given after that came out sheared and short: 8.1 degrees for the 50
+    it was dragged to, 83 for the 81 Curl asked for."""
+
+    SHOULDER, ELBOW = Vector((0.0, 0.0, 1.0)), Vector((2.0, 0.0, 1.0))
+
+    def setUp(self):
+        super().setUp()
+        self.upper = cube("Upper", (1.0, 0.0, 1.0))
+        self.upper.scale = (2.0, 0.3, 0.3)
+        self.fore = cube("Fore", (3.0, 0.0, 1.0))
+        self.fore.scale = (2.0, 0.25, 0.25)
+        bpy.context.view_layer.update()
+        self.home = {o.name: o.matrix_world.copy() for o in (self.upper, self.fore)}
+        self.shut = {o.name: rest_points(o) for o in (self.upper, self.fore)}
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj, where in ((self.upper, self.SHOULDER), (self.fore, self.ELBOW)):
+            bpy.context.scene.cursor.location = where
+            select(obj)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.upper.matrix_world = turn_about(self.SHOULDER, "Y", 30.0) @ self.home["Upper"]
+        bpy.context.view_layer.update()
+        select(self.upper)
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=1.0), {"FINISHED"})
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        drive(self.move, 1.0)
+        self.bent = {o.name: world_points(o) for o in (self.upper, self.fore)}
+        drive(self.move, 0.0)
+
+    def apply_scale_and_build(self):
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.object.transform_apply(location=False, rotation=False,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for share, want in ((0.0, self.shut), (1.0, self.bent)):
+            drive(self.move, share)
+            for obj in (self.upper, self.fore):
+                self.assertLess(drift(obj, want[obj.name]), TOLERANCE, obj.name)
+        drive(self.move, 0.0)
+
+    def test_the_forearm_dragged_after_applying_scale_is_a_rigid_copy_turned_50_degrees(self):
+        self.apply_scale_and_build()
+        self.fore.matrix_world = turn_about(self.ELBOW, "Y", 50.0) @ self.fore.matrix_world
+        bpy.context.view_layer.update()
+        select(self.fore, self.upper)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 1.0)
+        angle, miss = fit_rigid(self.shut["Fore"], world_points(self.fore))
+        self.assertLess(miss, 1e-4)
+        self.assertAlmostEqual(angle, 50.0, delta=0.01)
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.fore, self.shut["Fore"]), TOLERANCE)
+
+    def test_curl_after_applying_scale_gives_the_angle_it_was_asked_for(self):
+        self.apply_scale_and_build()
+        self.upper.matrix_world = turn_about(self.SHOULDER, "Y", 45.0) @ self.upper.matrix_world
+        bpy.context.view_layer.update()
+        select(self.upper)
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=0.8), {"FINISHED"})
+        # 45 degrees of upper arm, and 0.8 of that again at the elbow.
+        angle, miss = fit_rigid(self.shut["Fore"], world_points(self.fore))
+        self.assertLess(miss, 1e-4)
+        self.assertAlmostEqual(angle, 45.0 * 1.8, delta=0.01)
+        select(self.fore, self.upper)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 1.0)
+        angle, miss = fit_rigid(self.shut["Fore"], world_points(self.fore))
+        self.assertLess(miss, 1e-4)
+        self.assertAlmostEqual(angle, 45.0 * 1.8, delta=0.01)
+        drive(self.move, 0.0)
+
+    def test_putting_a_re_framed_parent_back_restores_its_childs_frame_exactly(self):
+        parent = cube("Parent", (0.0, 0.0, 1.0))
+        parent.scale = (2.0, 0.5, 1.0)
+        kid = cube("Kid", (2.0, 0.0, 1.0))
+        kid.scale = (0.5, 1.0, 2.0)
+        bpy.context.view_layer.update()
+        kid.parent = parent
+        kid.matrix_parent_inverse = parent.matrix_world.inverted()
+        # What Blender's Apply leaves a child: an inverse that carries a scale.
+        kid.matrix_parent_inverse = (Matrix.Diagonal((0.5, 2.0, 1.0, 1.0))
+                                     @ kid.matrix_parent_inverse)
+        kid.matrix_world = (Matrix.Translation((2.0, 0.0, 1.0))
+                            @ Matrix.Diagonal((0.5, 1.0, 2.0, 1.0)))
+        bpy.context.view_layer.update()
+        was = [m.copy() for m in (kid.matrix_world, kid.matrix_parent_inverse, kid.matrix_basis,
+                                  parent.matrix_world)]
+        frame = Matrix.Translation((0.0, 0.0, 1.5)) @ Matrix.Rotation(0.4, 4, "Z")
+        framed = [rigmoves.reframe(parent, frame)]
+        bpy.context.view_layer.update()
+        # Held where it stood, and hung from the parent as Build hangs a follower.
+        self.assertTrue(rigmoves.same_matrix(kid.matrix_world, was[0], 1e-5))
+        self.assertTrue(rigmoves.same_matrix(kid.matrix_parent_inverse, frame.inverted(), 1e-5))
+        rigmoves.put_back(framed)
+        bpy.context.view_layer.update()
+        for now, before in zip((kid.matrix_world, kid.matrix_parent_inverse, kid.matrix_basis,
+                                parent.matrix_world), was):
+            self.assertTrue(rigmoves.same_matrix(now, before, 1e-5))
 
 
 class TestRigidFit(unittest.TestCase):
