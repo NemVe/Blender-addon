@@ -1,7 +1,11 @@
 # CopyThat (formerly RigMoves) - notes for Claude
 
-- New session? Read `START_HERE.md` first (the session handoff), then
-  `HANDOFF.md` and the guide.
+- New session on the user's PC? The project's memory, state and procedures
+  live in the Obsidian vault `D:\ObsidianVault\NemVe3D`: read its `CLAUDE.md`
+  first (the loop, anti-bloat rules), then `02 - CopyThat/Open Work.md`. Log
+  there, not in Claude's memory folder. (Cloud sessions: `START_HERE.md`.)
+- New session in the cloud? Read `START_HERE.md` first (the session handoff),
+  then `HANDOFF.md` and the guide.
 - Working locally (Windows, the user's own PC)? Test with their real Blender:
   `"<path to>\blender.exe" --background --factory-startup --python tests/test_rigmoves.py`
   (or a Python 3.13 venv with `pip install bpy==5.2.2`, then
@@ -26,14 +30,13 @@
   the add-on). Read curves from the channelbags only, never `action.fcurves`:
   4.4 and 4.5 answer it with the first slot's curves again. Tested headless
   on 4.5.14, 5.0.1 and 5.2.1.
-- Before a release, run the suite on all three, each with the command above:
-  5.2.1 `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`, 5.0.1
+- Before a release, run the suite on all three at once:
+  `bash tools/test_all_blenders.sh` (one line per Blender): 5.2.1
+  `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`, 5.0.1
   `C:\Program Files\Blender Foundation\Blender 5.0\blender.exe`, 4.5.14 LTS
-  portable `Q:\blender-4.5.14-windows-x64\blender.exe`. Q: is a `subst` drive
-  onto a short folder (gone after a reboot: `subst Q: <folder>` again, or unzip
-  the build to any short path): run 4.5 only from a short path, because from a
-  long one its numpy fails to load (Windows path-length limit) and Spread and
-  Ring fail for no reason.
+  portable `D:\Tools\blender-4.5.14-windows-x64\blender.exe`. Keep 4.5 in a
+  short path: from a long one its numpy fails to load (Windows path-length
+  limit) and Spread and Ring fail for no reason.
 - Test: `.venv/bin/python tests/test_rigmoves.py` (the SessionStart hook puts
   `bpy` in `.venv`). Lint: `ruff check rigmoves tests tools`. Zip:
   `python tools/build_zip.py`.

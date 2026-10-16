@@ -98,6 +98,15 @@
 
   const $ = id => document.getElementById(id);
   const el = { line: $('line'), txt: $('txt'), rule: $('rule') };
+
+  // ?y=... puts the line that many CSS pixels from the top (the rule keeps its
+  // place under it), so each statement can sit in the dark part of its shot
+  // rather than across the flower.
+  const Y = parseFloat(P.get('y'));
+  if (Y >= 0) {
+    el.line.style.top = Y + 'px';
+    el.rule.style.top = (Y + 111) + 'px';
+  }
   // textContent, so nothing in the text is read as markup; and a real
   // apostrophe where the address had a straight one (it's -> it&rsquo;s)
   el.txt.textContent = TEXT.replace(/(\w)'(\w)/g, '$1' + String.fromCharCode(0x2019) + '$2');
