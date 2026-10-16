@@ -951,9 +951,13 @@ def let_deleted_go():
     """A timer's version of the above, for every rig of ours: not done in the
     handler itself, which must not take things out of the file."""
     try:
-        for obj in bpy.data.objects:
-            if obj.type == "ARMATURE" and len(obj.rigmoves.moves):
-                let_go_of_deleted(obj.rigmoves)
+        # The rigs are taken first and the objects let go after: letting one go
+        # removes it from bpy.data.objects, and a loop over that collection
+        # then hands out the object it has just lost (Blender may even crash on
+        # it, and every rig after it was skipped).
+        rigs = [o for o in bpy.data.objects if o.type == "ARMATURE" and len(o.rigmoves.moves)]
+        for rig in rigs:
+            let_go_of_deleted(rig.rigmoves)
     except Exception:
         pass
 

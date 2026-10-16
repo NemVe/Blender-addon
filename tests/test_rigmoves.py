@@ -4126,6 +4126,87 @@ class TestCopiedParts(CopyThatCase):
         self.check_travel(first, rest, 1.0)
 
 
+class WatchedObjects:
+    """bpy.data.objects, noting every removal made while a loop over it is going
+    on. Iterating it goes through a generator that counts the loops that are
+    live: a `for` that is still running is suspended inside the generator."""
+
+    def __init__(self, real):
+        self.real, self.live, self.removals = real, 0, []
+
+    def __iter__(self):
+        return self.loop()
+
+    def loop(self):
+        self.live += 1
+        try:
+            yield from self.real
+        finally:
+            self.live -= 1
+
+    def remove(self, obj, *args, **kwargs):
+        self.removals.append((obj.name, self.live))
+        return self.real.remove(obj, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+class WatchedData:
+    """bpy.data with its objects watched; all else is the real one's."""
+
+    def __init__(self, real):
+        self.real, self.objects = real, WatchedObjects(real.objects)
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+class WatchedBpy:
+    """The bpy the add-on sees: its data watched, all else the real bpy's."""
+
+    def __init__(self):
+        self.data = WatchedData(bpy.data)
+
+    def __getattr__(self, name):
+        return getattr(bpy, name)
+
+
+class TestTheTimerRemovesNothingWhileItLoops(CopyThatCase):
+    """A part deleted in the viewport is let go of by a timer, which removes its
+    object from the file. It did so from inside a loop over every object in the
+    file, and a loop over a collection that loses a member goes on to hand out
+    the member it has just lost: the next rig was read off freed memory, and
+    Blender could crash on it."""
+
+    def test_the_object_of_a_deleted_part_is_removed_after_the_loop_is_over(self):
+        # "Cube" sorts right after "CopyThat Rig" in bpy.data.objects: the very
+        # next object the loop would hand out.
+        part = cube("Cube", (0.0, 0.0, 1.0))
+
+        def pose():
+            part.location.z += 1.0
+
+        record_move([part], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual([o.name for o in bpy.data.objects][:2], ["CopyThat Rig", "Cube"])
+        select(part)
+        # X in the viewport: out of every collection, kept by the part's pointer.
+        self.assertEqual(bpy.ops.object.delete(), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(len(bpy.data.objects["Cube"].users_collection), 0)
+
+        watched = WatchedBpy()
+        with mock.patch.object(rigmoves, "bpy", watched):
+            rigmoves.let_deleted_go()
+        objects = watched.data.objects
+        self.assertEqual([name for name, _live in objects.removals], ["Cube"])
+        self.assertEqual([live for _name, live in objects.removals], [0],
+                         "removed while a loop over the objects was going on")
+        self.assertIsNone(rig().rigmoves.moves[0].parts[0].object)
+        self.assertNotIn("Cube", bpy.data.objects)
+
+
 class TestMakeChainOrder(CopyThatCase):
     """The order follows how a joint is built, at the far end of the part before
     it: not whichever pivot happens to be nearest."""
