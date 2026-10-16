@@ -1364,25 +1364,67 @@ def own_transform_curves(obj):
 
     Easy to end up with by accident: with Auto Keying on, dragging a part into
     its After pose keys it, which is exactly the gesture this tool asks for.
+
+    Only the curves of the slot the object plays are its own: one action can
+    hold a slot for each of several objects, and an Alt+D twin plays the same
+    slot as the original, but the keys of the others are theirs.
+    """
+    if obj is None or obj.animation_data is None:
+        return []
+    animation = obj.animation_data
+    return [(bag, curve) for bag, curve in slot_curves(animation.action, animation.action_slot)
+            if curve.data_path in TRANSFORM_PATHS]
+
+
+def slot_curves(action, slot):
+    """Every F-curve an action holds for one slot, as (channelbag, curve) - none
+    for an action or a slot that is not there.
+
+    Only the channelbags are read. From Blender 4.4 every action keeps its
+    curves in them (a file made before is converted when it opens), but 4.4
+    and 4.5 still answer `action.fcurves` as well, with the first slot's
+    curves over again, so reading both counted every curve twice. 5.0 took
+    that list away. And only the channelbag of the slot asked for: the others
+    belong to whatever plays them.
     """
     found = []
-    if obj is None or obj.animation_data is None:
+    if action is None or slot is None:
         return found
-    action = obj.animation_data.action
-    if action is None:
-        return found
-    # Only the channelbags are read. From Blender 4.4 every action keeps its
-    # curves in them (a file made before is converted when it opens), but 4.4
-    # and 4.5 still answer `action.fcurves` as well, with the first slot's
-    # curves over again, so reading both counted every curve twice. 5.0 took
-    # that list away.
     for layer in action.layers:
         for strip in layer.strips:
-            for bag in strip.channelbags:
-                for curve in bag.fcurves:
-                    if curve.data_path in TRANSFORM_PATHS:
-                        found.append((bag, curve))
+            bag = strip.channelbag(slot)
+            if bag is not None:
+                found.extend((bag, curve) for curve in bag.fcurves)
     return found
+
+
+def own_action(obj):
+    """Make sure the action an object plays is its own, before keys come out.
+
+    An action can be shared: Alt+D plays the same action on the twin, and one
+    action can hold a slot for each of several objects. Taking the keys out of
+    it takes them from every one of them. An object whose action is played by
+    another ID too is given a copy of it - with its own slot, and nobody else's
+    - to take its keys out of; the others keep theirs.
+    """
+    animation = obj.animation_data
+    action = animation.action if animation is not None else None
+    slot = animation.action_slot if animation is not None else None
+    if action is None or slot is None:
+        return
+    others = [user for user in bpy.data.user_map(subset={action}, key_types={"ACTION"})
+              .get(action, ())
+              if not (isinstance(user, bpy.types.Object) and user.name == obj.name)]
+    if not others:
+        return
+    identifier = slot.identifier
+    mine = action.copy()
+    mine.use_fake_user = False
+    # The other slots of the copy would be copies of what the others play.
+    for other in [s for s in mine.slots if s.identifier != identifier]:
+        mine.slots.remove(other)
+    animation.action = mine
+    animation.action_slot = next((s for s in mine.slots if s.identifier == identifier), None)
 
 
 def our_bone_names(data):
@@ -1424,7 +1466,7 @@ def rig_own_curves(rig, data):
             return False
         return bone in names and path.rsplit("].", 1)[-1] in TRANSFORM_PATHS
 
-    # Channelbags only, for the reason given in own_transform_curves.
+    # Channelbags only, for the reason given in slot_curves.
     for layer in action.layers:
         for strip in layer.strips:
             for bag in strip.channelbags:
@@ -1509,7 +1551,7 @@ def drop_empty_action(holder):
     action = animation.action if animation else None
     if action is None:
         return
-    # Channelbags only, for the reason given in own_transform_curves.
+    # Channelbags only, for the reason given in slot_curves.
     if any(len(bag.fcurves) for layer in action.layers
            for strip in layer.strips for bag in strip.channelbags):
         return
@@ -1541,9 +1583,12 @@ def clear_autokey(rig, data, auto=True):
             obj = bpy.data.objects.get(part.name)
             if obj is None:
                 continue
-            found = own_transform_curves(obj)
-            if found:
-                objects += lift_curves(found)
+            # Only the keys this part plays, and from an action that is its own:
+            # a twin, or another object with a slot in the same action, keeps
+            # what it has, and is not counted.
+            if own_transform_curves(obj):
+                own_action(obj)
+                objects += lift_curves(own_transform_curves(obj))
                 drop_empty_action(obj)
 
     ours = rig_own_curves(rig, data)
@@ -7252,7 +7297,7 @@ def action_curve(rig, data_path, index):
     action = rig.animation_data.action if rig.animation_data else None
     if action is None:
         return None, None
-    # Channelbags only, for the reason given in own_transform_curves.
+    # Channelbags only, for the reason given in slot_curves.
     holders = [bag for layer in action.layers for strip in layer.strips
                for bag in strip.channelbags]
     for holder in holders:

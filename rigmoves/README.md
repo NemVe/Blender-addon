@@ -1233,6 +1233,14 @@ and one lifted 1 m:
   it. And if anything at all goes wrong once the riders are made, Ring takes them
   out again, puts every petal back as it found it, and says "Ring could not be
   finished: ... Nothing was changed."
+- **Build took the animation of other objects away.** A part keyed on its own
+  transform has those keys lifted when it is built, and they were taken out of the
+  action the part plays. Where another object plays the same action - an Alt+D twin,
+  or a lamp with a slot of its own in it - that object lost its animation too, and
+  the report counted its tracks as the part's. Now only the keys of the slot the part
+  itself plays are looked at, lifted and counted, and an action another object plays
+  too is copied for the part first, so the keys come out of the copy: the others keep
+  theirs exactly. **Lift Those Keyframes** does the same.
 
 ## Known rough edges
 

@@ -135,6 +135,14 @@ Features, in the order the user asked for them:
   `curve_for(bag, path, index)`. Never read `action.fcurves` as well: 4.4 and
   4.5 still answer it with the first slot's curves again, so every curve was
   counted twice there (5.0 removed it).
+- **An object's own keys are its own slot's** (0.19): `slot_curves(action, slot)`
+  reads the one channelbag of a slot, `own_transform_curves(obj)` the slot in
+  `obj.animation_data.action_slot` (none when it has no slot: it plays nothing).
+  An Alt+D twin plays the same action AND slot; another object can have a slot of
+  its own in the same action. `own_action(obj)` runs before keys are lifted: if any
+  other ID uses the action (`bpy.data.user_map`) the object gets `action.copy()`,
+  without the other slots and without a fake user, and the same slot, and the keys
+  come out of the copy only (`drop_empty_action` then drops the empty copy).
 - **Drivers must stay "simple expressions"** so they run with Auto Run
   Python Scripts off, and must stay under 256 characters, or Blender cuts
   them short.

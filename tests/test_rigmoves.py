@@ -5858,6 +5858,152 @@ class TestRingPetalsSharingOneMesh(RingFlows):
             self.assertEqual(petal.data.users, 1, petal.name)
 
 
+def curves_in(action, slot=None):
+    """(data path, index) of every curve an action holds - of one slot, or of
+    all of them - read from the channelbags."""
+    return sorted((curve.data_path, curve.array_index)
+                  for layer in action.layers for strip in layer.strips
+                  for bag in strip.channelbags
+                  if slot is None or bag.slot_handle == slot.handle
+                  for curve in bag.fcurves)
+
+
+class TestSharedActions(CopyThatCase):
+    """A part keyed on its own transform has the keys lifted when it is built. An
+    action another object plays too is that object's as much as the part's: it
+    must keep what it has."""
+
+    def keyed_gear(self):
+        """A gear that rises from 1 to 3 over twenty frames, keyed on location."""
+        self.gear = cube("Gear", (0.0, 0.0, 1.0))
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        self.gear.keyframe_insert("location", frame=1)
+        self.gear.location.z = 3.0
+        self.gear.keyframe_insert("location", frame=20)
+        scene.frame_set(1)
+
+    def lamp_in_the_same_action(self):
+        """Another object plays the gear's action under a slot of its own, as
+        the Action editor leaves it: assigned, then keyed on its height."""
+        self.keyed_gear()
+        self.lamp = cube("Lamp", (5.0, 0.0, 1.0))
+        scene = bpy.context.scene
+        self.lamp.animation_data_create()
+        self.lamp.animation_data.action = self.gear.animation_data.action
+        self.lamp.keyframe_insert("location", index=2, frame=1)
+        self.lamp.location.z = 4.0
+        self.lamp.keyframe_insert("location", index=2, frame=20)
+        scene.frame_set(1)
+        self.assertEqual(len(self.gear.animation_data.action.slots), 2)
+
+    def twin_by_alt_d(self):
+        self.keyed_gear()
+        select(self.gear)
+        self.assertEqual(bpy.ops.object.duplicate(linked=True), {"FINISHED"})
+        self.twin = bpy.context.view_layer.objects.active
+        self.twin.location.x += 4.0
+        self.assertEqual(self.twin.animation_data.action, self.gear.animation_data.action)
+        self.assertEqual(self.twin.animation_data.action_slot.identifier,
+                         self.gear.animation_data.action_slot.identifier)
+
+    @staticmethod
+    def height_at(obj, frame):
+        bpy.context.scene.frame_set(frame)
+        return obj.matrix_world.translation.z
+
+    def build_the_gear(self):
+        """The gear turned a quarter about X for its After, and Build."""
+        bpy.context.scene.frame_set(1)
+        select(self.gear)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.gear.rotation_euler.x = math.radians(90.0)
+        bpy.context.view_layer.update()
+        self.after = rest_points(self.gear)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def test_a_part_reads_only_the_curves_of_its_own_slot(self):
+        self.lamp_in_the_same_action()
+        self.assertEqual(len(rigmoves.own_transform_curves(self.gear)), 3)
+        self.assertEqual(len(rigmoves.own_transform_curves(self.lamp)), 1)
+        # Nothing to play: no slot, no keys of its own.
+        spare = cube("Spare", (9.0, 0.0, 0.0))
+        spare.animation_data_create()
+        spare.animation_data.action = self.gear.animation_data.action
+        self.assertIsNone(spare.animation_data.action_slot)
+        self.assertEqual(rigmoves.own_transform_curves(spare), [])
+
+    def test_building_the_gear_leaves_the_twin_its_keys(self):
+        self.twin_by_alt_d()
+        frames = (1, 10, 20)
+        was = [self.height_at(self.twin, f) for f in frames]
+        self.assertGreater(was[1], 1.5)
+        self.build_the_gear()
+        self.assertEqual([round(self.height_at(self.twin, f), 6) for f in frames],
+                         [round(z, 6) for z in was])
+        self.assertEqual(len(rigmoves.own_transform_curves(self.twin)), 3)
+        # The gear's own keys are lifted, and it plays the move at any frame.
+        self.assertEqual(rigmoves.own_transform_curves(self.gear), [])
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+        move = rig().rigmoves.moves[0]
+        for frame in frames:
+            bpy.context.scene.frame_set(frame)
+            drive(move, 1.0)
+            self.assertLess(drift(self.gear, self.after), TOLERANCE, frame)
+
+    def test_the_part_given_a_copy_has_none_left_over(self):
+        self.twin_by_alt_d()
+        original = self.twin.animation_data.action
+        self.build_the_gear()
+        # The copy made for the gear was emptied and went; the twin has the
+        # action the two shared, to itself now.
+        self.assertIsNone(self.gear.animation_data.action)
+        self.assertEqual(self.twin.animation_data.action.name, original.name)
+        self.assertEqual(original.users, 1)
+        self.assertEqual([a.name for a in bpy.data.actions if a.name.startswith(original.name)
+                          and a.name != original.name], [])
+
+    def test_building_the_gear_leaves_another_slot_of_its_action_its_curve(self):
+        self.lamp_in_the_same_action()
+        action = self.gear.animation_data.action
+        everything = curves_in(action)
+        self.assertEqual(len(everything), 4)
+        was = [self.height_at(self.lamp, f) for f in (1, 10, 20)]
+        self.assertAlmostEqual(was[2], 4.0, places=5)
+        self.build_the_gear()
+        self.assertEqual([round(self.height_at(self.lamp, f), 6) for f in (1, 10, 20)],
+                         [round(z, 6) for z in was])
+        self.assertEqual(curves_in(action), everything)
+        self.assertEqual(curves_in(action, self.lamp.animation_data.action_slot),
+                         [("location", 2)])
+        self.assertEqual(rigmoves.own_transform_curves(self.gear), [])
+        # Counted: the gear's three tracks, not the lamp's as a fourth.
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+        self.assertNotIn("4 stray", rig().rigmoves.report)
+
+    def test_the_lift_button_takes_only_the_parts_own_keys_and_counts_them(self):
+        self.lamp_in_the_same_action()
+        select(self.gear)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        was = [self.height_at(self.lamp, f) for f in (1, 10, 20)]
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"FINISHED"})
+        self.assertIn("3 keyframe track(s) lifted off the parts", rig().rigmoves.report)
+        self.assertEqual(rigmoves.own_transform_curves(self.gear), [])
+        self.assertEqual([round(self.height_at(self.lamp, f), 6) for f in (1, 10, 20)],
+                         [round(z, 6) for z in was])
+
+    def test_an_action_played_by_one_object_is_lifted_in_place_as_before(self):
+        # Nobody else plays it: no copy is made, and the action is emptied and
+        # taken off the part, as it always was.
+        self.keyed_gear()
+        name = self.gear.animation_data.action.name
+        self.build_the_gear()
+        self.assertIsNone(self.gear.animation_data.action)
+        self.assertIsNone(bpy.data.actions.get(name))
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+
+
 class TestCombined(CopyThatCase):
 
     def test_combined_control_plays_members_in_order(self):
