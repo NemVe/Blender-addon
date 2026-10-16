@@ -960,9 +960,19 @@ def point_at_objects(rig, data):
 
 
 def has_deleted(data):
-    """Whether any part points at an object that has been deleted."""
-    return any(part.object is not None and not part.object.users_collection
+    """Whether any part points at an object, or at the one it hung from before,
+    that has been deleted."""
+    return any((part.object is not None and not part.object.users_collection)
+               or (part.home_object is not None and not part.home_object.users_collection)
                for move in data.moves for part in move.parts)
+
+
+def free_children(obj):
+    """Hang what hangs from an object from what the object hangs from, standing
+    where it stands. Blender frees an object's children from it without keeping
+    them where they are, and a follower jumped when its leader went."""
+    for child in list(obj.children):
+        keep_world(child, obj.parent)
 
 
 def let_go_of_deleted(data):
@@ -974,21 +984,29 @@ def let_go_of_deleted(data):
     called Lid.001. The part lets go of it, and it goes if nothing else wants it.
 
     The part is marked gone for good: the name it has may be given to a new
-    object, which is not it (see part_object). And what hung from the object is
-    hung from what the object hung from, standing where it stands: Blender frees
-    an object's children from it without keeping them where they are, and a
-    follower jumped when its leader went.
+    object, which is not it (see part_object). What hung from the object is hung
+    from what it hung from first (free_children).
+
+    The object a part hung from before is the same: let go of when deleted, and
+    its name marked, so that a new object given that name is not taken for it
+    (see home_of).
     """
     for move in data.moves:
         for part in move.parts:
             obj = part.object
             if obj is not None and not obj.users_collection:
-                for child in list(obj.children):
-                    keep_world(child, obj.parent)
+                free_children(obj)
                 part.object = None
                 part.gone = True
                 if obj.users == 0:
                     bpy.data.objects.remove(obj)
+            home = part.home_object
+            if home is not None and not home.users_collection:
+                free_children(home)
+                part.home_parent = home.name + DELETED
+                part.home_object = None
+                if home.users == 0:
+                    bpy.data.objects.remove(home)
 
 
 def let_deleted_go():
@@ -1006,7 +1024,8 @@ def let_deleted_go():
         pass
 
 
-# What a part that leads riders is called once its object is deleted and it stays.
+# Put after the name of something deleted that is still named: a part that leads
+# riders and stays, and an old parent that is let go of. No object has it.
 DELETED = " (deleted)"
 
 
@@ -1180,7 +1199,8 @@ def follow_renames_handler(*_arguments):
     and its users, and not the collections - those are looked through for the
     whole file at every question. Renames are followed only when a name
     differs, and the timer is set only when an object has no user but the
-    pointer, which is what an object deleted in the viewport looks like."""
+    pointer, which is what an object deleted in the viewport looks like - the
+    part's own, or the one it hung from before."""
     try:
         deleted = False
         for obj in bpy.data.objects:
@@ -1189,11 +1209,12 @@ def follow_renames_handler(*_arguments):
             renamed = False
             for move in obj.rigmoves.moves:
                 for part in move.parts:
-                    held = part.object
-                    if held is None:
-                        continue
-                    renamed = renamed or held.name != part.name
-                    deleted = deleted or held.users < 2
+                    held, home = part.object, part.home_object
+                    if held is not None:
+                        renamed = renamed or held.name != part.name
+                        deleted = deleted or held.users < 2
+                    if home is not None:
+                        deleted = deleted or home.users < 2
             if renamed:
                 follow_renames(obj, obj.rigmoves)
         if deleted and not bpy.app.timers.is_registered(let_deleted_go):
@@ -1260,6 +1281,35 @@ def keep_world(obj, parent):
     obj.matrix_world = world
 
 
+def remember_home(part, parent):
+    """Note the object a part hung from before this add-on took it over, to give
+    it back: by name and by pointer (see home_of)."""
+    part.home_parent = parent.name
+    part.home_object = parent
+
+
+def home_of(part):
+    """The object a part hung from before this add-on took it over, if it is
+    still there, else None.
+
+    The one the part points at, while it is in a scene; a name finds whatever
+    has it now, and after a copy of the whole model that is the original's.
+    The name is for a file from before the pointer was kept. One that was
+    deleted is let go of (let_go_of_deleted), and its name marked, so a new
+    object that is given it is not taken for it.
+    """
+    held = part.home_object
+    if held is None:
+        held = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+    return held if held is not None and held.users_collection else None
+
+
+def home_name(part):
+    """What the object a part hung from was called, in words."""
+    name = part.home_parent
+    return name[:-len(DELETED)] if name.endswith(DELETED) else name
+
+
 def hang(part):
     """Let a part's object hang from the object of the part it follows, so
     that dragging that one carries it along on screen - and what is recorded
@@ -1284,7 +1334,7 @@ def hang(part):
             # The parent it had of its own is remembered, to be given back.
             if (not part.bone_name and obj.parent is not None
                     and not obj.get(FOLLOW_MARK)):
-                part.home_parent = obj.parent.name
+                remember_home(part, obj.parent)
             keep_world(obj, target)
             obj[FOLLOW_MARK] = True
     else:
@@ -1309,7 +1359,7 @@ def unhang(part):
     if part.bone_name and rig_holding(obj) is not None:
         keep_world(obj, rig_holding(obj))
     else:
-        home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+        home = home_of(part)
         keep_world(obj, home if home is not obj else None)
     del obj[FOLLOW_MARK]
 
@@ -1408,6 +1458,11 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # The object this one hung from before the first Build took it over, so
     # taking it out of the rig can hang it there again.
     home_parent: bpy.props.StringProperty()
+    # That object held by pointer as well. The pointer follows it when it is
+    # renamed, and when the whole model is copied it points at the copy's own,
+    # where the name finds whatever has it now. Empty in a file from before it
+    # was kept. See home_of.
+    home_object: bpy.props.PointerProperty(type=bpy.types.Object)
     # Set when the part's object was deleted and let go of. The name above may
     # be given to a new object at once, and that is not this part: a part that
     # is gone has no object, whatever stands under its name. See part_object.
@@ -1775,7 +1830,7 @@ def unbind_object(rig, part):
         del obj[FOLLOW_MARK]
     obj.matrix_world = world
     # Hung back from whatever it hung from before the rig took it.
-    home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+    home = home_of(part)
     if home is not None and home is not obj:
         keep_world(obj, home)
     return True
@@ -2943,7 +2998,7 @@ def bind_loose(context, rig, data, leave=()):
             if obj is None or obj.parent is None or obj.parent is rig:
                 continue
             if not obj.get(FOLLOW_MARK):
-                part.home_parent = obj.parent.name
+                remember_home(part, obj.parent)
             else:
                 del obj[FOLLOW_MARK]
             keep_world(obj, None)
@@ -5535,7 +5590,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             # which a copy of a follower brings with it.
             if (obj.parent is not None and obj.parent.type != "ARMATURE"
                     and not obj.get(FOLLOW_MARK)):
-                part.home_parent = obj.parent.name
+                remember_home(part, obj.parent)
         adopt_riders(move, {obj.name for obj, _joint, _rides in joining})
 
         def ride(count):
@@ -8645,6 +8700,11 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
         # is no reason to keep it.
         catch_up(rig, data)
         gone = []
+        # Those that hung from an object of their own before the rig took them,
+        # which is not there any more, are left standing free; that is said.
+        stranded = [(part.name, home_name(part)) for part in move.parts
+                    if part.kind == "OBJECT" and part.home_parent and home_of(part) is None
+                    and part_object(part) is not None]
         for pose_bone, constraint in our_constraints(rig, move):
             pose_bone.constraints.remove(constraint)
         # Objects this move bound get their freedom back: the group, the
@@ -8715,7 +8775,15 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
             bpy.ops.rigmoves.build()
         rig.update_tag()
         context.view_layer.update()
-        data.report = "Removed. The rig is back to how it was."
+        if len(stranded) == 1:
+            said = ("'{:s}' hung from '{:s}', which is gone, so it was left standing free."
+                    .format(short(stranded[0][0], 18), short(stranded[0][1], 18)))
+        elif stranded:
+            said = ("{:s} hung from objects that are gone, so they were left standing free."
+                    .format(named([name for name, _home in stranded])))
+        else:
+            said = "The rig is back to how it was."
+        data.report = "Removed. " + said
         return {"FINISHED"}
 
 

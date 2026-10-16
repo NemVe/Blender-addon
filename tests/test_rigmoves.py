@@ -4564,11 +4564,21 @@ class CopiedModel(CopyThatCase):
 
     OFF = Matrix.Translation((6.0, 0.0, 0.0))
 
-    def chest(self):
-        """A lid hinged on its back edge, swung 100 degrees, built."""
+    def chest(self, body=False):
+        """A lid hinged on its back edge, swung 100 degrees, built. With `body`
+        the lid is first hung from a box under it, as it is when modelled."""
         self.lid = cube("Lid", (0.0, 0.0, 1.1))
         self.lid.scale = (2.0, 1.2, 0.2)
         bpy.context.view_layer.update()
+        if body:
+            self.body = cube("Body", (0.0, 0.0, 0.5))
+            self.body.scale = (2.0, 1.2, 1.0)
+            bpy.context.view_layer.update()
+            world = self.lid.matrix_world.copy()
+            self.lid.parent = self.body
+            self.lid.matrix_parent_inverse = self.body.matrix_world.inverted()
+            self.lid.matrix_world = world
+            bpy.context.view_layer.update()
         home = self.lid.matrix_world.copy()
         hinge = Vector((0.0, 0.6, 1.0))
         select(self.lid)
@@ -4607,13 +4617,15 @@ class CopiedModel(CopyThatCase):
                 [g.name for g in self.part.vertex_groups],
                 sorted((pb.name, c.name) for pb in self.rig1.pose.bones for c in pb.constraints))
 
-    def copy_everything(self, linked):
-        """Duplicate the rig and its part, as Alt+D (linked) or Shift+D does,
-        and move the copy off. Returns the copy's rig and part."""
+    def copy_everything(self, linked, *also):
+        """Duplicate the rig and its part (and these), as Alt+D (linked) or
+        Shift+D does, and move the copy off. Returns the copy's rig and part."""
         for obj in bpy.context.view_layer.objects:
             obj.select_set(False)
         self.rig1.select_set(True)
         self.part.select_set(True)
+        for obj in also:
+            obj.select_set(True)
         bpy.context.view_layer.objects.active = self.rig1
         if linked:
             self.assertEqual(bpy.ops.object.duplicate_move_linked(
@@ -4622,8 +4634,9 @@ class CopiedModel(CopyThatCase):
             self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
             self.assertEqual(bpy.ops.transform.translate(value=(6.0, 0.0, 0.0)), {"FINISHED"})
         bpy.context.view_layer.update()
-        rig2 = next(o for o in bpy.context.selected_objects if o.type == "ARMATURE")
-        part2 = next(o for o in bpy.context.selected_objects if o.type == "MESH")
+        self.copies = list(bpy.context.selected_objects)
+        rig2 = next(o for o in self.copies if o.type == "ARMATURE")
+        part2 = next(o for o in self.copies if o.name.startswith(self.part.name + "."))
         self.assertIsNot(rig2, self.rig1)
         bpy.context.scene.rigmoves_rig = rig2
         return rig2, part2
@@ -4784,6 +4797,67 @@ class TestACopyOfAWholeModelHasPathCurvesOfItsOwn(CopiedModel):
         own = rig2.rigmoves.moves[0].paths_object
         self.assertIsNotNone(own)
         self.assertNotEqual(own.name, line_name)
+
+
+class TestAPartIsHungBackOnTheObjectItHungFrom(CopiedModel):
+    """A lid modelled hanging from a body goes back to hanging from it when its
+    move is removed. The body was kept by name: Remove on a Shift+D copy of the
+    chest hung the copy's lid on the ORIGINAL body, so moving that moved the
+    copy's lid, and after the body was renamed (F2) Remove hung it on nothing and
+    said "The rig is back to how it was"."""
+
+    def setUp(self):
+        super().setUp()
+        self.chest(body=True)
+        self.assertIs(self.lid.parent, self.rig1)
+        self.shut = world_points(self.lid)
+
+    def test_remove_on_a_copy_hangs_the_copys_lid_on_the_copys_body(self):
+        rig2, lid2 = self.copy_everything(False, self.body)
+        body2 = next(o for o in self.copies if o.name.startswith("Body."))
+        select(lid2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIs(lid2.parent, body2)
+        copy_lid = world_points(lid2)
+        self.body.location.x += 5.0
+        bpy.context.view_layer.update()
+        self.assertLess(drift(lid2, copy_lid), TOLERANCE)
+        # Its own body does carry it.
+        body2.location.x += 3.0
+        bpy.context.view_layer.update()
+        self.assertLess(drift(lid2, [p + Vector((3.0, 0.0, 0.0)) for p in copy_lid]), TOLERANCE)
+
+    def test_a_body_renamed_is_still_the_body_remove_hangs_the_lid_on(self):
+        self.body.name = "Chest Body"
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIs(self.lid.parent, self.body)
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+        self.assertEqual(rig().rigmoves.report, "Removed. The rig is back to how it was.")
+
+    def test_a_file_from_before_the_pointer_was_kept_finds_the_body_by_its_name(self):
+        part = self.rig1.rigmoves.moves[0].parts[0]
+        self.assertIs(part.home_object, self.body)
+        self.assertEqual(part.home_parent, "Body")
+        part.home_object = None
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIs(self.lid.parent, self.body)
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+
+    def test_a_body_that_is_gone_is_said_so_and_a_new_one_of_its_name_is_not_it(self):
+        delete_in_the_viewport(self.body)
+        self.assertNotIn("Body", bpy.data.objects)
+        new = cube("Body", (9.0, 0.0, 0.5))
+        self.assertEqual(new.name, "Body")
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIsNone(self.lid.parent)
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+        self.assertEqual(rig().rigmoves.report,
+                         "Removed. 'Lid' hung from 'Body', which is gone, so it was left "
+                         "standing free.")
 
 
 class TestMakeChainOrder(CopyThatCase):
