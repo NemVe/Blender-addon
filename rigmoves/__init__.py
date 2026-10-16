@@ -1171,6 +1171,11 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # before it was kept.
     rest_marks: bpy.props.FloatVectorProperty(size=9)
     rest_count: bpy.props.IntProperty(default=0)
+    # Which three vertices those are, by number: picked to stand as far apart
+    # as the mesh lets three be (see note_rest). Minus one in a part from before
+    # that was kept, whose three were the first, a third of the way through and
+    # two thirds.
+    rest_which: bpy.props.IntVectorProperty(size=3, default=(-1, -1, -1))
     has_before: bpy.props.BoolProperty(default=False)
     has_after: bpy.props.BoolProperty(default=False)
     start: bpy.props.FloatProperty(
@@ -2052,25 +2057,71 @@ def mentioning_invoke(run):
 
 
 def marked_vertices(count):
-    """The three vertices a part is told by: the first, a third of the way
-    through and two thirds."""
+    """The three vertices a part from 0.19.0 is told by: the first, a third of
+    the way through and two thirds."""
     return (0, count // 3, 2 * count // 3)
+
+
+def spread_vertices(vertices):
+    """The numbers of three of a mesh's vertices that stand as far apart as
+    three can: one far from the middle, the one farthest from that, and the one
+    farthest from the line through the two.
+
+    Three vertices at the start of a mesh's list can be neighbours, or in a
+    line, and a turn cannot be read from those; these span the mesh. Done in
+    numpy so that a big mesh costs no more than a read of it; the fallback is
+    the same three passes, slowly.
+    """
+    try:
+        import numpy
+    except ImportError:
+        numpy = None
+    if numpy is not None:
+        values = numpy.empty(3 * len(vertices), dtype=numpy.float32)
+        vertices.foreach_get("co", values)
+        points = values.reshape(-1, 3).astype(float)
+        first = int(numpy.argmax(((points - points.mean(axis=0)) ** 2).sum(axis=1)))
+        second = int(numpy.argmax(((points - points[first]) ** 2).sum(axis=1)))
+        line = points[second] - points[first]
+        length = float(numpy.sqrt((line ** 2).sum()))
+        off = points - points[first]
+        if length > 0.0:
+            off = off - numpy.outer(off @ (line / length), line / length)
+        return first, second, int(numpy.argmax((off ** 2).sum(axis=1)))
+    values = [0.0] * (3 * len(vertices))
+    vertices.foreach_get("co", values)
+    points = [Vector(values[i:i + 3]) for i in range(0, len(values), 3)]
+    middle = sum(points, Vector()) / len(points)
+    first = max(range(len(points)), key=lambda i: (points[i] - middle).length_squared)
+    second = max(range(len(points)), key=lambda i: (points[i] - points[first]).length_squared)
+    line = points[second] - points[first]
+    along = line.normalized() if line.length > 0.0 else line
+
+    def gap(i):
+        off = points[i] - points[first]
+        return (off - along * off.dot(along)).length_squared
+
+    return first, second, max(range(len(points)), key=gap)
 
 
 def note_rest(part, obj):
     """Remember where three of an object's vertices are in the world at the
     part's Before, so that an object framed differently later - its origin set,
     its scale applied - can be told from one that was dragged: the first has
-    its vertices where they were."""
+    its vertices where they were. Which three, by number, is kept as well, so
+    that they can be found again when the mesh has changed since."""
     count = len(obj.data.vertices) if obj.type == "MESH" else 0
     if count < 3:
         part.rest_count = 0
+        part.rest_which = (-1, -1, -1)
         return
+    which = spread_vertices(obj.data.vertices)
     world = as_matrix(part.before)
     marks = []
-    for index in marked_vertices(count):
+    for index in which:
         marks.extend(world @ obj.data.vertices[index].co)
     part.rest_marks = marks
+    part.rest_which = which
     part.rest_count = count
 
 
@@ -2081,29 +2132,120 @@ def take_before(part, obj, place=None):
     note_rest(part, obj)
 
 
-def reach_of(obj):
-    """How big an object is across, in the world."""
-    return max(diagonal([obj.matrix_world @ c for c in corners_of(obj)]), 1e-6)
+def reach_of(obj, corners=None):
+    """How big an object is across, in the world. `corners`, if the caller has
+    them already, are those of corners_of."""
+    corners = corners_of(obj) if corners is None else corners
+    return max(diagonal([obj.matrix_world @ c for c in corners]), 1e-6)
+
+
+def triangle_frame(a, b, c):
+    """A frame standing on the first of three points: its X along the first
+    edge, its Z square to the triangle, its Y between. None when the three lie
+    (nearly) in a line, and no frame stands on them."""
+    along, across = b - a, c - a
+    normal = along.cross(across)
+    if along.length < 1e-12 or normal.length < 1e-4 * along.length * across.length:
+        return None
+    x = along.normalized()
+    z = normal.normalized()
+    y = z.cross(x)
+    return Matrix(((x.x, y.x, z.x, a.x),
+                   (x.y, y.y, z.y, a.y),
+                   (x.z, y.z, z.z, a.z),
+                   (0.0, 0.0, 0.0, 1.0)))
+
+
+def rigid_fit(then, now):
+    """The turn and shift - one 4x4 matrix - that carries three points onto
+    three others, and how far the worst of them misses: nothing when they are
+    the same shape, however far apart. (None, infinity) when either three lie
+    (nearly) in a line, and say nothing about a turn.
+
+    A frame is stood on each triangle, and the fit is the one frame on the
+    other: exact for the first point, and for the others as far as the two
+    triangles are alike.
+    """
+    start, end = triangle_frame(*then), triangle_frame(*now)
+    if start is None or end is None:
+        return None, math.inf
+    fit = end @ start.inverted_safe()
+    return fit, max((fit @ a - b).length for a, b in zip(then, now))
+
+
+def rest_marks_of(part):
+    """The places a part's marks were taken at, in the world, as three vectors."""
+    return [Vector(part.rest_marks[3 * number:3 * number + 3]) for number in range(3)]
+
+
+def rest_places(part, obj):
+    """Where the vertices a part is told by are now, in the world - or None when
+    they cannot be read: the part has none, the object is no mesh, or the mesh
+    no longer has them. A part from 0.19.0 names its three by position in a
+    mesh of the same size; a newer one by number, so a mesh that has grown, its
+    old vertices where they were, can still be read."""
+    if not part.rest_count or obj is None or obj.type != "MESH":
+        return None
+    vertices = obj.data.vertices
+    which = tuple(part.rest_which)
+    if which[0] < 0:
+        if len(vertices) != part.rest_count:
+            return None
+        which = marked_vertices(part.rest_count)
+    elif max(which) >= len(vertices):
+        return None
+    return [obj.matrix_world @ vertices[index].co for index in which]
+
+
+def rest_slack(obj, points, corners=None):
+    """How far from where it was a mark may be and still be there: a little of
+    the object's size, and of the rounding that comes with standing far from
+    the world's origin."""
+    return (1e-5 * reach_of(obj, corners)
+            + 1e-6 * max([abs(c) for p in points for c in p] or [0.0]))
+
+
+def frame_gap(corners, one, other):
+    """How far apart two frames put a mesh whose corners (in its own space) are
+    these: its origin and a point as far along each of its axes as it is across.
+    Nothing when the two are the same frame."""
+    size = max(diagonal(corners), 1e-6)
+    probes = (Vector((0.0, 0.0, 0.0)), Vector((size, 0.0, 0.0)),
+              Vector((0.0, size, 0.0)), Vector((0.0, 0.0, size)))
+    return max((one @ p - other @ p).length for p in probes)
 
 
 def was_reframed(part, obj):
-    """Whether an object that is off its Before only has its mesh framed in
-    another way: the same number of vertices, and the ones the part is told by
-    exactly where they were."""
-    if not part.rest_count or obj.type != "MESH" or len(obj.data.vertices) != part.rest_count:
-        return False
-    slack = 1e-5 * reach_of(obj)
-    world = obj.matrix_world
-    for number, index in enumerate(marked_vertices(part.rest_count)):
-        mark = Vector(part.rest_marks[3 * number:3 * number + 3])
-        if (world @ obj.data.vertices[index].co - mark).length > slack:
-            return False
-    return True
+    """The drag of an object that has had its frame changed - its origin set, its
+    scale or rotation applied - as the matrix it moved the mesh by; or None.
+
+    The mesh of such an object is where it was, or where it was moved to, and
+    only the numbers have changed. The three vertices the part is told by are
+    fitted onto where they are now. If they cannot be - the mesh has changed
+    shape, or size - there is nothing to say. If the object's frame is the one
+    the drag would have left it in, it was dragged, or not moved: also None.
+    Else the frame was changed, and the drag is what the mesh was moved by -
+    the identity when it was not moved at all.
+    """
+    places = rest_places(part, obj)
+    if places is None:
+        return None
+    then = rest_marks_of(part)
+    fit, miss = rigid_fit(then, places)
+    corners = corners_of(obj)
+    slack = rest_slack(obj, then + places, corners)
+    if fit is None or miss > slack:
+        return None
+    still = all((a - b).length <= slack for a, b in zip(then, places))
+    drag = Matrix.Identity(4) if still else fit
+    if frame_gap(corners, obj.matrix_world, drag @ as_matrix(part.before)) <= slack:
+        return None
+    return drag
 
 
 def take_back_reframed(rig, data):
     """Put objects whose origin, scale or rotation was changed after they were
-    bound back on the frame their move was recorded in, the mesh moved the
+    recorded back on the frame their move was recorded in, the mesh moved the
     other way, so that nothing is seen to move. Returns why it cannot, or "".
 
     Set Origin, or Apply Scale or Rotation, changes the object's own transform
@@ -2113,13 +2255,20 @@ def take_back_reframed(rig, data):
     up somewhere else. Done by the machinery Ring uses to stand an object on a
     new frame, and checked the same way: what Blender shows is compared before
     and after, and anything that differs is put back exactly.
+
+    Every part that has a Before is looked at, bound or not, a rider too. One
+    that was moved as well is stood on its Before moved by that much, which is
+    what a part dragged without being touched looks like: the rest of the
+    add-on reads that as a pose, if it is bound, and as where it was put, if not.
     """
     jobs = []
     for move in data.moves:
-        for part in follow_order(move, bound_parts(move)):
+        parts = [part for part in move.parts if part.kind == "OBJECT" and part.has_before]
+        for part in follow_order(move, parts):
             obj, world = hand_moved(part)
-            if obj is not None and world is not None and was_reframed(part, obj):
-                jobs.append((part, obj))
+            drag = was_reframed(part, obj) if world is not None else None
+            if drag is not None:
+                jobs.append((part, obj, drag, drag @ as_matrix(part.before)))
     if not jobs:
         return ""
 
@@ -2129,18 +2278,19 @@ def take_back_reframed(rig, data):
                 "that, or take it out of its move (x) and add it again."
                 .format(short(part.name, 18)))
 
-    users = bpy.data.user_map(subset={obj for _part, obj in jobs}, value_types={"OBJECT"})
+    users = bpy.data.user_map(subset={obj for _part, obj, _drag, _frame in jobs},
+                              value_types={"OBJECT"})
     # The rig uses every part's object, by the pointer the part keeps.
     users = {obj: {user for user in found if user is not rig} for obj, found in users.items()}
-    for part, obj in jobs:
-        if reframe_blocker(obj, as_matrix(part.before), None, users):
+    for part, obj, _drag, frame in jobs:
+        if reframe_blocker(obj, frame, None, users):
             return refuse(part)
     view_layer = bpy.context.view_layer
     view_layer.update()
-    looks = {obj.name: look_of(obj) for _part, obj in jobs}
-    framed = [reframe(obj, as_matrix(part.before)) for part, obj in jobs]
+    looks = {obj.name: look_of(obj) for _part, obj, _drag, _frame in jobs}
+    framed = [reframe(obj, frame) for _part, obj, _drag, frame in jobs]
     view_layer.update()
-    for part, obj in jobs:
+    for part, obj, _drag, _frame in jobs:
         points = looks[obj.name][0]
         far = max([abs(c) for p in points for c in p] or [0.0])
         if not looks_the_same(looks[obj.name], look_of(obj), 1e-5 * reach_of(obj) + 1e-6 * far):
@@ -2148,16 +2298,20 @@ def take_back_reframed(rig, data):
             view_layer.update()
             return refuse(part)
     settle(framed)
+    moved = sum(1 for _part, _obj, drag, _frame in jobs if drag != Matrix.Identity(4))
     if len(jobs) == 1:
         said = ("'{:s}' had its origin, scale or rotation changed after it was bound; "
                 "it was put back on the frame its move was recorded in - its mesh did "
-                "not move. To change where it turns, use Pivot."
-                .format(short(jobs[0][0].name, 18)))
+                "not move.{:s} To change where it turns, use Pivot."
+                .format(short(jobs[0][0].name, 18),
+                        " It had been moved as well, and that move was kept." if moved else ""))
     else:
         said = ("{:d} parts had their origin, scale or rotation changed after they were "
                 "bound; they were put back on the frame their move was recorded in - "
-                "their meshes did not move. To change where a part turns, use Pivot."
-                .format(len(jobs)))
+                "their meshes did not move.{:s} To change where a part turns, use Pivot."
+                .format(len(jobs),
+                        " {:d} of them had been moved as well, and that move was kept."
+                        .format(moved) if moved else ""))
     HEARD["notes"].append((rig.name, said))
     return ""
 
@@ -6232,10 +6386,18 @@ class RIGMOVES_OT_build(bpy.types.Operator):
 
 def unrecorded(data):
     """Bound parts dragged off their Before and not recorded yet. One that has
-    only had its origin, scale or rotation changed was not dragged."""
-    return [part.name for move in data.moves for part in bound_parts(move)
-            if not part.leader and hand_moved(part)[1] is not None
-            and not was_reframed(part, hand_moved(part)[0])]
+    only had its origin, scale or rotation changed was not dragged; one that
+    has had that and been moved as well was."""
+    out = []
+    for move in data.moves:
+        for part in bound_parts(move):
+            obj, world = hand_moved(part)
+            if part.leader or world is None:
+                continue
+            drag = was_reframed(part, obj)
+            if drag is None or drag != Matrix.Identity(4):
+                out.append(part.name)
+    return out
 
 
 def keeps_drags(operator, data):
