@@ -426,8 +426,10 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     undo step. `settle` is the last call in it.
     Taken objects and copies share the `told` pairing. `bpy.data.objects.remove`
     leaves `None` in `view_layer.objects` (and in `scene.objects`) until an update:
-    `standing_pool` skips them. Not checked (rough edge): materials using Object or
-    Generated texture coordinates.
+    `standing_pool` skips them. Not checked (rough edges): materials using Object or
+    Generated texture coordinates; and anything that is not a MESH - a collection
+    instance (an empty), a curve, a text - which the pool never lists, so Fill the
+    gaps copies on top of it (the guide says so).
   - Vertex group names live on the mesh, so linked copies share groups with
     the leader. `own_binding` (0.16, called by `bind_object`) gives a bound
     object its own mesh and drops groups for other parts' bones; Build heals

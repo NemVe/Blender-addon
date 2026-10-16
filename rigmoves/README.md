@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.18.3
+# CopyThat - v0.18.3
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -199,7 +199,7 @@ the Path**), pick **Use**, set the **Count**, **OK**.
 |---|---|---|
 | **Make copies** | a new copy for every place round the ring, whatever already stands there | nothing is modelled but the one part |
 | **Use what's there** | takes up the objects already standing in the places, and makes nothing | every petal is modelled already, and you do not want one more object |
-| **Fill the gaps** (the default) | takes up what stands in a place, and copies the part only into the places where nothing does | most are modelled and a few are missing - or you are not sure. It never puts a copy on top of a petal that is there |
+| **Fill the gaps** (the default) | takes up what stands in a place, and copies the part only into the places where nothing does | most are modelled and a few are missing - or you are not sure. It never puts a copy on top of a mesh object that is there (other kinds of object are not seen: see the rough edges) |
 
 How an object already there is told from one that is not. Ring takes an object
 up, or stands it on a new frame, only when that is **provably safe**; anything
@@ -216,7 +216,7 @@ else is left exactly as it is, and the report says why:
   editable, in no move of this add-on, and with no keys, drivers or NLA of its
   own. Left alone, and named: "has keys or drivers of its own" (Build lifts a
   part's own keys, and a re-framed object would jump when they play: use Lift
-  Their Own Keyframes first), "is linked from a library" or "cannot be edited"
+  Those Keyframes first), "is linked from a library" or "cannot be edited"
   (the change would be lost when the file is saved and opened), "is hidden",
   "cannot be selected", "is already part of a move".
 - **Stood on a frame, only when plain.** A rider copies its leader's move from
@@ -252,12 +252,13 @@ else is left exactly as it is, and the report says why:
   turned down with that reason.
 - **Where two objects stand on one place**, the closer fit is taken and the other is
   named.
-- **Nothing is ever copied on top of anything.** In **Fill the gaps** a place is
+- **Nothing is copied on top of a mesh object.** In **Fill the gaps** a place is
   occupied, and no copy is made there, when any mesh object at all - hidden, in a
   move, of any number of vertices, a near miss scaled or nudged or cut - has the
   middle of the box round it within a quarter of the part's reach of where the
-  part would stand. The report says how many places "had something standing there
-  that is not a copy". **Use what's there** says how many places had nothing
+  part would stand. Only mesh objects are seen: a collection instance, a curve, a
+  text or an empty standing in a place is not, and a copy is made on top of it. The
+  report says how many places "had something standing there that is not a copy". **Use what's there** says how many places had nothing
   standing in them, and that **Fill the gaps** would copy the part there - but only
   when it would: where Fill the gaps would be turned down, as below, it gives that
   advice instead.
@@ -382,7 +383,7 @@ Parts the order cannot tell apart share a place, so they get the same value:
 | **Around a ring** | further round the ring it stands from the start, one way round. **Both ways** folds it in half, so the two sides of the ring match: the parts either side of the start go together | the two sides of the ring, with **Both ways** |
 | **By distance** | further it is from the start: a ripple | parts the same distance away |
 | **Along an axis** | further along world X, Y or Z: dominoes, a wave across a grid | parts at the same place along it |
-| **Down a chain** | further down a **Follows** chain it hangs: a finger or a tentacle (Delays only) | joints at the same depth - the branches of a tree |
+| **Down a chain** | further down a **Follows** chain it hangs: a finger or a tentacle (Delays only: refused for Leads, riders have no Follows chain of their own) | joints at the same depth - the branches of a tree |
 | **Random** | no order - the same every time for the same **Seed**. The places are dealt out, none shared | none |
 
 "The same" is to within a ten-thousandth of how far the parts run, so the two
@@ -400,8 +401,9 @@ together, and the petal opposite it is the last.
   start is the leader, which is place 0, so a rider's Lead is Start + Step x its
   place with the first rider at place 1. A copied finger has one Lead, its first
   joint's, so that is what is spread and counted - one for a whole finger - and
-  selecting any joint of a copy selects the copy. Down a chain is not offered for
-  Leads: riders have no Follows chain of their own.
+  selecting any joint of a copy selects the copy. **Down a chain** is listed for
+  Leads, and refused when you press OK: riders have no Follows chain of their own,
+  so there is none to spread down.
 - Delays belong to the parts in the **Timing** list. **Around a ring** and **By
   distance** are measured from the active part (or the first one), which is place
   0 and gets Start. **Along an axis** the part lowest along it is place 0; **down
@@ -1245,7 +1247,7 @@ and one lifted 1 m:
   until the file was opened again. It is redrawn now.
 - **On Blender 4.5 every key was found twice.** The red box that warns about
   stray keys said "2 key track(s) on this rig's bones" for a single stray key,
-  and "6" for a bone keyed on three channels. Lift Their Own Keyframes and Build
+  and "6" for a bone keyed on three channels. Lift Those Keyframes and Build
   reported the right numbers, but Blender's console printed "F-Curve not found"
   once for every track they took off. Each track is counted once now. Blender
   5.0 and newer never did it.
@@ -1406,6 +1408,9 @@ and one lifted 1 m:
   panel, not on the button.
 - Ring's linked copies share one mesh only until Build, which gives every bound
   part a mesh of its own; edit-mode changes after that are one part's alone.
+- Ring sees mesh objects only. A collection instance, a curve, a text object or an
+  empty standing in a place of the ring is not seen: **Fill the gaps** makes its
+  copy on top of it, and **Use what's there** never takes it up.
 - Spread's ring takes the best-fit plane of the parts' spots. Parts that are not
   roughly on one ring - a scatter - get an order that is the plane's, and is
   seldom what was meant: use By distance or Along an axis instead.
