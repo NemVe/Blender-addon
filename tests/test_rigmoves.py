@@ -8255,6 +8255,30 @@ class TestAnEditedMeshThenANewOrigin(ChestCase):
         self.assertTrue(rigmoves.marks_fit(part, self.lid))
         self.set_origin_and_build()
 
+    def test_a_model_moved_as_a_whole_and_then_edited_is_told_from_one_dragged(self):
+        # No button has caught the rig up yet: the lid stands where the model's
+        # move has carried its Before, which is as good as on it.
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(4.0, 1.0, 0.0)), {"FINISHED"})
+        self.assertEqual(bpy.ops.transform.rotate(value=math.radians(40.0), orient_axis="Z"),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+        part = self.move.parts["Lid"]
+        self.edit("nudge")
+        self.assertTrue(rigmoves.marks_fit(part, self.lid, rigmoves.moved_since(
+            rig(), rig().rigmoves)))
+        self.set_origin_and_build()
+
+    def test_and_so_when_a_button_is_what_notices_the_move_and_the_edit(self):
+        bpy.app.handlers.depsgraph_update_post.remove(rigmoves.marks_handler)
+        self.addCleanup(bpy.app.handlers.depsgraph_update_post.append, rigmoves.marks_handler)
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(4.0, 1.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.edit("nudge")
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=False), {"FINISHED"})
+        self.set_origin_and_build()
+
     def test_a_part_off_its_before_keeps_its_marks(self):
         # Dragged, it cannot be told from a part with its mesh changed.
         part = self.move.parts["Lid"]

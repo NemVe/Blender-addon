@@ -1609,7 +1609,7 @@ def same_place(one, other, near, far=0.0):
     return turn <= 1e-5 and shift <= 1e-5 * (1.0 + near) + 2e-6 * far
 
 
-def hand_moved(part):
+def hand_moved(part, shift=None):
     """A bound object's own transform, if it has been dragged off its Before.
 
     Binding makes the object's own transform the rig's rest: the modifier
@@ -1618,11 +1618,17 @@ def hand_moved(part):
     quietly redefined where the move starts, and every slider on it is then
     wrong by that much. Spotting the drift is what lets it be read as a pose
     instead, which is what somebody dragging it plainly meant.
+
+    With `shift`, how far the whole model has been moved since the rig was last
+    caught up (see moved_since), its Before is where it would stand carried by
+    that.
     """
     obj = part_object(part)
     if obj is None:
         return None, None
     rest = as_matrix(part.before)
+    if shift is not None:
+        rest = shift @ rest
     world = obj.matrix_world.copy()
     near = max(world.translation.length, rest.translation.length)
     return obj, (None if same_place(world, rest, near, part.id_data.rigmoves.far) else world)
@@ -2267,28 +2273,34 @@ def was_reframed(part, obj):
     return drag
 
 
-def marks_fit(part, obj):
+def marks_fit(part, obj, shift=None):
     """Whether the vertices a part is told by can be read and are where the part's
-    marks say, as they are for an object standing on its Before. (The size they
-    are measured against is the marks' own, not the mesh's, so that this is
-    quick to ask of every part at every button.)"""
+    marks say, as they are for an object standing on its Before (carried by
+    `shift`, if the model has been moved). (The size they are measured against is
+    the marks' own, not the mesh's, so that this is quick to ask of every part at
+    every button.)"""
     places = rest_places(part, obj)
     if places is None:
         return False
     then = rest_marks_of(part)
+    if shift is not None:
+        then = [shift @ mark for mark in then]
     slack = (1e-5 * max((a - b).length for a in then for b in then)
              + 1e-6 * max(abs(c) for p in then + places for c in p))
     return all((a - b).length <= slack for a, b in zip(then, places))
 
 
-def retake_marks(data, meshes=None):
+def retake_marks(data, meshes=None, shift=None):
     """Take new marks for every object part that stands exactly on its Before
     and whose marks no longer fit: its mesh was edited since they were taken,
     so that a vertex moved or the vertices were numbered another way.
 
     A part off its Before cannot be told from one dragged, and gets none. An
     object in Edit Mode is waited for. With `meshes`, only the parts whose
-    object uses one of those.
+    object uses one of those. With `shift` - the model was moved as a whole
+    since the rig was last caught up, and what it remembers is still where it
+    was - a part stands on its Before if it stands where that is carried to;
+    its marks are taken at the Before it still has, and carried with it later.
     """
     for move in data.moves:
         for part in move.parts:
@@ -2298,11 +2310,11 @@ def retake_marks(data, meshes=None):
                 held = part.object
                 if held is None or held.type != "MESH" or held.data not in meshes:
                     continue
-            obj, world = hand_moved(part)
+            obj, world = hand_moved(part, shift)
             if (obj is None or world is not None or obj.type != "MESH" or obj.mode == "EDIT"
                     or len(obj.data.vertices) < 3):
                 continue
-            if not marks_fit(part, obj):
+            if not marks_fit(part, obj, shift):
                 note_rest(part, obj)
 
 
@@ -2319,7 +2331,7 @@ def marks_handler(*arguments):
             return
         for obj in bpy.data.objects:
             if obj.type == "ARMATURE" and len(obj.rigmoves.moves):
-                retake_marks(obj.rigmoves, meshes)
+                retake_marks(obj.rigmoves, meshes, moved_since(obj, obj.rigmoves))
     except Exception:
         pass
 
@@ -2467,6 +2479,19 @@ def seat_of(rig):
 def store_seat(rig, data):
     """Keep where the rig stands now as where what it remembers is true."""
     data.seat, data.seated, data.seat_on_root = flat(seat_of(rig)), True, True
+
+
+def moved_since(rig, data):
+    """How far the model has been moved since catch_up last looked, as a matrix:
+    what it will carry what the rig remembers by. None if it has not been, or
+    that cannot be told - the rig has no seat yet, or is scaled to nothing."""
+    if not data.seated:
+        return None
+    now = seat_of(rig) if data.seat_on_root else rig.matrix_world
+    was = as_matrix(data.seat)
+    if is_singular(now) or is_singular(was):
+        return None
+    return now @ was.inverted_safe()
 
 
 def is_singular(matrix):
