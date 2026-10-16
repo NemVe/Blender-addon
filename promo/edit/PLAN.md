@@ -87,6 +87,54 @@ Graphics, if that stays simple.
   fps.
 - Cuts land on the storyboard's 0.5 s grid, for music.
 
+## Re-rendering a shot
+The Cycles footage comes from one Blender file,
+`../files/CopyThat_promo_shots.blend` (Blender 5.2), so NemVe3D can adjust a
+shot and render it again. Each of its four scenes renders to the folder the
+edit already reads, with the same file names: a re-render replaces the footage
+in place.
+
+**Which scene makes which footage**
+
+| Scene | Frames | Output folder | Shots |
+|---|---|---|---|
+| Outro | 1-210 | `dist/promo/outro_frames_1440/` (`outro_0001.png`...) | 7, 8 |
+| Hook A | 30-90 | `dist/promo/hooks_1440/hook_A/` (`hook_A_0030.png`...) | 1 |
+| Hook B | 106-150 | `dist/promo/hooks_1440/hook_B/` (`hook_B_0106.png`...) | 2 |
+| Hook C | 152-197 | `dist/promo/hooks_1440/hook_C/` (`hook_C_0152.png`...) | 3 |
+
+All four: 2560x1440 at 100%, 16-bit RGB PNG, Cycles, 512 samples, 30 fps.
+- Hook A, B and C are linked copies of Outro. The flower and its animation, the
+  lights and the world are shared, so a change to them shows in all four. Each
+  scene has its own camera, frame range, output folder and compositor (the
+  bloom is a Glare node in it), so change the bloom in each scene.
+- A hook camera ("Hook A Camera") is keyed at the first and last frame of its
+  shot, and always looks at its empty ("Hook A Aim"), which is also where it
+  focuses. Move either at those two frames, or change the lens and f-stop in
+  the camera's properties. If you change the frame range, move the keys too.
+
+**How to re-render**
+1. Open the .blend. It opens on Outro; pick the scene at the top right.
+2. Adjust it, and look at a frame with Render > Render Image (F12).
+3. Render > Render Animation. The frames overwrite the old ones in the output
+   folder; to keep the old ones, set a new output folder first (Output
+   properties).
+4. Cycles uses the GPU only if OptiX (or CUDA) is chosen in Edit > Preferences
+   > System. Otherwise it renders on the CPU, far slower. On the RTX 3090 a
+   frame takes 45 to 60 s: a hook shot 35 to 50 minutes, the outro about 2.5
+   hours.
+- From a script or the command line, make the scene the active one first:
+  `blender -b CopyThat_promo_shots.blend -S "Hook A" -a` does. A script that
+  calls `bpy.ops.render.render(scene="Hook A")` while another scene is active
+  gets the flower in a stale pose.
+
+**How to bring it into After Effects**
+- Same folder, same file names: select the footage item in the Project panel
+  and File > Reload Footage.
+- A new folder, other names or a changed frame range: select the item, File >
+  Replace Footage > File, pick the first frame and tick PNG Sequence. Then check
+  the layer's length in its shot precomp.
+
 ## Output
 - Encode with ffmpeg: 2560x1440, 30 fps, H.264 High, `-crf 14 -preset slow`,
   yuv420p, bt709 tags, `+faststart`, no audio track.
