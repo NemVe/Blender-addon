@@ -4126,6 +4126,984 @@ class TestCopiedParts(CopyThatCase):
         self.check_travel(first, rest, 1.0)
 
 
+class WatchedObjects:
+    """bpy.data.objects, noting every removal made while a loop over it is going
+    on. Iterating it goes through a generator that counts the loops that are
+    live: a `for` that is still running is suspended inside the generator."""
+
+    def __init__(self, real):
+        self.real, self.live, self.removals = real, 0, []
+
+    def __iter__(self):
+        return self.loop()
+
+    def loop(self):
+        self.live += 1
+        try:
+            yield from self.real
+        finally:
+            self.live -= 1
+
+    def remove(self, obj, *args, **kwargs):
+        self.removals.append((obj.name, self.live))
+        return self.real.remove(obj, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+class WatchedData:
+    """bpy.data with its objects watched; all else is the real one's."""
+
+    def __init__(self, real):
+        self.real, self.objects = real, WatchedObjects(real.objects)
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+class WatchedBpy:
+    """The bpy the add-on sees: its data watched, all else the real bpy's."""
+
+    def __init__(self):
+        self.data = WatchedData(bpy.data)
+
+    def __getattr__(self, name):
+        return getattr(bpy, name)
+
+
+class TestTheTimerRemovesNothingWhileItLoops(CopyThatCase):
+    """A part deleted in the viewport is let go of by a timer, which removes its
+    object from the file. It did so from inside a loop over every object in the
+    file, and a loop over a collection that loses a member goes on to hand out
+    the member it has just lost: the next rig was read off freed memory, and
+    Blender could crash on it."""
+
+    def test_the_object_of_a_deleted_part_is_removed_after_the_loop_is_over(self):
+        # "Cube" sorts right after "CopyThat Rig" in bpy.data.objects: the very
+        # next object the loop would hand out.
+        part = cube("Cube", (0.0, 0.0, 1.0))
+
+        def pose():
+            part.location.z += 1.0
+
+        record_move([part], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual([o.name for o in bpy.data.objects][:2], ["CopyThat Rig", "Cube"])
+        select(part)
+        # X in the viewport: out of every collection, kept by the part's pointer.
+        self.assertEqual(bpy.ops.object.delete(), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(len(bpy.data.objects["Cube"].users_collection), 0)
+
+        watched = WatchedBpy()
+        with mock.patch.object(rigmoves, "bpy", watched):
+            rigmoves.let_deleted_go()
+        objects = watched.data.objects
+        self.assertEqual([name for name, _live in objects.removals], ["Cube"])
+        self.assertEqual([live for _name, live in objects.removals], [0],
+                         "removed while a loop over the objects was going on")
+        self.assertIsNone(rig().rigmoves.moves[0].parts[0].object)
+        self.assertNotIn("Cube", bpy.data.objects)
+
+
+def delete_in_the_viewport(*objects):
+    """X on these, and what Blender does about it half a second later: the
+    depsgraph handler sees them and a timer lets go of them. The rig is
+    selected after, as the panel has nothing to say without an active object."""
+    select(*objects)
+    assert bpy.ops.object.delete() == {"FINISHED"}
+    bpy.context.view_layer.update()
+    rigmoves.follow_renames_handler()
+    rigmoves.let_deleted_go()
+    select(rig())
+
+
+class TestANewObjectTakesTheNameOfADeletedPart(CopyThatCase):
+    """Two cubes are a move, built; one is deleted, and the cube added next is
+    given the name it left free. The part of the deleted cube took the new one
+    for its object: the panel said it was in the rig, New Move and Add To This
+    Group refused it ("already in Move 1"), and Build moved it onto the deleted
+    cube's Before, unbound."""
+
+    def setUp(self):
+        super().setUp()
+        self.first = cube("Cube", (0.0, 0.0, 0.0))
+        second = cube("Cube.001", (3.0, 0.0, 0.0))
+        select(self.first, second)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.first.location.z += 1.0
+        bpy.context.view_layer.update()
+        select(self.first)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        delete_in_the_viewport(second)
+        self.assertNotIn("Cube.001", bpy.data.objects)
+        # The next cube added is given the name that was left.
+        self.new = cube("Cube.001", (20.0, 0.0, 0.0))
+        self.assertEqual(self.new.name, "Cube.001")
+        bpy.context.view_layer.update()
+        self.where = rest_points(self.new)
+
+    def test_the_part_of_the_deleted_cube_is_not_the_new_one(self):
+        self.assertIsNone(rigmoves.part_object(self.move.parts["Cube.001"]))
+        select(self.new)
+        self.assertEqual(rigmoves.newcomers(bpy.context, rig()), [self.new])
+
+    def test_add_to_this_group_takes_it_and_build_leaves_it_where_it_stands(self):
+        select(self.new)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual([p.name for p in self.move.parts], ["Cube", "Cube.001"])
+        self.assertIs(rigmoves.part_object(self.move.parts["Cube.001"]), self.new)
+        self.assertIn("'Cube.001' was deleted, so it was taken out of 'Move 1'.",
+                      rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertLess(drift(self.new, self.where), TOLERANCE)
+        self.assertEqual([g.name for g in self.new.vertex_groups], ["Cube.001"])
+        # And it plays a move of its own once one is recorded.
+        self.new.location.z += 1.0
+        bpy.context.view_layer.update()
+        select(self.new)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            self.assertLess(drift(self.new, [p + Vector((0.0, 0.0, share)) for p in self.where]),
+                            TOLERANCE, share)
+        self.assertLess(drift(self.first, [p + Vector((0.0, 0.0, 1.0))
+                                           for p in rest_points(self.first)]), TOLERANCE)
+
+    def test_new_move_takes_it_too(self):
+        select(self.new)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.assertEqual([p.name for p in rig().rigmoves.moves[1].parts], ["Cube.001"])
+        self.assertEqual([p.name for p in rig().rigmoves.moves[0].parts], ["Cube"])
+
+
+class FingerCase(CopyThatCase):
+    """A finger of three segments, built. (TestFollowers makes one too; these
+    classes come before it.)"""
+
+    KNUCKLES = (Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)))
+
+    def finger(self):
+        """Three segments end to end, each hanging from the one before, every
+        joint closed 30 degrees; built."""
+        self.segments = []
+        for number in range(3):
+            segment = cube("Seg{:d}".format(number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+        bpy.context.view_layer.update()
+        homes = [s.matrix_world.copy() for s in self.segments]
+        self.rest = [rest_points(s) for s in self.segments]
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        for segment, knuckle in zip(self.segments, self.KNUCKLES):
+            bpy.context.scene.cursor.location = knuckle
+            select(segment)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.assertEqual({p.name: p.follows for p in self.move.parts},
+                         {"Seg1": "", "Seg2": "Seg1", "Seg3": "Seg2"})
+        carry = Matrix.Identity(4)
+        for segment, knuckle, home in zip(self.segments, self.KNUCKLES, homes):
+            carry = (carry @ Matrix.Translation(knuckle)
+                     @ Matrix.Rotation(math.radians(30.0), 4, "Y") @ Matrix.Translation(-knuckle))
+            segment.matrix_world = carry @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertLess(drift(self.segments[2], self.rest[2]), TOLERANCE)
+
+
+class TestADeletedPartLeavesItsMove(FingerCase):
+    """A part whose object was deleted stayed in its move for good: Ring said it
+    "has no Before recorded yet", the reports counted it, a part that followed
+    it was left hung from nothing, and every call for the part's object looked
+    through the whole file for it."""
+
+    def petals(self):
+        """One petal that moves outwards, ringed four times round the world's
+        origin, built; the petal, and where each copy is at 50% and 100%."""
+        petal = cube("Petal", (2.0, 0.0, 0.5))
+        petal.scale = (0.8, 0.3, 0.1)
+        bpy.context.view_layer.update()
+
+        def pose():
+            petal.location.x += 1.0
+
+        record_move([petal], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
+        select(petal)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        self.copies = [bpy.data.objects["Petal {:d}".format(n)] for n in (2, 3, 4)]
+        self.plays = {}
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            self.plays[share] = [world_points(c) for c in self.copies]
+        drive(self.move, 0.0)
+        return petal
+
+    def test_a_deleted_middle_joint_leaves_the_tip_where_it_stands_and_following_nothing(self):
+        self.finger()
+        delete_in_the_viewport(self.segments[1])
+        self.assertLess(drift(self.segments[2], self.rest[2]), TOLERANCE)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual([p.name for p in self.move.parts], ["Seg1", "Seg3"])
+        self.assertEqual(self.move.parts["Seg3"].follows, "")
+        self.assertEqual(self.move.parts["Seg3"].follows_kept, "")
+        self.assertNotIn("Seg2", rig().data.bones)
+        self.assertLess(drift(self.segments[2], self.rest[2]), TOLERANCE)
+        self.assertIn("'Seg2' was deleted, so it was taken out of 'Move 1'.",
+                      rig().rigmoves.report)
+        # What is left plays.
+        drive(self.move, 1.0)
+        self.assertGreater(drift(self.segments[2], self.rest[2]), 0.1)
+
+    def test_a_follower_does_not_jump_when_the_part_it_hung_from_is_let_go(self):
+        # Before the first Build a follower's object hangs from its leader's, and
+        # is carried when the leader is dragged. Blender frees what hung from an
+        # object without keeping it where it stood.
+        leader = cube("Leader", (0.0, 0.0, 0.0))
+        follower = cube("Follower", (3.0, 0.0, 0.0))
+        select(leader, follower)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        move.parts["Follower"].follows = "Leader"
+        self.assertIs(follower.parent, leader)
+        leader.location.z += 1.0
+        bpy.context.view_layer.update()
+        carried = world_points(follower)
+        self.assertGreater(carried[0].z, 0.4)
+        delete_in_the_viewport(leader)
+        self.assertLess(drift(follower, carried), TOLERANCE)
+        # What it says is for the next button to put in the report.
+        self.addCleanup(lambda: rigmoves.HEARD.update(notes=[]))
+        rigmoves.catch_up(rig())
+        self.assertEqual([p.name for p in move.parts], ["Follower"])
+        self.assertEqual(move.parts["Follower"].follows, "")
+        self.assertIsNone(follower.parent)
+        self.assertLess(drift(follower, carried), TOLERANCE)
+
+    def test_several_are_said_together(self):
+        self.finger()
+        delete_in_the_viewport(self.segments[1], self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual([p.name for p in self.move.parts], ["Seg1"])
+        self.assertIn("'Seg2' and 'Seg3' were deleted, so they were taken out of 'Move 1'.",
+                      rig().rigmoves.report)
+
+    def test_a_deleted_leader_with_riders_stays_under_a_name_that_is_free(self):
+        petal = self.petals()
+        delete_in_the_viewport(petal)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual([p.name for p in self.move.parts],
+                         ["Petal (deleted)", "Petal 2", "Petal 3", "Petal 4"])
+        self.assertEqual({p.leader for p in self.move.parts if p.leader}, {"Petal (deleted)"})
+        self.assertIn("'Petal' was deleted, but 3 riders copy its move, so it is kept as "
+                      "'Petal (deleted)'", rig().rigmoves.report)
+        # The riders play as they did.
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            for copy, points in zip(self.copies, self.plays[share]):
+                self.assertLess(drift(copy, points), TOLERANCE, "{:s} at {:.0%}".format(
+                    copy.name, share))
+        drive(self.move, 0.0)
+        # Said once: the next Build has nothing new to say.
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotIn("was deleted", rig().rigmoves.report)
+        # And the name is free for a new object.
+        new = cube("Petal", (9.0, 0.0, 0.5))
+        self.assertEqual(new.name, "Petal")
+        select(new)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertIs(rigmoves.part_object(self.move.parts["Petal"]), new)
+        self.assertIsNone(rigmoves.part_object(self.move.parts["Petal (deleted)"]))
+
+    def test_the_middle_joint_of_a_copied_finger_stays_for_the_tip_that_hangs_from_it(self):
+        # Taken out, the tip of the copy would hang from the original finger's
+        # middle joint instead, and fly about with it.
+        self.finger()
+        bpy.context.scene.cursor.location = (0.0, 0.0, -3.0)
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=2), {"FINISHED"})
+        tip = bpy.data.objects["Seg3 2"]
+        plays = {}
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            plays[share] = world_points(tip)
+        drive(self.move, 0.0)
+        self.assertEqual(self.move.parts["Seg3 2"].rides_on, "Seg2 2")
+        delete_in_the_viewport(bpy.data.objects["Seg2 2"])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.move.parts["Seg3 2"].rides_on, "Seg2 2 (deleted)")
+        self.assertTrue(self.move.parts["Seg2 2 (deleted)"].gone)
+        self.assertIn("'Seg2 2' was deleted, but 1 rider hangs from it, so it is kept as "
+                      "'Seg2 2 (deleted)'", rig().rigmoves.report)
+        for share, points in plays.items():
+            drive(self.move, share)
+            self.assertLess(drift(tip, points), TOLERANCE, "{:.0%}".format(share))
+
+    def test_a_deleted_leader_that_stayed_goes_when_its_last_rider_does(self):
+        petal = self.petals()
+        delete_in_the_viewport(petal)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for riders_left in (3, 2, 1):
+            self.assertEqual(len(self.move.parts), riders_left + 1)
+            self.assertEqual(bpy.ops.rigmoves.drop_rider(index=0, part=1), {"FINISHED"})
+        self.assertEqual([p.name for p in self.move.parts], [])
+        self.assertNotIn("Petal", rig().data.bones)
+        self.assertIn("'Petal' was deleted, so it was taken out of 'Move 1'.",
+                      rig().rigmoves.report)
+
+    def test_removing_the_move_takes_the_bone_of_a_deleted_leader_too(self):
+        petal = self.petals()
+        delete_in_the_viewport(petal)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIn("Petal", rig().data.bones)
+        select(rig())
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertEqual(sorted(b.name for b in rig().data.bones), ["Root"])
+
+    def test_ring_on_a_chain_whose_last_joint_was_deleted_does_not_blame_a_before(self):
+        self.finger()
+        delete_in_the_viewport(self.segments[2])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        bpy.context.scene.cursor.location = (0.0, 0.0, -3.0)
+        select(self.segments[0])
+        done = bpy.ops.rigmoves.ring(index=0, count=3)
+        self.assertNotIn("has no Before recorded yet", rig().rigmoves.report)
+        self.assertEqual(done, {"FINISHED"}, rig().rigmoves.report)
+        self.assertIn("2 joints each", rig().rigmoves.report)
+
+    def test_a_move_left_with_no_parts_stays_and_the_panel_build_and_remove_cope(self):
+        part = cube("Cube", (0.0, 0.0, 1.0))
+
+        def pose():
+            part.location.z += 1.0
+
+        record_move([part], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        delete_in_the_viewport(part)
+        drawn_panel()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(len(rig().rigmoves.moves), 1)
+        self.assertEqual(len(rig().rigmoves.moves[0].parts), 0)
+        select(rig())
+        drawn_panel()
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertEqual(len(rig().rigmoves.moves), 0)
+
+    def test_a_button_drawn_before_a_part_was_taken_out_works_on_the_part_it_was_drawn_for(self):
+        # The riders' rows are drawn by their place in the move's list, and a
+        # deleted part ahead of them is taken out when the button is pressed.
+        ahead = cube("Ahead", (-4.0, 0.0, 0.5))
+        petal = cube("Petal", (2.0, 0.0, 0.5))
+        petal.scale = (0.8, 0.3, 0.1)
+        bpy.context.view_layer.update()
+        select(ahead, petal)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        petal.location.x += 1.0
+        bpy.context.view_layer.update()
+        select(petal)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
+        select(petal)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual([p.name for p in move.parts],
+                         ["Ahead", "Petal", "Petal 2", "Petal 3", "Petal 4"])
+        delete_in_the_viewport(ahead)
+        # Drawn now, "Petal 3" is the fourth row: index 3.
+        self.assertEqual(bpy.ops.rigmoves.drop_rider(index=0, part=3), {"FINISHED"})
+        self.assertEqual([p.name for p in move.parts], ["Petal", "Petal 2", "Petal 4"])
+
+
+class TestABigSceneStaysQuick(CopyThatCase):
+    """A rig of fifty parts in a file with a thousand other meshes in sixty
+    collections. Every question about a part's object looked through the
+    collections of the whole file, and the handler that runs after every update
+    asked it of every part, so the panel and every drag slowed down - and one
+    deleted part, not yet let go of, made each of those questions look at every
+    object in the file."""
+
+    def setUp(self):
+        super().setUp()
+        scene = bpy.context.scene
+        collections = []
+        for number in range(60):
+            collection = bpy.data.collections.new("Col{:02d}".format(number))
+            scene.collection.children.link(collection)
+            collections.append(collection)
+        shape = bpy.data.meshes.new("Shape")
+        shape.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        for number in range(1000):
+            collections[number % 60].objects.link(
+                bpy.data.objects.new("Other{:04d}".format(number), shape))
+        self.parts = [cube("Part{:02d}".format(number), (number * 2.0, 0.0, 1.0))
+                      for number in range(50)]
+        select(*self.parts)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for part in self.parts:
+            part.location.z += 1.0
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def times(self):
+        """(milliseconds a handler call takes on average, milliseconds the panel
+        takes to draw). The processor's time, not the clock's: the machine may
+        be busy with something else, and the limits below are wide for the same
+        reason."""
+        import time
+        select(self.parts[1])
+        drawn_panel()
+        rigmoves.follow_renames_handler()
+        start = time.process_time()
+        for _ in range(20):
+            rigmoves.follow_renames_handler()
+        handler = (time.process_time() - start) * 1000.0 / 20
+        start = time.process_time()
+        for _ in range(3):
+            drawn_panel()
+        return handler, (time.process_time() - start) * 1000.0 / 3
+
+    def test_the_handler_and_the_panel_take_a_few_milliseconds(self):
+        handler, panel = self.times()
+        self.assertLess(handler, 30.0, "the handler took {:.1f} ms".format(handler))
+        self.assertLess(panel, 150.0, "the panel took {:.1f} ms".format(panel))
+        # With one part deleted and not yet let go of, which is for half a second
+        # after X and for as long as the timer is not run.
+        select(self.parts[0])
+        self.assertEqual(bpy.ops.object.delete(), {"FINISHED"})
+        bpy.context.view_layer.update()
+        handler, panel = self.times()
+        self.assertLess(handler, 30.0, "the handler took {:.1f} ms with a part deleted".format(handler))
+        self.assertLess(panel, 150.0, "the panel took {:.1f} ms with a part deleted".format(panel))
+
+    def test_the_handler_follows_a_rename_and_otherwise_leaves_the_parts_alone(self):
+        with mock.patch.object(rigmoves, "follow_renames", wraps=rigmoves.follow_renames) as asked:
+            rigmoves.follow_renames_handler()
+            self.assertEqual(asked.call_count, 0)
+            self.parts[3].name = "Renamed"
+            rigmoves.follow_renames_handler()
+            self.assertEqual(asked.call_count, 1)
+        self.assertEqual(rig().rigmoves.moves[0].parts[3].name, "Renamed")
+
+
+class CopiedModel(CopyThatCase):
+    """A built model, and copies made of it by the rig and its parts being
+    selected and duplicated, then moved 6 m. (ChestCase, further down, is a
+    chest too; these classes have to come before it.)"""
+
+    OFF = Matrix.Translation((6.0, 0.0, 0.0))
+
+    def chest(self, body=False):
+        """A lid hinged on its back edge, swung 100 degrees, built. With `body`
+        the lid is first hung from a box under it, as it is when modelled."""
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        if body:
+            self.body = cube("Body", (0.0, 0.0, 0.5))
+            self.body.scale = (2.0, 1.2, 1.0)
+            bpy.context.view_layer.update()
+            world = self.lid.matrix_world.copy()
+            self.lid.parent = self.body
+            self.lid.matrix_parent_inverse = self.body.matrix_world.inverted()
+            self.lid.matrix_world = world
+            bpy.context.view_layer.update()
+        home = self.lid.matrix_world.copy()
+        hinge = Vector((0.0, 0.6, 1.0))
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        bpy.context.scene.cursor.location = hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.lid.matrix_world = turn_about(hinge, "X", -100.0) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.keep(self.lid)
+
+    def keep(self, part):
+        """Remember the model as it is: the part (the original) and its rig,
+        how the part plays, and what the rig is made of."""
+        self.part, self.rig1 = part, rig()
+        self.plays = self.play(self.rig1, part)
+        self.made = self.made_of()
+
+    def play(self, owner, part):
+        """Where the part is at the ends and half way."""
+        move = owner.rigmoves.moves[0]
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            owner.pose.bones[move.handle_name].location.y = move.rail * share
+            bpy.context.view_layer.update()
+            out[share] = world_points(part)
+        owner.pose.bones[move.handle_name].location.y = 0.0
+        bpy.context.view_layer.update()
+        return out
+
+    def made_of(self):
+        """The original rig's bones, the part's groups and the constraints."""
+        return (sorted(b.name for b in self.rig1.data.bones),
+                [g.name for g in self.part.vertex_groups],
+                sorted((pb.name, c.name) for pb in self.rig1.pose.bones for c in pb.constraints))
+
+    def copy_everything(self, linked, *also):
+        """Duplicate the rig and its part (and these), as Alt+D (linked) or
+        Shift+D does, and move the copy off. Returns the copy's rig and part."""
+        for obj in bpy.context.view_layer.objects:
+            obj.select_set(False)
+        self.rig1.select_set(True)
+        self.part.select_set(True)
+        for obj in also:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = self.rig1
+        if linked:
+            self.assertEqual(bpy.ops.object.duplicate_move_linked(
+                TRANSFORM_OT_translate={"value": (6.0, 0.0, 0.0)}), {"FINISHED"})
+        else:
+            self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
+            self.assertEqual(bpy.ops.transform.translate(value=(6.0, 0.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.copies = list(bpy.context.selected_objects)
+        rig2 = next(o for o in self.copies if o.type == "ARMATURE")
+        part2 = next(o for o in self.copies if o.name.startswith(self.part.name + "."))
+        self.assertIsNot(rig2, self.rig1)
+        bpy.context.scene.rigmoves_rig = rig2
+        return rig2, part2
+
+    def check_original(self):
+        """The original is made of what it was and plays as it did."""
+        self.assertEqual(self.made_of(), self.made)
+        now = self.play(self.rig1, self.part)
+        for share, points in self.plays.items():
+            self.assertLess(max((a - b).length for a, b in zip(now[share], points)), TOLERANCE,
+                            "the original at {:.0%}".format(share))
+
+    def check_copy(self, rig2, part2):
+        """The copy plays what the original does, 6 m along."""
+        now = self.play(rig2, part2)
+        for share, points in self.plays.items():
+            wanted = [self.OFF @ p for p in points]
+            self.assertLess(max((a - b).length for a, b in zip(now[share], wanted)), TOLERANCE,
+                            "the copy at {:.0%}".format(share))
+
+
+class TestAnAltDCopyOfAWholeModelIsAModelOfItsOwn(CopiedModel):
+    """Alt+D of the rig and its parts links the Armature as well as the meshes,
+    so the copy and the original had one set of bones: building the copy, ringing
+    its lid or removing its move changed the original, which ended up a metre
+    off, or lost its bone, its group and its constraints."""
+
+    def setUp(self):
+        super().setUp()
+        self.chest()
+        self.rig2, self.part2 = self.copy_everything(linked=True)
+        self.assertIs(self.rig2.data, self.rig1.data)
+        self.assertIs(self.part2.data, self.part.data)
+
+    def test_the_copy_takes_an_armature_of_its_own_and_keeps_its_pose_constraints_and_drivers(self):
+        def made_of(owner):
+            return ([(pb.name, [c.name for c in pb.constraints]) for pb in owner.pose.bones],
+                    sorted(d.data_path for d in owner.animation_data.drivers),
+                    {pb.name: sorted(pb.keys()) for pb in owner.pose.bones},
+                    {b.name: sorted(b.keys()) for b in owner.data.bones},
+                    owner.pose.bones["Move 1 handle"].location.y)
+
+        self.rig2.pose.bones["Move 1 handle"].location.y = 0.05
+        bpy.context.view_layer.update()
+        before = made_of(self.rig2)
+        rigmoves.catch_up(self.rig2)
+        self.assertIsNot(self.rig2.data, self.rig1.data)
+        self.assertEqual(self.rig1.data.users, 1)
+        self.assertIn(self.rig2.name, self.rig2.data.name)
+        self.assertEqual(made_of(self.rig2), before)
+        self.assertEqual(made_of(self.rig1)[:4], before[:4])
+        # Once is enough.
+        own = self.rig2.data
+        rigmoves.catch_up(self.rig2)
+        self.assertIs(self.rig2.data, own)
+
+    def test_building_the_copy_with_another_part_leaves_the_original_alone(self):
+        coin = cube("Coin", (6.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        select(coin, self.part2)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=self.rig2.name),
+                         {"FINISHED"})
+        coin.location.z += 1.0
+        bpy.context.view_layer.update()
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_original()
+        self.check_copy(self.rig2, self.part2)
+        self.assertIn("Coin", self.rig2.data.bones)
+        self.assertIsNot(self.rig2.data, self.rig1.data)
+
+    def test_a_ring_on_the_copy_leaves_the_original_alone(self):
+        bpy.context.scene.cursor.location = (6.0, 4.0, 0.0)
+        select(self.part2)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        self.assertEqual(len(self.rig2.rigmoves.moves[0].parts), 4)
+        self.check_original()
+        self.check_copy(self.rig2, self.part2)
+
+    def test_removing_the_copys_move_leaves_the_original_its_bones_groups_and_constraints(self):
+        select(self.part2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertEqual(len(self.rig2.rigmoves.moves), 0)
+        self.assertEqual([g.name for g in self.part2.vertex_groups], [])
+        self.check_original()
+
+
+class TestACopyOfAWholeModelHasPathCurvesOfItsOwn(CopiedModel):
+    """A path curve and the line Show Paths draws are objects of their own, and
+    are not selected with "the rig and its parts": the copy's parts pointed at
+    the original's. Building the copy pinned the original's curve to the copy's
+    ends, removing the copy's move deleted it, and the copy's Build deleted the
+    original's path line."""
+
+    def setUp(self):
+        super().setUp()
+        coin = cube("Coin", (3.0, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        home = coin.matrix_world.copy()
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        coin.matrix_world = Matrix.Translation((0.0, -2.2, 0.0)) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        curve = rig().rigmoves.moves[0].parts["Coin"].path_curve
+        middle = curve.data.splines[0].bezier_points[1]
+        for point in (middle.co, middle.handle_left, middle.handle_right):
+            point.z += 1.5
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.curve_name = curve.name
+        self.keep(coin)
+        # Bent: half way along it is well above where a straight path goes.
+        self.assertGreater(self.plays[0.5][0].z - rest_points(coin)[0].z, 1.0)
+
+    def where_the_curve_is(self):
+        curve = bpy.data.objects[self.curve_name]
+        return [tuple(round(c, 5) for c in p) for p in rigmoves.curve_line(curve)]
+
+    def test_building_the_copy_leaves_the_original_s_curve_where_it_is(self):
+        before = self.where_the_curve_is()
+        rig2, part2 = self.copy_everything(linked=False)
+        # The curve is an object of its own, not selected: the copy shares it.
+        self.assertEqual(rig2.rigmoves.moves[0].parts[0].path_curve.name, self.curve_name)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotEqual(rig2.rigmoves.moves[0].parts[0].path_curve.name, self.curve_name)
+        self.assertEqual(self.where_the_curve_is(), before)
+        self.check_original()
+        self.check_copy(rig2, part2)
+
+    def test_removing_the_copy_leaves_the_original_s_curve_and_path(self):
+        rig2, part2 = self.copy_everything(linked=False)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIn(self.curve_name, bpy.data.objects)
+        bpy.context.scene.rigmoves_rig = self.rig1
+        select(self.part)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.rig1.rigmoves.moves[0].parts[0].path_curve.name, self.curve_name)
+        self.check_original()
+
+    def test_the_copys_build_leaves_the_original_s_path_line(self):
+        select(self.part)
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=True), {"FINISHED"})
+        line_name = self.rig1.rigmoves.moves[0].paths_object.name
+        rig2, part2 = self.copy_everything(linked=False)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIn(line_name, bpy.data.objects)
+        self.assertIs(self.rig1.rigmoves.moves[0].paths_object, bpy.data.objects[line_name])
+        own = rig2.rigmoves.moves[0].paths_object
+        self.assertIsNotNone(own)
+        self.assertNotEqual(own.name, line_name)
+
+
+class TestAPartIsHungBackOnTheObjectItHungFrom(CopiedModel):
+    """A lid modelled hanging from a body goes back to hanging from it when its
+    move is removed. The body was kept by name: Remove on a Shift+D copy of the
+    chest hung the copy's lid on the ORIGINAL body, so moving that moved the
+    copy's lid, and after the body was renamed (F2) Remove hung it on nothing and
+    said "The rig is back to how it was"."""
+
+    def setUp(self):
+        super().setUp()
+        self.chest(body=True)
+        self.assertIs(self.lid.parent, self.rig1)
+        self.shut = world_points(self.lid)
+
+    def test_remove_on_a_copy_hangs_the_copys_lid_on_the_copys_body(self):
+        rig2, lid2 = self.copy_everything(False, self.body)
+        body2 = next(o for o in self.copies if o.name.startswith("Body."))
+        select(lid2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIs(lid2.parent, body2)
+        copy_lid = world_points(lid2)
+        self.body.location.x += 5.0
+        bpy.context.view_layer.update()
+        self.assertLess(drift(lid2, copy_lid), TOLERANCE)
+        # Its own body does carry it.
+        body2.location.x += 3.0
+        bpy.context.view_layer.update()
+        self.assertLess(drift(lid2, [p + Vector((3.0, 0.0, 0.0)) for p in copy_lid]), TOLERANCE)
+
+    def test_a_body_renamed_is_still_the_body_remove_hangs_the_lid_on(self):
+        self.body.name = "Chest Body"
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIs(self.lid.parent, self.body)
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+        self.assertEqual(rig().rigmoves.report, "Removed. The rig is back to how it was.")
+
+    def test_a_file_from_before_the_pointer_was_kept_finds_the_body_by_its_name(self):
+        part = self.rig1.rigmoves.moves[0].parts[0]
+        self.assertIs(part.home_object, self.body)
+        self.assertEqual(part.home_parent, "Body")
+        part.home_object = None
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIs(self.lid.parent, self.body)
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+
+    def test_a_body_that_is_gone_is_said_so_and_a_new_one_of_its_name_is_not_it(self):
+        delete_in_the_viewport(self.body)
+        self.assertNotIn("Body", bpy.data.objects)
+        new = cube("Body", (9.0, 0.0, 0.5))
+        self.assertEqual(new.name, "Body")
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIsNone(self.lid.parent)
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+        self.assertEqual(rig().rigmoves.report,
+                         "Removed. 'Lid' hung from 'Body', which is gone, so it was left "
+                         "standing free.")
+
+
+class TestAnNlaStripThatPlaysThePartsOwnKeys(CopyThatCase):
+    """A part keyed on its location whose action is also played by a strip of its
+    own NLA - Action Stash and Push Down both leave one. Build lifts the stray
+    keys of the action the part plays, and that was the strip's action: "3 stray
+    keyframe track(s)" emptied the strip, which the guide says is never touched."""
+
+    def keyed_and_stashed(self, muted):
+        scene = bpy.context.scene
+        gear = cube("Gear", (0.0, 0.0, 1.0))
+        scene.frame_set(1)
+        gear.keyframe_insert("location", frame=1)
+        gear.location.z = 2.0
+        gear.keyframe_insert("location", frame=10)
+        gear.location.z = 1.0
+        action = gear.animation_data.action
+        track = gear.animation_data.nla_tracks.new()
+        strip = track.strips.new("Gear keys", 1, action)
+        if strip.action_slot is None:
+            strip.action_slot = action.slots[0]
+        track.mute = muted
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+        return gear
+
+    def build_it(self, gear):
+        select(gear)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        gear.rotation_euler.x = math.radians(90.0)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def check_the_strip(self, gear):
+        strip = gear.animation_data.nla_tracks[0].strips[0]
+        curves = rigmoves.slot_curves(strip.action, strip.action_slot)
+        self.assertEqual([len(curve.keyframe_points) for _bag, curve in curves], [2, 2, 2])
+        # The part's own keys came out of a copy, which is gone with them.
+        self.assertEqual(rigmoves.own_transform_curves(gear), [])
+        self.assertIsNone(gear.animation_data.action)
+        self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
+
+    def test_build_lifts_the_keys_the_part_plays_and_leaves_a_stashed_strip_its_own(self):
+        gear = self.keyed_and_stashed(muted=True)
+        self.build_it(gear)
+        self.check_the_strip(gear)
+
+    def test_the_same_with_the_track_not_muted(self):
+        gear = self.keyed_and_stashed(muted=False)
+        self.build_it(gear)
+        self.check_the_strip(gear)
+
+    def test_the_strips_that_are_looked_at_can_include_muted_ones_and_those_in_a_meta_strip(self):
+        action = object()
+        inside = types.SimpleNamespace(mute=True, type="CLIP", strips=[], action=action)
+        meta = types.SimpleNamespace(mute=False, type="META", strips=[inside], action=None)
+        plain = types.SimpleNamespace(mute=False, type="CLIP", strips=[], action=action)
+        muted = types.SimpleNamespace(mute=True, type="CLIP", strips=[], action=action)
+        empty = types.SimpleNamespace(mute=False, type="CLIP", strips=[], action=None)
+        everything = [meta, plain, muted, empty]
+        self.assertEqual(list(rigmoves.clip_strips(everything)), [plain])
+        self.assertEqual(list(rigmoves.clip_strips(everything, muted=True)),
+                         [inside, plain, muted])
+
+
+class TestMutingAnNlaStrip(CopyThatCase):
+    """Build named a coin moved by an NLA strip and advised "mute or remove it".
+    A strip that is muted still sets every channel it works to its default on
+    every frame, so a coin whose strip was muted sat at the origin at every
+    frame, and the part was no longer named. Muting the track, or deleting the
+    strip, is what works."""
+
+    def setUp(self):
+        super().setUp()
+        scene = bpy.context.scene
+        self.coin = cube("Coin", (0.3, 0.0, 0.6))
+        self.coin.scale = (0.3, 0.3, 0.05)
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+        self.rest = rest_points(self.coin)
+        self.coin.keyframe_insert("location", frame=1)
+        self.coin.location = (0.3, 0.0, 0.9)
+        self.coin.keyframe_insert("location", frame=20)
+        self.coin.location = (0.3, 0.0, 0.6)
+        action = self.coin.animation_data.action
+        self.track = self.coin.animation_data.nla_tracks.new()
+        self.strip = self.track.strips.new("hover", 1, action)
+        if self.strip.action_slot is None:
+            self.strip.action_slot = action.slots[0]
+        self.coin.animation_data.action = None
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+        select(self.coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.coin.matrix_world = Matrix.Translation((0.0, -2.2, 0.0)) @ self.coin.matrix_world
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIn("is moved by an NLA strip of its own", rig().rigmoves.report)
+
+    def build(self):
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        select(self.coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        return rig().rigmoves.report
+
+    def plays_the_move_at_every_frame(self):
+        move = rig().rigmoves.moves[0]
+        for frame in (1, 10, 20):
+            bpy.context.scene.frame_set(frame)
+            for share in (0.0, 0.5, 1.0):
+                drive(move, share)
+                self.assertLess(drift(self.coin, [p + Vector((0.0, -2.2 * share, 0.0))
+                                                  for p in self.rest]), TOLERANCE,
+                                "frame {:d}, {:.0%}".format(frame, share))
+
+    def test_a_muted_strip_is_still_named_and_a_muted_track_or_a_deleted_strip_is_not(self):
+        # What the advice used to be: the strip muted. It is still named, and
+        # the advice is the one that works.
+        self.strip.mute = True
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), (["Coin"], []))
+        self.assertIn("'Coin' is moved by an NLA strip of its own, which fights the rig: in "
+                      "the NLA editor, mute its track (the checkbox on the track) or delete "
+                      "the strip, then Build.", self.build())
+        # Its track muted: nothing is named, and the coin plays the move.
+        self.strip.mute = False
+        self.track.mute = True
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), ([], []))
+        self.assertNotIn("fights the rig", self.build())
+        self.plays_the_move_at_every_frame()
+        # The strip deleted: the same.
+        self.track.mute = False
+        self.track.strips.remove(self.strip)
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), ([], []))
+        self.assertNotIn("fights the rig", self.build())
+        self.plays_the_move_at_every_frame()
+
+
+class TestRingSaysWhyAPartStopsIt(FingerCase):
+    """Ring turned a chain down with "has no Before recorded yet" whatever was
+    wrong with the part below: a part with no Before, a part that was deleted -
+    an older file can leave one in its move, with nothing to stand for it - and
+    one that is no mesh."""
+
+    def refusal(self):
+        bpy.context.scene.cursor.location = (0.0, 0.0, -3.0)
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=3), {"CANCELLED"})
+        return rig().rigmoves.report
+
+    def deleted(self):
+        # As an older file has it: the pointer let go of and nothing marked gone.
+        delete_in_the_viewport(self.segments[2])
+        self.move.parts["Seg3"].gone = False
+
+    def unrecorded(self):
+        self.move.parts["Seg3"].has_before = False
+
+    def no_mesh(self):
+        lamp = bpy.data.objects.new("Lamp", None)
+        bpy.context.scene.collection.objects.link(lamp)
+        self.move.parts["Seg3"].object = lamp
+
+    def test_each_thing_that_stops_a_ring_has_a_sentence_of_its_own(self):
+        for how, sentence in (
+                (self.deleted, "'Seg3' was deleted, so the chain cannot be ringed."),
+                (self.unrecorded, "'Seg3' has no Before recorded yet."),
+                (self.no_mesh, "'Lamp' is not a mesh, so it cannot be ringed.")):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            self.finger()
+            how()
+            self.assertEqual(self.refusal(), sentence, how.__name__)
+
+    def test_a_deleted_leader_kept_for_its_riders_is_named_as_it_was(self):
+        self.finger()
+        bpy.context.scene.cursor.location = (0.0, 0.0, -3.0)
+        # A rider of the middle joint keeps it when it is deleted.
+        rider = cube("Rider", (1.5, 4.0, 0.0))
+        rider.scale = (1.0, 0.3, 0.3)
+        bpy.context.view_layer.update()
+        select(rider, self.segments[1])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Seg2",
+                                                     rig_name=rig().name), {"FINISHED"})
+        delete_in_the_viewport(self.segments[1])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.move.parts[1].name, "Seg2 (deleted)")
+        self.assertEqual(self.refusal(), "'Seg2' was deleted, so the chain cannot be ringed.")
+
+
+class TestNewMoveDoesNotRememberNewRig(CopyThatCase):
+    """New Rig is New Move with `fresh` on, and Blender opens an operator with
+    what it was last used with, for every property not marked SKIP_SAVE: after
+    one press of New Rig every plain New Move was a New Rig, and each press
+    started another rig."""
+
+    def test_the_new_rig_choice_is_not_remembered(self):
+        props = bpy.ops.rigmoves.new_move.get_rna_type().properties
+        self.assertTrue(props["fresh"].is_skip_save)
+        self.assertFalse(props["fresh"].default)
+
+
 class TestMakeChainOrder(CopyThatCase):
     """The order follows how a joint is built, at the far end of the part before
     it: not whichever pivot happens to be nearest."""
@@ -6706,8 +7684,8 @@ class TestPartsMovedByTheirOwn(CopyThatCase):
     lifts keys - they are somebody's work - so it names them, and says what to
     do."""
 
-    NLA = ("'Lid' is moved by an NLA strip of its own, which fights the rig: mute or "
-           "remove it in the NLA editor, then Build.")
+    NLA = ("'Lid' is moved by an NLA strip of its own, which fights the rig: in the NLA "
+           "editor, mute its track (the checkbox on the track) or delete the strip, then Build.")
     DRIVER = ("'Lid' is moved by a driver on its transform: remove it in the Drivers "
               "editor, then Build.")
 
@@ -6823,16 +7801,15 @@ class TestPartsMovedByTheirOwn(CopyThatCase):
                 for n in range(4)]
         self.start(*lids)
         self.assertIn("'Lid 0', 'Lid 1', 'Lid 2' and 1 more are moved by NLA strips of "
-                      "their own, which fight the rig: mute or remove them in the NLA "
-                      "editor, then Build.", self.said_by_the_panel())
+                      "their own, which fight the rig: in the NLA editor, mute their tracks "
+                      "(the checkbox on each) or delete the strips, then Build.",
+                      self.said_by_the_panel())
 
     def test_nothing_is_said_of_what_plays_nothing(self):
-        # A muted strip, a muted track, the NLA switched off, a muted driver, a
-        # strip with no transform in it: none of them moves the part.
+        # A muted track, the NLA switched off, a muted driver, a strip with no
+        # transform in it: none of them moves the part. (A muted strip does: see
+        # TestMutingAnNlaStrip.)
         cases = []
-        lid = self.lid_with(self.in_the_nla, "Muted Strip", (0.0, 0.0, 1.0))
-        self.strip.mute = True
-        cases.append(lid)
         lid = self.lid_with(self.in_the_nla, "Muted Track", (0.0, 3.0, 1.0))
         self.track.mute = True
         cases.append(lid)
@@ -6905,11 +7882,11 @@ class TestPartsMovedByTheirOwn(CopyThatCase):
         self.assertNotIn("fights the rig", text)
         self.assertEqual(rigmoves.own_transform_curves(self.lid), [])
 
-    def test_build_keeps_saying_so_until_the_strip_is_muted(self):
+    def test_build_keeps_saying_so_until_the_track_is_muted(self):
         self.lid = self.lid_with(self.in_the_nla)
         self.start(self.lid)
         self.assertEqual(self.build_and_hear()[0], {"WARNING"})
-        self.strip.mute = True
+        self.track.mute = True
         kinds, text = self.build_and_hear()
         self.assertEqual(kinds, {"INFO"})
         self.assertNotIn("fights the rig", text)

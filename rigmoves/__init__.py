@@ -828,17 +828,27 @@ def part_object(part):
     Else whatever its name finds that no other rig has taken.
 
     An object that is in no collection is deleted as far as anyone can tell: the
-    pointer a part keeps is why Blender has not freed it.
+    pointer a part keeps is why Blender has not freed it. And a part whose
+    object was deleted and let go of is none at all: its name may be a new
+    object's by now, and that is not it.
     """
-    if part.kind != "OBJECT":
+    if part.kind != "OBJECT" or part.gone:
         return None
     rig = part.id_data
 
     def standing(obj):
         return obj is not None and len(obj.users_collection) > 0
 
+    # The object the part points at stands when something besides the pointer
+    # holds it: each collection with it in is a user, and users_collection says
+    # the same by looking through every collection in the file, which was most
+    # of what the panel took to draw in a big scene. (An object held by two
+    # pointers and in no collection reads as standing here. The exact question
+    # is asked in let_go_of_deleted, at every button, before anything acts on
+    # the parts.)
     held = part.object
-    if standing(held) and (bound_to(held, rig) or not bound_elsewhere(held, rig)):
+    if (held is not None and held.users > 1
+            and (bound_to(held, rig) or not bound_elsewhere(held, rig))):
         return held
     named = bpy.data.objects.get(part.name)
     if not standing(named):
@@ -846,9 +856,10 @@ def part_object(part):
     if named is not None and bound_to(named, rig):
         return named
     if part.bone_name:
+        # The cheapest question first: this looks at every object in the file.
         for obj in bpy.data.objects:
-            if (obj.type == "MESH" and standing(obj) and bound_to(obj, rig)
-                    and obj.vertex_groups.get(part.bone_name) is not None):
+            if (obj.type == "MESH" and obj.vertex_groups.get(part.bone_name) is not None
+                    and bound_to(obj, rig) and standing(obj)):
                 return obj
     if named is not None and not bound_elsewhere(named, rig):
         return named
@@ -865,6 +876,24 @@ def part_for(move, obj):
     return None
 
 
+def part_held(move, index):
+    """What the part at this place in a move's list is, to find it again.
+
+    A button drawn a moment ago says where in the list its part was. By the
+    time it does its work catch_up may have taken deleted parts out of the
+    list, and the places after them have moved up: the button would work on
+    the part next door.
+    """
+    part = move.parts[index]
+    return part_object(part), part.name
+
+
+def part_again(move, held):
+    """The part a button meant (see part_held), or None when it is gone."""
+    obj, name = held
+    return part_for(move, obj) if obj is not None else move.parts.get(name)
+
+
 def objects_in_moves():
     """Every object that is a part of a move, on any rig of ours."""
     found = set()
@@ -876,6 +905,22 @@ def objects_in_moves():
                     if obj is not None:
                         found.add(obj)
     return found
+
+
+def rename_parts(move, wanted):
+    """Give these parts of a move new names - wanted is [(part, new name)] - and
+    point everything in the move that names one of them at the new name."""
+    renamed = {part.name: new for part, new in wanted}
+    for part, new in wanted:
+        part.name = new
+    for other in move.parts:
+        for field in ("leader", "rides_on", "follows_kept", "home_parent"):
+            if getattr(other, field) in renamed:
+                setattr(other, field, renamed[getattr(other, field)])
+        # Written straight in: through the property it would be asked if it
+        # were a choice that can be, and put back where it was.
+        if other.follows in renamed:
+            other["follows"] = renamed[other.follows]
 
 
 def follow_renames(rig, data):
@@ -898,17 +943,7 @@ def follow_renames(rig, data):
         wanted = [(p, n) for p, n in wanted if [m for _q, m in wanted].count(n) == 1]
         if not wanted:
             continue
-        renamed = {part.name: new for part, new in wanted}
-        for part, new in wanted:
-            part.name = new
-        for other in move.parts:
-            for field in ("leader", "rides_on", "follows_kept", "home_parent"):
-                if getattr(other, field) in renamed:
-                    setattr(other, field, renamed[getattr(other, field)])
-            # Written straight in: through the property it would be asked if it
-            # were a choice that can be, and put back where it was.
-            if other.follows in renamed:
-                other["follows"] = renamed[other.follows]
+        rename_parts(move, wanted)
         count += len(wanted)
     return count
 
@@ -925,9 +960,19 @@ def point_at_objects(rig, data):
 
 
 def has_deleted(data):
-    """Whether any part points at an object that has been deleted."""
-    return any(part.object is not None and not part.object.users_collection
+    """Whether any part points at an object, or at the one it hung from before,
+    that has been deleted."""
+    return any((part.object is not None and not part.object.users_collection)
+               or (part.home_object is not None and not part.home_object.users_collection)
                for move in data.moves for part in move.parts)
+
+
+def free_children(obj):
+    """Hang what hangs from an object from what the object hangs from, standing
+    where it stands. Blender frees an object's children from it without keeping
+    them where they are, and a follower jumped when its leader went."""
+    for child in list(obj.children):
+        keep_world(child, obj.parent)
 
 
 def let_go_of_deleted(data):
@@ -937,25 +982,120 @@ def let_go_of_deleted(data):
     holds it, and the pointer a part keeps does: it stays in the file, in no
     scene, keeping its name for itself, so that a new object called Lid was
     called Lid.001. The part lets go of it, and it goes if nothing else wants it.
+
+    The part is marked gone for good: the name it has may be given to a new
+    object, which is not it (see part_object). What hung from the object is hung
+    from what it hung from first (free_children).
+
+    The object a part hung from before is the same: let go of when deleted, and
+    its name marked, so that a new object given that name is not taken for it
+    (see home_of).
     """
     for move in data.moves:
         for part in move.parts:
             obj = part.object
             if obj is not None and not obj.users_collection:
+                free_children(obj)
                 part.object = None
+                part.gone = True
                 if obj.users == 0:
                     bpy.data.objects.remove(obj)
+            home = part.home_object
+            if home is not None and not home.users_collection:
+                free_children(home)
+                part.home_parent = home.name + DELETED
+                part.home_object = None
+                if home.users == 0:
+                    bpy.data.objects.remove(home)
 
 
 def let_deleted_go():
     """A timer's version of the above, for every rig of ours: not done in the
     handler itself, which must not take things out of the file."""
     try:
-        for obj in bpy.data.objects:
-            if obj.type == "ARMATURE" and len(obj.rigmoves.moves):
-                let_go_of_deleted(obj.rigmoves)
+        # The rigs are taken first and the objects let go after: letting one go
+        # removes it from bpy.data.objects, and a loop over that collection
+        # then hands out the object it has just lost (Blender may even crash on
+        # it, and every rig after it was skipped).
+        rigs = [o for o in bpy.data.objects if o.type == "ARMATURE" and len(o.rigmoves.moves)]
+        for rig in rigs:
+            let_go_of_deleted(rig.rigmoves)
     except Exception:
         pass
+
+
+# Put after the name of something deleted that is still named: a part that leads
+# riders and stays, and an old parent that is let go of. No object has it.
+DELETED = " (deleted)"
+
+
+def take_out_gone(rig, data):
+    """Take the parts whose objects were deleted out of their moves.
+
+    A part is its object, and once that is deleted and let go of there is
+    nothing left of it to move. Left in its move it was counted in reports,
+    refused Ring, and kept the name a new object may be given. The parts that
+    follow it follow nothing from now on, standing where they stand; its
+    constraints, its drivers and its bone's curves go with it, and its bone at
+    the next Build.
+
+    One that leads riders stays: its bone still plays the path they copy. So
+    does a rider that other riders ride on - the middle joint of a copied
+    finger, whose tip hangs from its bone: taken out, the tip would hang from
+    the original finger instead. It is given a name that is free for a new
+    object, "Hand (deleted)", and everything in its move that named it names
+    that. Said through HEARD, as the rest of what catch_up does is.
+    """
+    for move in data.moves:
+        gone = [p.name for p in move.parts if p.gone]
+        if not gone:
+            continue
+        leading = {p.leader for p in move.parts if p.leader}
+        carrying = {p.rides_on for p in move.parts if p.rides_on}
+        keep = [name for name in gone if name in leading or name in carrying]
+        out = [name for name in gone if name not in keep]
+        said = []
+        if out:
+            one = len(out) == 1
+            said.append("{:s} {:s} deleted, so {:s} {:s} taken out of '{:s}'.".format(
+                named([plain_name(name) for name in out]), "was" if one else "were",
+                "it" if one else "they", "was" if one else "were", move.name))
+        taken, renamed = {p.name for p in move.parts}, []
+        for name in keep:
+            # Kept, and renamed, by an earlier catch-up.
+            if name.endswith(DELETED):
+                continue
+            new, number = name + DELETED, 2
+            while new in taken:
+                new, number = "{:s}{:s} {:d}".format(name, DELETED, number), number + 1
+            taken.add(new)
+            copying = sum(1 for p in move.parts if p.leader == name)
+            riders = copying or sum(1 for p in move.parts if p.rides_on == name)
+            one = riders == 1
+            said.append("'{:s}' was deleted, but {:s} {:s}, so it is kept as '{:s}': take "
+                        "{:s} out and it goes too.".format(
+                            short(name, 18), counted(riders, "rider"),
+                            ("copies its move" if one else "copy its move") if copying
+                            else ("hangs from it" if one else "hang from it"),
+                            short(new, 28), "it" if one else "them"))
+            renamed.append((move.parts[name], new))
+        rename_parts(move, renamed)
+        # What followed a part that is going follows nothing now, standing where
+        # it stands. What followed one that stays keeps following it - its bone
+        # is still there - but its object no longer hangs from one that is not.
+        going = set(out)
+        ghosts = {p.name for p in move.parts if p.gone}
+        for other in move.parts:
+            if other.follows in going:
+                other["follows"] = ""
+                other.follows_kept = ""
+                hang(other)
+            elif other.follows in ghosts:
+                hang(other)
+        if out:
+            take_riders_out(rig, move, out)
+        for text in said:
+            HEARD["notes"].append((rig.name, text))
 
 
 def played_elsewhere(rig, action):
@@ -995,16 +1135,92 @@ def own_actions(rig, data):
                 pass
 
 
+def own_armature(rig):
+    """A rig that shares its Armature with another takes a copy of it for itself.
+
+    Alt+D of a whole model links the Armature as well as the meshes: the rig and
+    its copy had one set of bones, so building, ringing or removing the copy's
+    move added to, moved and took away the original's. (Shift+D copies the
+    Armature, and there is nothing to do.) The pose, its constraints and its
+    drivers belong to the rig and find their bones again by name. The copy is
+    named as an Action's is (own_actions), and whichever rig is caught up first
+    gets it. Returns whether it was made.
+    """
+    armature = rig.data
+    # A fake user alone does not make it shared; nor can one from a library be.
+    if (armature is None or armature.library is not None
+            or armature.users - int(armature.use_fake_user) < 2 or rig.mode == "EDIT"):
+        return False
+    fresh = armature.copy()
+    fresh.name = "{:s} {:s}".format(armature.name, rig.name)
+    rig.data = fresh
+    return True
+
+
+def own_curves(rig, data):
+    """The path curves and drawn path lines a rig shares with another rig get
+    copies for this one.
+
+    They are objects of their own, and not selected with "the rig and its
+    parts", so a copy of a whole model went on pointing at the original's: its
+    Build pinned the original's curve to its own ends, removing its move deleted
+    the original's curve, and its Build deleted the original's drawn path. A
+    curve is copied with its data, into the same collections and named as an
+    Action's copy is; the only thing that points at one is the part's pointer.
+    A drawn line is let go of: the next Build or Show Paths draws this rig's
+    own, and nothing here deletes the other's.
+    """
+    others = [o for o in bpy.data.objects
+              if o.type == "ARMATURE" and o is not rig and len(o.rigmoves.moves)]
+    curves = {p.path_curve for o in others for m in o.rigmoves.moves for p in m.parts
+              if p.path_curve is not None}
+    lines = {m.paths_object for o in others for m in o.rigmoves.moves
+             if m.paths_object is not None}
+    for move in data.moves:
+        if move.paths_object is not None and move.paths_object in lines:
+            move.paths_object = None
+        for part in move.parts:
+            curve = part.path_curve
+            if curve is None or curve not in curves:
+                continue
+            fresh = curve.copy()
+            fresh.name = "{:s} {:s}".format(curve.name, rig.name)
+            if curve.data is not None:
+                fresh.data = curve.data.copy()
+                fresh.data.name = fresh.name
+            for collection in curve.users_collection:
+                collection.objects.link(fresh)
+            part.path_curve = fresh
+
+
 @bpy.app.handlers.persistent
 def follow_renames_handler(*_arguments):
     """Called after each update of the scene: parts follow a rename at once.
-    Never raises, and does nothing for a scene with no moves in it."""
+    Never raises, and does nothing for a scene with no moves in it.
+
+    It runs on every update, so it asks the least it can: a pass over each
+    rig's parts that reads nothing but the object a part points at, its name
+    and its users, and not the collections - those are looked through for the
+    whole file at every question. Renames are followed only when a name
+    differs, and the timer is set only when an object has no user but the
+    pointer, which is what an object deleted in the viewport looks like - the
+    part's own, or the one it hung from before."""
     try:
         deleted = False
         for obj in bpy.data.objects:
-            if obj.type == "ARMATURE" and len(obj.rigmoves.moves):
+            if obj.type != "ARMATURE" or not len(obj.rigmoves.moves):
+                continue
+            renamed = False
+            for move in obj.rigmoves.moves:
+                for part in move.parts:
+                    held, home = part.object, part.home_object
+                    if held is not None:
+                        renamed = renamed or held.name != part.name
+                        deleted = deleted or held.users < 2
+                    if home is not None:
+                        deleted = deleted or home.users < 2
+            if renamed:
                 follow_renames(obj, obj.rigmoves)
-                deleted = deleted or has_deleted(obj.rigmoves)
         if deleted and not bpy.app.timers.is_registered(let_deleted_go):
             bpy.app.timers.register(let_deleted_go, first_interval=0.5)
     except Exception:
@@ -1029,6 +1245,8 @@ def _follows_changed(self, context):
     why = ""
     if target is None or target.name == self.name:
         why = "pick another part of this move"
+    elif target.gone:
+        why = "that part was deleted"
     elif self.leader or target.leader:
         why = "riders copy their leader instead"
     elif self.kind != "OBJECT" or target.kind != "OBJECT":
@@ -1067,6 +1285,39 @@ def keep_world(obj, parent):
     obj.matrix_world = world
 
 
+def remember_home(part, parent):
+    """Note the object a part hung from before this add-on took it over, to give
+    it back: by name and by pointer (see home_of)."""
+    part.home_parent = parent.name
+    part.home_object = parent
+
+
+def home_of(part):
+    """The object a part hung from before this add-on took it over, if it is
+    still there, else None.
+
+    The one the part points at, while it is in a scene; a name finds whatever
+    has it now, and after a copy of the whole model that is the original's.
+    The name is for a file from before the pointer was kept. One that was
+    deleted is let go of (let_go_of_deleted), and its name marked, so a new
+    object that is given it is not taken for it.
+    """
+    held = part.home_object
+    if held is None:
+        held = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+    return held if held is not None and held.users_collection else None
+
+
+def plain_name(name):
+    """A name without the mark of something deleted that is still named."""
+    return name[:-len(DELETED)] if name.endswith(DELETED) else name
+
+
+def home_name(part):
+    """What the object a part hung from was called, in words."""
+    return plain_name(part.home_parent)
+
+
 def hang(part):
     """Let a part's object hang from the object of the part it follows, so
     that dragging that one carries it along on screen - and what is recorded
@@ -1091,7 +1342,7 @@ def hang(part):
             # The parent it had of its own is remembered, to be given back.
             if (not part.bone_name and obj.parent is not None
                     and not obj.get(FOLLOW_MARK)):
-                part.home_parent = obj.parent.name
+                remember_home(part, obj.parent)
             keep_world(obj, target)
             obj[FOLLOW_MARK] = True
     else:
@@ -1116,7 +1367,7 @@ def unhang(part):
     if part.bone_name and rig_holding(obj) is not None:
         keep_world(obj, rig_holding(obj))
     else:
-        home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+        home = home_of(part)
         keep_world(obj, home if home is not obj else None)
     del obj[FOLLOW_MARK]
 
@@ -1215,6 +1466,15 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # The object this one hung from before the first Build took it over, so
     # taking it out of the rig can hang it there again.
     home_parent: bpy.props.StringProperty()
+    # That object held by pointer as well. The pointer follows it when it is
+    # renamed, and when the whole model is copied it points at the copy's own,
+    # where the name finds whatever has it now. Empty in a file from before it
+    # was kept. See home_of.
+    home_object: bpy.props.PointerProperty(type=bpy.types.Object)
+    # Set when the part's object was deleted and let go of. The name above may
+    # be given to a new object at once, and that is not this part: a part that
+    # is gone has no object, whatever stands under its name. See part_object.
+    gone: bpy.props.BoolProperty(default=False)
     # The part this one hangs from, like the joints of a finger: it moves
     # with that part and plays its own move on top. Empty for none. Put
     # into effect at the next Build, which hangs the bone from that part's.
@@ -1565,6 +1825,12 @@ def unbind_object(rig, part):
             obj.modifiers.remove(modifier)
     group = obj.vertex_groups.get(part.bone_name)
     if group is not None:
+        # The groups live on the mesh: one that is shared (Alt+D) is made the
+        # object's own first, or the group comes off the other's too.
+        if (obj.type == "MESH" and obj.data is not None
+                and obj.data.users - int(obj.data.use_fake_user) > 1):
+            obj.data = obj.data.copy()
+            group = obj.vertex_groups.get(part.bone_name)
         obj.vertex_groups.remove(group)
     if obj.parent is rig or obj.get(FOLLOW_MARK):
         obj.parent = None
@@ -1572,7 +1838,7 @@ def unbind_object(rig, part):
         del obj[FOLLOW_MARK]
     obj.matrix_world = world
     # Hung back from whatever it hung from before the rig took it.
-    home = bpy.data.objects.get(part.home_parent) if part.home_parent else None
+    home = home_of(part)
     if home is not None and home is not obj:
         keep_world(obj, home)
     return True
@@ -1658,6 +1924,10 @@ def own_action(obj):
     it takes them from every one of them. An object whose action is played by
     another ID too is given a copy of it - with its own slot, and nobody else's
     - to take its keys out of; the others keep theirs.
+
+    One of the object's own NLA strips that plays the action is another user,
+    muted or not, in a meta strip or not (Action Stash and Push Down leave
+    them): the keys came out of the strip too, and an NLA is never touched.
     """
     animation = obj.animation_data
     action = animation.action if animation is not None else None
@@ -1667,7 +1937,9 @@ def own_action(obj):
     others = [user for user in bpy.data.user_map(subset={action}, key_types={"ACTION"})
               .get(action, ())
               if not (isinstance(user, bpy.types.Object) and user.name == obj.name)]
-    if not others:
+    in_a_strip = any(strip.action is action for track in animation.nla_tracks
+                     for strip in clip_strips(track.strips, muted=True))
+    if not others and not in_a_strip:
         return
     identifier = slot.identifier
     mine = action.copy()
@@ -1885,25 +2157,28 @@ def moved_by_driver(obj):
         curve.data_path in TRANSFORM_PATHS and not curve.mute for curve in animation.drivers)
 
 
-def clip_strips(strips):
-    """The NLA strips among these that play an action and are not muted, those
-    inside a meta strip too."""
+def clip_strips(strips, muted=False):
+    """The NLA strips among these that play an action and are not muted - or,
+    with `muted`, every one that plays an action - those inside a meta strip
+    too."""
     for strip in strips:
-        if strip.mute:
+        if strip.mute and not muted:
             continue
         if strip.type == "META":
-            yield from clip_strips(strip.strips)
+            yield from clip_strips(strip.strips, muted)
         elif strip.action is not None:
             yield strip
 
 
 def moved_by_nla(obj):
-    """Whether an NLA strip that is not muted works an object's transform: one
-    that plays an action with a curve on it, for the slot the strip plays.
+    """Whether an NLA strip works an object's transform: one that plays an
+    action with a curve on it, for the slot the strip plays.
 
     The NLA is evaluated under the object's own action, and the rig plays
     against it all the same. A track muted, or put aside by another that is
-    soloed, plays nothing.
+    soloed, plays nothing. A strip that is muted on a track that plays is not
+    played, but Blender sets every channel it works to its default on every
+    frame: the part sits at the origin, and the rig fights that instead.
     """
     animation = obj.animation_data
     if animation is None or not animation.use_nla:
@@ -1914,7 +2189,7 @@ def moved_by_nla(obj):
     for track in tracks:
         if track.mute:
             continue
-        for strip in clip_strips(track.strips):
+        for strip in clip_strips(track.strips, muted=True):
             if any(curve.data_path in TRANSFORM_PATHS
                    for _bag, curve in slot_curves(strip.action, strip.action_slot)):
                 return True
@@ -1956,12 +2231,14 @@ def fighting_words(nla, driven):
     said = []
     if nla:
         one = len(nla) == 1
-        said.append("{:s} {:s} moved by {:s} of {:s} own, which {:s} the rig: mute or "
-                    "remove {:s} in the NLA editor, then Build.".format(
+        said.append("{:s} {:s} moved by {:s} of {:s} own, which {:s} the rig: in the NLA "
+                    "editor, mute {:s} {:s} (the checkbox on {:s}) or delete the {:s}, "
+                    "then Build.".format(
                         named(nla), "is" if one else "are",
                         "an NLA strip" if one else "NLA strips",
                         "its" if one else "their", "fights" if one else "fight",
-                        "it" if one else "them"))
+                        "its" if one else "their", "track" if one else "tracks",
+                        "the track" if one else "each", "strip" if one else "strips"))
     if driven:
         one = len(driven) == 1
         said.append("{:s} {:s} moved by {:s} on {:s}: remove {:s} in the Drivers editor, "
@@ -2219,9 +2496,12 @@ def catch_up(rig, data=None):
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
     let_go_of_deleted(data)
+    take_out_gone(rig, data)
     follow_renames(rig, data)
     point_at_objects(rig, data)
     own_actions(rig, data)
+    own_armature(rig)
+    own_curves(rig, data)
     now = rig.matrix_world.copy()
     if not data.seated:
         # A new rig, or one from before this was kept: it stands where it
@@ -2737,7 +3017,7 @@ def bind_loose(context, rig, data, leave=()):
             if obj is None or obj.parent is None or obj.parent is rig:
                 continue
             if not obj.get(FOLLOW_MARK):
-                part.home_parent = obj.parent.name
+                remember_home(part, obj.parent)
             else:
                 del obj[FOLLOW_MARK]
             keep_world(obj, None)
@@ -4855,8 +5135,11 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
     bl_description = ("Start a move from the bones selected in pose mode. Where "
                       "they stand now is recorded as Before")
     bl_options = {"REGISTER", "UNDO"}
+    # Not remembered from the last New Move, as the others would be: only the
+    # New Rig button asks for it, and left alone, Blender gave every plain New
+    # Move the choice of the last press, so each one started another rig.
     fresh: bpy.props.BoolProperty(
-        default=False,
+        default=False, options={"SKIP_SAVE"},
         description="Start a rig of its own rather than adding to the one "
                     "already being worked on")
 
@@ -5329,7 +5612,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             # which a copy of a follower brings with it.
             if (obj.parent is not None and obj.parent.type != "ARMATURE"
                     and not obj.get(FOLLOW_MARK)):
-                part.home_parent = obj.parent.name
+                remember_home(part, obj.parent)
         adopt_riders(move, {obj.name for obj, _joint, _rides in joining})
 
         def ride(count):
@@ -5382,10 +5665,14 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
+        meant = part_held(move, self.part)
         if not ready(self, rig, data) or not keeps_drags(self, data):
             return {"CANCELLED"}
+        rider = part_again(move, meant)
+        if rider is None:
+            return {"CANCELLED"}
         # A copied finger mirrors as one, by the setting on its first joint.
-        rider = copy_root(move, move.parts[self.part])
+        rider = copy_root(move, rider)
         rider.mirror = self.axis
         bpy.ops.rigmoves.build()
         data.report = ("'{:s}' mirrors its leader across {:s}.".format(
@@ -5398,7 +5685,8 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
 def take_riders_out(rig, move, names):
     """Take these riders out of a move: their constraints and drivers, their
     bones' curves, their binding, and the parts themselves. The bones are
-    swept by the next Build.
+    swept by the next Build. Any part can be taken out this way, a rider or
+    not: a deleted one is (take_out_gone).
 
     Their constraints, and with them their drivers, go before the bones do: a
     driver left on a bone that is gone is one Blender warns about on every
@@ -5451,12 +5739,14 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
+        meant = part_held(move, self.part)
         catch_up(rig, data)
-        if not keeps_drags(self, data):
+        rider = part_again(move, meant)
+        if rider is None or not keeps_drags(self, data):
             return {"CANCELLED"}
         # The joints riding on it go with it: left behind they would hang
         # from a bone about to be swept, and play only half a finger.
-        names = [p.name for p in copy_of(move, move.parts[self.part])]
+        names = [p.name for p in copy_of(move, rider)]
         take_riders_out(rig, move, names)
         # The build sweeps the bones, now that nothing claims them.
         bpy.ops.rigmoves.build()
@@ -6420,12 +6710,19 @@ class RIGMOVES_OT_drop_curve(bpy.types.Operator):
 
     @mentioning
     def execute(self, context):
+        # Which part is meant, kept to find it again once the rig is caught up
+        # (see part_held).
+        shown = rig_of(context)
+        moves = shown.rigmoves.moves if here(context, shown) else []
+        meant = None
+        if 0 <= self.index < len(moves) and 0 <= self.part < len(moves[self.index].parts):
+            meant = part_held(moves[self.index], self.part)
         _rig, data, move = move_at(context, self.index, self)
-        if move is None or not 0 <= self.part < len(move.parts):
+        part = part_again(move, meant) if move is not None and meant is not None else None
+        if part is None:
             return {"CANCELLED"}
         if not keeps_drags(self, data):
             return {"CANCELLED"}
-        part = move.parts[self.part]
         obj = part.path_curve
         part.path_curve = None
         if obj is not None:
@@ -7907,7 +8204,15 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         members = [part] + [p for p, _steps in chain_below(move, part)]
         for joint in members:
             obj = part_object(joint)
-            if not joint.has_before or obj is None or obj.type != "MESH":
+            # Each is said for what it is: a part from an older file can be left
+            # in its move with no object to stand for it.
+            if obj is None:
+                return self.refuse(data, "'{:s}' was deleted, so the chain cannot be "
+                                         "ringed.".format(short(plain_name(joint.name), 18)))
+            if obj.type != "MESH":
+                return self.refuse(data, "'{:s}' is not a mesh, so it cannot be ringed."
+                                         .format(short(joint.name, 18)))
+            if not joint.has_before:
                 return self.refuse(data, "'{:s}' has no Before recorded yet.".format(
                     short(joint.name, 18)))
         # Riding along on a built move is a Build, and Build puts a dragged
@@ -8425,6 +8730,11 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
         # is no reason to keep it.
         catch_up(rig, data)
         gone = []
+        # Those that hung from an object of their own before the rig took them,
+        # which is not there any more, are left standing free; that is said.
+        stranded = [(part.name, home_name(part)) for part in move.parts
+                    if part.kind == "OBJECT" and part.home_parent and home_of(part) is None
+                    and part_object(part) is not None]
         for pose_bone, constraint in our_constraints(rig, move):
             pose_bone.constraints.remove(constraint)
         # Objects this move bound get their freedom back: the group, the
@@ -8435,8 +8745,10 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
                 unhang(part)
             if part.kind != "OBJECT" or not part.bone_name:
                 continue
-            if unbind_object(rig, part):
-                gone.append(part.bone_name)
+            # Its bone goes with it whether or not its object is still there: a
+            # deleted part that leads riders stays for its bone.
+            unbind_object(rig, part)
+            gone.append(part.bone_name)
         # The handle's driver goes with the slider it writes. Left behind it
         # points at a property that is gone and a handle about to be, and
         # Blender complains about it on every update from then on.
@@ -8493,7 +8805,15 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
             bpy.ops.rigmoves.build()
         rig.update_tag()
         context.view_layer.update()
-        data.report = "Removed. The rig is back to how it was."
+        if len(stranded) == 1:
+            said = ("'{:s}' hung from '{:s}', which is gone, so it was left standing free."
+                    .format(short(stranded[0][0], 18), short(stranded[0][1], 18)))
+        elif stranded:
+            said = ("{:s} hung from objects that are gone, so they were left standing free."
+                    .format(named([name for name, _home in stranded])))
+        else:
+            said = "The rig is back to how it was."
+        data.report = "Removed. " + said
         return {"FINISHED"}
 
 
