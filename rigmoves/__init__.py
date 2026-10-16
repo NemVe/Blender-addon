@@ -5736,6 +5736,55 @@ def spread_words(what, order, groups, axis, both_ways, seed):
     return "at random (seed {:d})".format(seed)
 
 
+def sized_for(settings, rig, move, groups):
+    """The step to use for the order a Spread is set to (see sized_step).
+    `settings` is an operator, or what a dialog holds: anything with what,
+    order, axis, both_ways and seed."""
+    ranks = spread_ranks(rig, move, groups, settings.what, settings.order, settings.axis,
+                         settings.both_ways, settings.seed)
+    return sized_step(settings.what, max(ranks.values()))
+
+
+# Set while this add-on writes the Step itself, so that a write of its own is not
+# taken for a Step the user typed.
+SIZING = {"ours": False}
+
+
+def _spread_changed(self, context):
+    """A setting of the Spread dialog that changes the places the parts take -
+    Order, Both ways, Axis, Seed, By, Only the selected - was changed. Until a
+    Step has been typed, the Step is the one sized for the settings, so it is
+    sized again for these, and the dialog shows what OK is going to do: it was
+    sized once for the way the dialog opened, and a ring turned from both ways
+    to one way round was held at the limit by a step meant for half as many
+    places.
+
+    `self` here is the operator's properties, not the operator: Blender calls
+    this from the dialog, and from a script that passes the settings, where
+    `sizing` is not set and nothing is done.
+    """
+    if not self.sizing or SIZING["ours"]:
+        return
+    rig, _data, move = move_at(context, self.index)
+    if move is None:
+        return
+    groups = spread_groups(context, move, self.what, self.only_selected)
+    if not groups:
+        return
+    SIZING["ours"] = True
+    try:
+        self.step = sized_for(self, rig, move, groups)
+    finally:
+        SIZING["ours"] = False
+
+
+def _step_typed(self, context):
+    """The Step was changed. Unless this add-on did it, somebody typed it, and
+    it is theirs: it is no longer sized for the settings."""
+    if not SIZING["ours"]:
+        self.sizing = False
+
+
 class RIGMOVES_OT_spread(bpy.types.Operator):
     bl_idname = "rigmoves.spread"
     bl_label = "Spread"
@@ -5746,12 +5795,19 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
     index: bpy.props.IntProperty(options={"HIDDEN"})
     what: bpy.props.EnumProperty(items=SPREAD_WHAT, default="LEAD",
                                  options={"HIDDEN"})
+    # While it is on, the dialog keeps the Step sized for its settings: invoke
+    # sets it, and it is off for good once somebody types a Step of their own.
+    # Defined before the settings it follows, because Blender applies what a
+    # script passes in the order the properties are defined, not the order they
+    # were written in: a Step passed with the flag must be applied after it.
+    sizing: bpy.props.BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})
     # Not remembered from one use to the next: what is sensible for a Lead is
     # not for a Delay, and invoke picks the right ones.
     order: bpy.props.EnumProperty(name="Order", items=SPREAD_ORDERS,
-                                  default="AROUND", options={"SKIP_SAVE"})
+                                  default="AROUND", options={"SKIP_SAVE"},
+                                  update=_spread_changed)
     by: bpy.props.EnumProperty(
-        name="By", items=SPREAD_BY, default="STEP",
+        name="By", items=SPREAD_BY, default="STEP", update=_spread_changed,
         description="How the values are given: a start and a step for each "
                     "place in the order, or a first and a last with the rest "
                     "spread between them")
@@ -5764,7 +5820,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
                     "the leader")
     step: bpy.props.FloatProperty(
         name="Step", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
-        soft_max=50.0, precision=2, options={"SKIP_SAVE"},
+        soft_max=50.0, precision=2, options={"SKIP_SAVE"}, update=_step_typed,
         description="What each place in the order adds to the one before. For "
                     "Leads, below 0 each waits more than the one before it and "
                     "above 0 each goes earlier; for Delays, above 0 each waits "
@@ -5777,22 +5833,27 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         name="Last", default=0.0, min=-1000.0, max=1000.0, soft_min=-50.0,
         soft_max=50.0, precision=2, options={"SKIP_SAVE"},
         description="The value for the part that comes last in the order")
+    # Neither is remembered from the last use. Both ways was, and the smart
+    # default invoke gives it only ever worked the first time; Only the selected
+    # was, and after a spread of Delays it quietly reached only the riders a Ring
+    # had left selected, which is what 0.17 stopped it doing.
     both_ways: bpy.props.BoolProperty(
-        name="Both ways", default=False,
+        name="Both ways", default=False, options={"SKIP_SAVE"}, update=_spread_changed,
         description="Fold the ring in half, so the two sides of it match: "
                     "the parts either side of the start go together")
     only_selected: bpy.props.BoolProperty(
-        name="Only the selected", default=False,
+        name="Only the selected", default=False, options={"SKIP_SAVE"},
+        update=_spread_changed,
         description="Spread only the parts that are selected now. Off, it is "
                     "every rider (or every part) of the move")
-    axis: bpy.props.EnumProperty(name="Axis", items=AXIS_ITEMS, default="X")
-    seed: bpy.props.IntProperty(name="Seed", default=1, min=0, max=100000)
+    axis: bpy.props.EnumProperty(name="Axis", items=AXIS_ITEMS, default="X",
+                                 update=_spread_changed)
+    seed: bpy.props.IntProperty(name="Seed", default=1, min=0, max=100000,
+                                update=_spread_changed)
 
     def sized(self, rig, move, groups):
         """The step to use when none was given: see sized_step."""
-        ranks = spread_ranks(rig, move, groups, self.what, self.order, self.axis,
-                             self.both_ways, self.seed)
-        return sized_step(self.what, max(ranks.values()))
+        return sized_for(self, rig, move, groups)
 
     def plan(self, context):
         """(rig, data, move, groups) - or None, with the reason said."""
@@ -5839,7 +5900,14 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         if self.what == "LEAD" and not props.is_property_set("both_ways"):
             self.both_ways = self.order == "AROUND"
         if not props.is_property_set("step"):
-            self.step = self.sized(rig, move, groups)
+            SIZING["ours"] = True
+            try:
+                self.step = self.sized(rig, move, groups)
+            finally:
+                SIZING["ours"] = False
+            # From here the dialog keeps it sized as its settings are changed,
+            # until a Step is typed (see _spread_changed).
+            self.sizing = True
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):

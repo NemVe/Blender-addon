@@ -268,6 +268,17 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
   place would pass 40 of 50 (Lead) or 0.9 of 0.99 (Delay). `invoke` also turns
   Both ways on for Leads around a ring when it was not set; `execute` does not
   (scripts keep the literal default). Ring's `lead_step` stays 0 unless typed.
+  **The dialog keeps the step sized** (0.19): `invoke` writes it and sets the
+  hidden SKIP_SAVE `sizing` flag; the `update=` callback `_spread_changed` on Order,
+  By, Both ways, Only the selected, Axis and Seed sizes it again (`sized_for`, which
+  the operator's `sized` calls too) while `sizing` is on, and `_step_typed` on Step
+  turns it off - unless the write is ours (`SIZING["ours"]`). Blender calls these
+  with `self` = the operator's PROPERTIES (no methods, no `plan`), and also when a
+  script passes the settings, which then leave `sizing` off and are untouched.
+  Blender applies a script's keywords in the order the properties are DEFINED, not
+  written: `sizing` is defined before the settings it follows, and a Step passed
+  with them is applied after it. Both ways and Only the selected are SKIP_SAVE,
+  or Blender restores them (as "set") on the next invoke.
   Writes set `WRITING["many"]` so `_timing_changed` skips, and the caller runs
   `refresh_drivers` once; a built move plays the new values with no Build.
   - Leads go to *copy roots* (`copy_root`): a copied finger has one Lead, its

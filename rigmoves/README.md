@@ -351,9 +351,13 @@ want to type a number into every row.
   when the last place would run past 40 of the 50 a Lead can be (or 0.9 of the
   0.99 a Delay can be), because a wave that is held at the limit stops dead
   there: twelve spikes one way round get -3, both ways -6, eight petals both ways
-  keep -10. For Leads **Around a ring** opens with **Both ways** on. A Step you
-  type is kept as you typed it, and what it holds at the limit is still counted.
-  Below 0 each
+  keep -10. For Leads **Around a ring** opens with **Both ways** on. The Step
+  follows the dialog while you have not typed one: untick **Both ways**, or change
+  the **Order**, **Axis**, **Seed**, **By** or **Only the selected**, and the field
+  reads the Step that fits now, before you press OK (twelve spikes: -6.00, and -3.00
+  with Both ways unticked). A Step you type is kept as you typed it, whatever you
+  change after, and what it holds at the limit is still counted. The dialog does
+  not remember **Both ways** or **Only the selected** from the last time. Below 0 each
   rider waits more than the one before it, above 0 each goes earlier; for Delays
   each waits that much longer. It is a *step*, so adding a petal gives it the next
   value and leaves the rest as they were - **+10 each** is +10, +20, +30 whether
@@ -1285,6 +1289,17 @@ and one lifted 1 m:
   sentence of its own that names it and says what to do, in Fill the gaps and in Use
   what's there. Use what's there no longer says "Fill the gaps would copy the part
   there" when Fill the gaps would be turned down.
+- **Spread kept a Step sized for the settings the dialog opened with.** The Step is
+  sized to fit when the dialog opens, and changing **Both ways**, **Order**,
+  **Axis**, **Seed**, **By** or **Only the selected** afterwards kept it, so the
+  riders were held at the limit: twelve spikes one way round got -6 instead of -3,
+  dominoes along an axis -10 instead of -5, and the end of the wave stopped dead. The
+  Step now follows those settings, and the dialog shows the new one before you press
+  OK, until you type a Step of your own, which is kept. The dialog also stopped
+  remembering **Both ways** and **Only the selected** from the last time: the smart
+  default of Both ways worked only the first time, and an **Only the selected** left
+  on after a spread of Delays reached only the riders Ring had left selected, which
+  is what 0.17 had stopped it doing.
 
 ## Known rough edges
 

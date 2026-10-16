@@ -6126,6 +6126,196 @@ def drift_of(points, expected):
     return max((a - b).length for a, b in zip(points, expected))
 
 
+class TestSpreadDialogFollowsItsSettings(CopyThatCase):
+    """The dialog sizes its Step for the way it opens. Until somebody types a Step
+    of their own, every setting that changes the places the parts take sizes it
+    again, so what the dialog shows is what OK does. The callbacks Blender runs
+    when a field is changed are run here by hand, against what the dialog holds."""
+
+    def lifted(self, objects):
+        select(*objects)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj in objects:
+            obj.location.z += 1.0
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def ride(self, leader, where, name):
+        obj = cube(name, where)
+        select(leader, obj)
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader=leader.name,
+                                                     rig_name=rig().name), {"FINISHED"})
+        return obj
+
+    def crown(self, count=11):
+        """A leader on a ring of count + 1 places, and a rider on each of the rest."""
+        places = ring_places((2.0, 1.0, 3.0), count + 1, 3.0)
+        self.leader = cube("Leader", places.pop(0))
+        self.lifted([self.leader])
+        self.riders = [self.ride(self.leader, where, "R{:d}".format(number))
+                       for number, where in enumerate(places)]
+        select(self.leader)
+
+    def dominoes(self, count=8):
+        """A leader at one end of a row along X, and a rider on each of the next places."""
+        self.leader = cube("Leader", (0.0, 0.0, 0.0))
+        self.lifted([self.leader])
+        self.riders = [self.ride(self.leader, (float(number + 1), 0.0, 0.0),
+                                 "R{:d}".format(number)) for number in range(count)]
+        select(self.leader)
+
+    def leads(self):
+        return [p.lead for p in self.move.parts if p.leader]
+
+    @staticmethod
+    def dialog(what="LEAD", **given):
+        """What Spread... holds when its dialog is opened (invoke has run), and
+        how it was run: `given` are settings the caller passed, which are set."""
+        stand_in = types.SimpleNamespace(
+            index=0, what=what, order="AROUND", axis="X", seed=1, only_selected=False,
+            both_ways=False, start=0.0, step=0.0, first=0.0, last=0.0, by="STEP",
+            sizing=False, report=lambda *args: None,
+            properties=types.SimpleNamespace(is_property_set=lambda name: name in given))
+        for name, value in given.items():
+            setattr(stand_in, name, value)
+        stand_in.plan = lambda context: rigmoves.RIGMOVES_OT_spread.plan(stand_in, bpy.context)
+        stand_in.sized = lambda *args: rigmoves.RIGMOVES_OT_spread.sized(stand_in, *args)
+        opened = types.SimpleNamespace(
+            window_manager=types.SimpleNamespace(invoke_props_dialog=lambda op: {"RUNNING_MODAL"}),
+            scene=bpy.context.scene, view_layer=bpy.context.view_layer,
+            selected_objects=bpy.context.selected_objects, selected_pose_bones=None)
+        assert rigmoves.RIGMOVES_OT_spread.invoke(stand_in, opened, None) == {"RUNNING_MODAL"}
+        return stand_in
+
+    @staticmethod
+    def change(dialog, **settings):
+        """A field changed in the dialog: what Blender does, and then calls."""
+        for name, value in settings.items():
+            setattr(dialog, name, value)
+            if name == "step":
+                rigmoves._step_typed(dialog, bpy.context)
+            else:
+                rigmoves._spread_changed(dialog, bpy.context)
+
+    def test_unticking_both_ways_sizes_the_step_again(self):
+        # Twelve spikes: one way round there are eleven places, and ten each
+        # would hold the last six at the limit. Both ways it is -6, and one way -3.
+        self.crown()
+        dialog = self.dialog()
+        self.assertTrue(dialog.both_ways)
+        self.assertEqual(dialog.step, -6.0)
+        self.change(dialog, both_ways=False)
+        self.assertEqual(dialog.step, -3.0)
+        self.change(dialog, both_ways=True)
+        self.assertEqual(dialog.step, -6.0)
+
+    def test_changing_the_order_sizes_the_step_again(self):
+        # Dominoes in a row: round a ring, both ways, the places are few and
+        # ten each fits. Along an axis there are eight, and it is -5.
+        self.dominoes()
+        dialog = self.dialog()
+        self.assertEqual(dialog.step, -10.0)
+        self.change(dialog, order="AXIS")
+        self.assertEqual(dialog.step, -5.0)
+        self.change(dialog, order="DISTANCE")
+        self.assertEqual(dialog.step, -5.0)
+        self.change(dialog, order="AROUND")
+        self.assertEqual(dialog.step, -10.0)
+
+    def test_only_the_selected_sizes_the_step_for_those(self):
+        self.crown()
+        dialog = self.dialog()
+        self.assertEqual(dialog.step, -6.0)
+        select(self.riders[0], self.riders[1], self.riders[2])
+        self.change(dialog, only_selected=True)
+        self.assertEqual(dialog.step, -10.0)
+        self.change(dialog, only_selected=False)
+        self.assertEqual(dialog.step, -6.0)
+
+    def test_axis_seed_and_by_keep_the_step_sized_too(self):
+        self.dominoes()
+        dialog = self.dialog()
+        self.change(dialog, order="AXIS")
+        self.assertEqual(dialog.step, -5.0)
+        # Along Y the row stands in one place: nobody waits for anybody.
+        self.change(dialog, axis="Y")
+        self.assertEqual(dialog.step, -10.0)
+        for setting in ({"axis": "X"}, {"seed": 7}, {"by": "RANGE"}, {"by": "STEP"}):
+            self.change(dialog, **setting)
+            self.assertEqual(dialog.step, -5.0, setting)
+        # Random deals out the places, none shared: the same count as along X.
+        self.change(dialog, order="RANDOM")
+        self.assertEqual(dialog.step, -5.0)
+        self.change(dialog, seed=3)
+        self.assertEqual(dialog.step, -5.0)
+
+    def test_a_step_that_was_typed_is_kept(self):
+        self.crown()
+        dialog = self.dialog()
+        self.change(dialog, step=-8.0)
+        self.assertFalse(dialog.sizing)
+        self.change(dialog, both_ways=False)
+        self.change(dialog, order="DISTANCE")
+        self.change(dialog, only_selected=True)
+        self.assertEqual(dialog.step, -8.0)
+
+    def test_the_dialogs_own_writes_are_not_taken_for_a_typed_step(self):
+        self.crown()
+        dialog = self.dialog()
+        self.assertTrue(dialog.sizing)
+        self.change(dialog, both_ways=False)
+        self.assertTrue(dialog.sizing)
+        # And once typed over, the dialog's own sizing is no longer the one in force.
+        self.change(dialog, step=-4.0)
+        self.change(dialog, both_ways=True)
+        self.assertEqual(dialog.step, -4.0)
+
+    def test_a_step_the_caller_gave_is_never_sized(self):
+        self.crown()
+        dialog = self.dialog(step=-7.0)
+        self.assertFalse(dialog.sizing)
+        self.change(dialog, both_ways=False)
+        self.assertEqual(dialog.step, -7.0)
+
+    def test_the_callbacks_are_wired_to_the_properties_of_the_operator(self):
+        # Through Blender's own machinery: the settings a script passes call
+        # them, and with the dialog's flag on, the Step is sized as the last of
+        # them leaves things.
+        self.crown()
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", sizing=True, order="AROUND", both_ways=True), {"FINISHED"})
+        self.assertEqual(self.leads(), [-6 * n for n in range(1, 7)] + [-30, -24, -18, -12, -6])
+        self.assertIn("in steps of -6 from 0,", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", sizing=True, order="AROUND", both_ways=False), {"FINISHED"})
+        self.assertEqual(self.leads(), [-3 * n for n in range(1, 12)])
+        self.assertIn("in steps of -3 from 0,", rig().rigmoves.report)
+        # A Step passed with them is the caller's, and is kept.
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", sizing=True, order="AROUND", step=-10.0, both_ways=False),
+            {"FINISHED"})
+        self.assertEqual(self.leads(), [-10, -20, -30, -40] + [-50] * 7)
+
+    def test_a_script_that_does_not_open_a_dialog_is_not_touched(self):
+        self.crown()
+        self.assertEqual(bpy.ops.rigmoves.spread(
+            index=0, what="LEAD", order="AROUND", both_ways=False), {"FINISHED"})
+        self.assertEqual(self.leads(), [-3 * n for n in range(1, 12)])
+        self.assertIn("(sized to fit)", rig().rigmoves.report)
+
+    def test_both_ways_and_only_the_selected_are_not_remembered(self):
+        # Blender keeps every property of an operator that is not marked
+        # otherwise, for the next time the dialog opens: Both ways, whose smart
+        # default then worked only the first time, and Only the selected, which
+        # a spread of Delays left on for the next spread of Leads.
+        props = bpy.ops.rigmoves.spread.get_rna_type().properties
+        for name in ("order", "start", "step", "first", "last", "both_ways",
+                     "only_selected", "sizing"):
+            self.assertTrue(props[name].is_skip_save, name)
+        self.assertTrue(props["sizing"].is_hidden)
+
+
 class TestRingDuplicateOnTop(RingFlows):
     """Shift+D, then a right-click to cancel the move, leaves a copy exactly on
     the part. That is not a copy off the ring - the advice for those, the centre
