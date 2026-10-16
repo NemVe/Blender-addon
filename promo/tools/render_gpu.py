@@ -10,6 +10,7 @@ survives a crash and can be resumed from the last frame, and ffmpeg encodes
 it afterwards.
 """
 
+import os
 import sys
 import time
 
@@ -52,7 +53,8 @@ if hasattr(settings, "media_type"):
 settings.file_format = "PNG"
 settings.color_mode = "RGB"
 settings.color_depth = "16"
-scene.render.filepath = out.rstrip("/\\") + "/" + prefix
+# Blender reads a relative path from the drive root, not the current folder.
+scene.render.filepath = os.path.abspath(out).rstrip("/\\") + "/" + prefix
 if first is not None:
     scene.frame_start, scene.frame_end = first, last
 start = time.time()

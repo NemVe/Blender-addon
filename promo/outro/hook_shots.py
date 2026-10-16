@@ -58,7 +58,8 @@ def arguments():
         i += 1
     if out is None:
         raise SystemExit("give an output folder")
-    return out, shots, samples, stills, percent
+    # Blender reads a relative path from the drive root, not the current folder.
+    return os.path.abspath(out), shots, samples, stills, percent
 
 
 def use_gpu(scene):
