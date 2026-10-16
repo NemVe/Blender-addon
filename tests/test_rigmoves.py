@@ -7093,6 +7093,12 @@ class TestRingAnimatedChild(RingFlows):
         # the fault the blocker keeps away, to show the others test something.
         self.modelled_flower()
         bee = self.hang("Bee", self.petals[3])
+        # Hung before its petal was moved, as a child often is: the inverse it
+        # hangs by does not cancel the petal's matrix. (One that does is held
+        # whole when its parent is stood on a frame - hung from it anew - and
+        # keys on it, which are then the world's, play as before.)
+        bee.matrix_parent_inverse = Matrix.Translation((0.5, 0.0, 0.0)) @ bee.matrix_parent_inverse
+        bpy.context.view_layer.update()
         self.key_a_flight(bee)
         was = self.seen_at([bee])
         with mock.patch.object(rigmoves, "has_own_motion", lambda obj: False):
@@ -8301,8 +8307,9 @@ class TestAReframedPart(ChestCase):
         select(self.lid)
         self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
         self.assertIn("was given a new origin, scale or rotation after it was bound, and "
-                      "cannot be put back safely: press Ctrl+Z to undo that, or take it "
-                      "out of its move (x) and add it again.", rig().rigmoves.report)
+                      "cannot be put back safely (it has constraints): press Ctrl+Z to undo "
+                      "that, or take it out of its move (x) and add it again.",
+                      rig().rigmoves.report)
         self.assertEqual(self.lid.data.name, was[2])
         self.assertTrue(rigmoves.same_matrix(self.lid.matrix_world, was[0], 1e-9))
         self.assertEqual(rigmoves.mesh_points(self.lid), was[1])
@@ -8826,6 +8833,1584 @@ class TestManifest(unittest.TestCase):
         # but the copy in the tree must not be left behind either.
         self.assertEqual(self.manifest_line("version"),
                          ".".join(map(str, rigmoves.bl_info["version"])))
+
+
+class TestTheMarksAMeshIsToldBy(CopyThatCase):
+    """The three vertices a part is told by, which it picks to stand far apart."""
+
+    def mesh_of(self, points):
+        mesh = bpy.data.meshes.new("Marked")
+        mesh.from_pydata(points, [], [])
+        mesh.update()
+        return mesh
+
+    def scatter(self, count=60):
+        # Distinct distances everywhere, so that no choice is a tie.
+        return [(3.0 * math.sin(1.3 * n + 0.2), 2.0 * math.cos(2.1 * n) + 0.01 * n,
+                 1.5 * math.sin(0.7 * n * n + 1.0)) for n in range(count)]
+
+    def test_they_are_far_from_the_middle_from_one_another_and_from_a_line(self):
+        points = self.scatter()
+        mesh = self.mesh_of(points)
+        first, second, third = rigmoves.spread_vertices(mesh.vertices)
+        vectors = [Vector(p) for p in points]
+        middle = sum(vectors, Vector()) / len(vectors)
+        self.assertEqual(first, max(range(len(vectors)),
+                                    key=lambda n: (vectors[n] - middle).length))
+        self.assertEqual(second, max(range(len(vectors)),
+                                     key=lambda n: (vectors[n] - vectors[first]).length))
+        line = (vectors[second] - vectors[first]).normalized()
+        self.assertEqual(third, max(range(len(vectors)), key=lambda n: (
+            (vectors[n] - vectors[first]) - line * (vectors[n] - vectors[first]).dot(line)).length))
+
+    def test_without_numpy_the_same_three_are_picked(self):
+        mesh = self.mesh_of(self.scatter())
+        wanted = rigmoves.spread_vertices(mesh.vertices)
+        with mock.patch.dict(sys.modules, {"numpy": None}):
+            self.assertEqual(rigmoves.spread_vertices(mesh.vertices), wanted)
+
+    def test_a_part_with_fewer_than_three_vertices_has_no_marks(self):
+        obj = bpy.data.objects.new("Two", self.mesh_of([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]))
+        bpy.context.scene.collection.objects.link(obj)
+        data = types.SimpleNamespace(before=rigmoves.flat(Matrix.Identity(4)), rest_count=7,
+                                     rest_which=(1, 2, 3), rest_marks=[0.0] * 9)
+        rigmoves.note_rest(data, obj)
+        self.assertEqual((data.rest_count, tuple(data.rest_which)), (0, (-1, -1, -1)))
+
+    def test_a_mesh_in_a_line_is_marked_but_never_taken_for_framed_differently(self):
+        line = [(float(n), 2.0 * n, -float(n)) for n in range(6)]
+        obj = bpy.data.objects.new("Line", self.mesh_of(line))
+        bpy.context.scene.collection.objects.link(obj)
+        bpy.context.view_layer.update()
+        holder = bpy.data.objects.new("Rig", bpy.data.armatures.new("Rig"))
+        bpy.context.scene.collection.objects.link(holder)
+        part = holder.rigmoves.moves.add().parts.add()
+        part.name, part.kind, part.object = "Line", "OBJECT", obj
+        rigmoves.take_before(part, obj)
+        self.assertEqual(part.rest_count, 6)
+        obj.location.x += 1.0
+        bpy.context.view_layer.update()
+        self.assertIsNone(rigmoves.was_reframed(part, obj))
+
+
+class TestAReframedPartThenDragged(ChestCase):
+    """The origin of a built lid is set, or its scale applied, and the lid is
+    then dragged to a new After before any CopyThat button is pressed. The two
+    changes were taken for a drag, together: Record said "moved by hand, read
+    as a pose", and the lid stood a whole lid off at rest."""
+
+    SAID = "had its origin, scale or rotation changed after it was bound"
+
+    def reframe_with_the_cursor(self):
+        bpy.context.scene.cursor.location = Vector((0.7, 0.3, 1.4))
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def apply(self, **kinds):
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.transform_apply(**kinds), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def drag_open(self, degrees):
+        self.lid.matrix_world = turn_about(self.hinge, "X", -degrees) @ self.lid.matrix_world
+        bpy.context.view_layer.update()
+
+    def record_and_build(self, degrees):
+        """Record After and Build, and check the lid. Returns what Record said."""
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        said = rig().rigmoves.report
+        # The drag is the one thing moved by hand.
+        self.assertIn("1 moved by hand", said)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_swing(degrees)
+        return said
+
+    def check_swing(self, degrees):
+        """The lid where it stood at slider 0, and `degrees` open at 1."""
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE, "at rest")
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.lid, [turn_about(self.hinge, "X", -degrees) @ p
+                                         for p in self.shut]), TOLERANCE, "open")
+        drive(self.move, 0.0)
+
+    def test_set_origin_then_a_drag_is_recorded_as_the_drag_alone(self):
+        self.reframe_with_the_cursor()
+        self.drag_open(70.0)
+        said = self.record_and_build(70.0)
+        self.assertIn(self.SAID, said)
+        self.assertIn("It had been moved as well, and that move was kept.", said)
+
+    def test_apply_scale_then_a_drag_is_recorded_as_the_drag_alone(self):
+        self.apply(location=False, rotation=False, scale=True)
+        self.drag_open(70.0)
+        self.record_and_build(70.0)
+
+    def test_apply_all_then_a_drag_is_recorded_as_the_drag_alone(self):
+        self.apply(location=True, rotation=True, scale=True)
+        self.drag_open(70.0)
+        self.record_and_build(70.0)
+
+    def test_a_button_that_would_build_says_the_drag_is_not_recorded_yet(self):
+        # The drag is a drag, whatever else the lid went through: a button that
+        # would Build asks for it to be recorded first, and nothing is lost.
+        self.reframe_with_the_cursor()
+        self.drag_open(70.0)
+        bpy.context.scene.cursor.location = self.hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"CANCELLED"})
+        self.assertIn("moved and not recorded", rig().rigmoves.report)
+        self.record_and_build(70.0)
+
+    def test_a_lid_scaled_the_other_way_round_before_its_first_build(self):
+        # Another lid, scaled (1.2, 1, 0.8), hinged on its own back edge.
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        lid = cube("Lid", (0.0, 0.0, 1.1))
+        lid.scale = (1.2, 1.0, 0.8)
+        bpy.context.view_layer.update()
+        home = lid.matrix_world.copy()
+        hinge = Vector((0.0, 0.5, 0.7))
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        bpy.context.scene.cursor.location = hinge
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        lid.matrix_world = turn_about(hinge, "X", -100.0) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        shut = rest_points(lid)
+        select(lid)
+        self.assertEqual(bpy.ops.object.transform_apply(location=False, rotation=False,
+                                                        scale=True), {"FINISHED"})
+        lid.matrix_world = turn_about(hinge, "X", -70.0) @ lid.matrix_world
+        bpy.context.view_layer.update()
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(move, 0.0)
+        self.assertLess(drift(lid, shut), TOLERANCE)
+        drive(move, 1.0)
+        self.assertLess(drift(lid, [turn_about(hinge, "X", -70.0) @ p for p in shut]), TOLERANCE)
+
+    def test_a_part_marked_the_old_way_is_still_read_as_reframed(self):
+        # A file from 0.19.0 names no vertices: its three are the first, a third
+        # of the way through and two thirds.
+        part = self.move.parts["Lid"]
+        old = rigmoves.marked_vertices(len(self.lid.data.vertices))
+        part.rest_which = (-1, -1, -1)
+        part.rest_marks = [c for index in old for c in
+                           rigmoves.as_matrix(part.before) @ self.lid.data.vertices[index].co]
+        self.reframe_with_the_cursor()
+        self.drag_open(70.0)
+        said = self.record_and_build(70.0)
+        self.assertIn(self.SAID, said)
+        self.assertEqual(tuple(part.rest_which), (-1, -1, -1))
+
+    def test_the_marks_stand_far_apart(self):
+        # The three vertices a part is told by span the mesh: not neighbours,
+        # not in a line. (The first three of a cube's eight are two edges.)
+        part = self.move.parts["Lid"]
+        which = tuple(part.rest_which)
+        self.assertEqual(len(set(which)), 3)
+        points = [self.lid.data.vertices[index].co for index in which]
+        self.assertGreater((points[1] - points[0]).length, 1.5)
+        self.assertGreater((points[2] - points[0]).cross(points[1] - points[0]).length, 1.0)
+
+
+class TestAReframedChainJoint(CopyThatCase):
+    """The origin of a built forearm is set, then the upper arm is turned by
+    hand. The forearm is carried by the upper arm and was not touched, but with
+    its frame changed it read as dragged by a whole forearm."""
+
+    SHOULDER, ELBOW = Vector((0.0, 0.0, 1.0)), Vector((2.0, 0.0, 1.0))
+
+    def setUp(self):
+        super().setUp()
+        self.upper = cube("Upper", (1.0, 0.0, 1.0))
+        self.upper.scale = (2.0, 0.3, 0.3)
+        self.fore = cube("Fore", (3.0, 0.0, 1.0))
+        self.fore.scale = (2.0, 0.25, 0.25)
+        bpy.context.view_layer.update()
+        self.home = {o.name: o.matrix_world.copy() for o in (self.upper, self.fore)}
+        self.shut = {o.name: rest_points(o) for o in (self.upper, self.fore)}
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj, where in ((self.upper, self.SHOULDER), (self.fore, self.ELBOW)):
+            bpy.context.scene.cursor.location = where
+            select(obj)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.upper.matrix_world = turn_about(self.SHOULDER, "Y", 30.0) @ self.home["Upper"]
+        bpy.context.view_layer.update()
+        select(self.upper)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def test_set_origin_on_the_forearm_then_the_upper_arm_turned(self):
+        bpy.context.scene.cursor.location = Vector((2.7, 0.2, 1.3))
+        select(self.fore)
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        turn = turn_about(self.SHOULDER, "Y", 45.0)
+        self.upper.matrix_world = turn @ self.home["Upper"]
+        bpy.context.view_layer.update()
+        select(self.upper)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        said = rig().rigmoves.report
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 0.0)
+        for name in ("Upper", "Fore"):
+            self.assertLess(drift(bpy.data.objects[name], self.shut[name]), TOLERANCE, name)
+        drive(self.move, 1.0)
+        for name in ("Upper", "Fore"):
+            self.assertLess(drift(bpy.data.objects[name], [turn @ p for p in self.shut[name]]),
+                            TOLERANCE, name)
+        drive(self.move, 0.0)
+        # The upper arm was turned by hand; the forearm was only carried.
+        self.assertIn("1 moved by hand", said)
+
+
+class TestAReframedPartNotBuiltYet(CopyThatCase):
+    """A part that has a Before but no bone yet - between New Move and the
+    first Build, or added to a built move with Add To This Group - had its
+    origin set or its scale applied: the first Build moved it, by a whole part,
+    and said it had worked."""
+
+    def coin(self, location=(0.3, 0.0, 0.6)):
+        coin = cube("Coin", location)
+        coin.scale = (0.3, 0.2, 0.05)
+        bpy.context.view_layer.update()
+        return coin
+
+    def set_origin(self, obj):
+        bpy.context.scene.cursor.location = obj.matrix_world.translation + Vector((0.4, 0.3, 0.2))
+        select(obj)
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def apply_scale(self, obj):
+        select(obj)
+        self.assertEqual(bpy.ops.object.transform_apply(location=False, rotation=False,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_set_origin_before_the_first_build_moves_nothing(self):
+        coin = self.coin()
+        where = rest_points(coin)
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.set_origin(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertLess(drift(coin, where), TOLERANCE)
+
+    def test_apply_scale_before_the_first_build_moves_nothing(self):
+        coin = self.coin()
+        where = rest_points(coin)
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.apply_scale(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertLess(drift(coin, where), TOLERANCE)
+
+    def test_a_part_added_to_a_built_move_and_given_a_new_origin_moves_nothing(self):
+        lid = cube("Lid", (0.0, 0.0, 1.1))
+        lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        lid.matrix_world = turn_about(Vector((0.0, 0.6, 1.0)), "X", -90.0) @ lid.matrix_world
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for kind in ("origin", "scale"):
+            coin = self.coin()
+            coin.name = "Coin " + kind
+            where = rest_points(coin)
+            select(coin, lid)
+            self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                             {"FINISHED"})
+            if kind == "origin":
+                self.set_origin(coin)
+            else:
+                self.apply_scale(coin)
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+            self.assertLess(drift(coin, where), TOLERANCE, kind)
+
+    def test_set_origin_then_a_drag_before_the_first_build_is_the_drag_alone(self):
+        hinge = Vector((0.0, 0.6, 1.0))
+        lid = cube("Lid", (0.0, 0.0, 1.1))
+        lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        shut = rest_points(lid)
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        bpy.context.scene.cursor.location = hinge
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.set_origin(lid)
+        lid.matrix_world = turn_about(hinge, "X", -70.0) @ lid.matrix_world
+        bpy.context.view_layer.update()
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        drive(move, 0.0)
+        self.assertLess(drift(lid, shut), TOLERANCE)
+        drive(move, 1.0)
+        self.assertLess(drift(lid, [turn_about(hinge, "X", -70.0) @ p for p in shut]), TOLERANCE)
+
+
+class TestAnEditedMeshThenANewOrigin(ChestCase):
+    """The mesh of a built lid is edited in Edit Mode - a vertex nudged, or the
+    mesh subdivided - and then the lid is given a new origin. The marks that tell
+    a part framed another way from one dragged were never taken again, so the
+    lid was put back as if the edit had not been made: 0.82 m off at rest."""
+
+    CURSOR = Vector((0.7, 0.3, 1.4))
+
+    def edit(self, how):
+        """Edit the lid's mesh in Edit Mode and come out, as a user does."""
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        editing = bmesh.from_edit_mesh(self.lid.data)
+        editing.verts.ensure_lookup_table()
+        if how == "nudge":
+            # Vertices the part is told by: the first of its three, and the first
+            # vertex, which a part from 0.19.0 was told by.
+            part = self.move.parts["Lid"]
+            for index in {0, getattr(part, "rest_which", (0,))[0]}:
+                editing.verts[index].co.x += 0.1
+        else:
+            bmesh.ops.subdivide_edges(editing, edges=list(editing.edges), cuts=1,
+                                      use_grid_fill=True)
+        bmesh.update_edit_mesh(self.lid.data)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def set_origin_and_build(self):
+        """Set Origin to the cursor, Build, and where the lid stands at 0."""
+        seen = world_points(self.lid)
+        bpy.context.scene.cursor.location = self.CURSOR
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.lid, seen), TOLERANCE)
+
+    def test_a_nudged_marked_vertex_then_set_origin_moves_nothing(self):
+        self.edit("nudge")
+        self.set_origin_and_build()
+
+    def test_a_subdivided_lid_then_set_origin_moves_nothing(self):
+        self.edit("subdivide")
+        self.assertEqual(len(self.lid.data.vertices), 26)
+        self.set_origin_and_build()
+
+    def test_the_marks_are_taken_again_as_soon_as_edit_mode_is_left(self):
+        part = self.move.parts["Lid"]
+        was = list(part.rest_marks)
+        self.assertTrue(rigmoves.marks_fit(part, self.lid))
+        self.edit("nudge")
+        self.assertTrue(rigmoves.marks_fit(part, self.lid))
+        self.assertNotEqual(list(part.rest_marks), was)
+        self.assertIn(rigmoves.marks_handler, bpy.app.handlers.depsgraph_update_post)
+
+    def test_a_button_takes_them_again_when_nothing_else_has(self):
+        bpy.app.handlers.depsgraph_update_post.remove(rigmoves.marks_handler)
+        self.addCleanup(bpy.app.handlers.depsgraph_update_post.append, rigmoves.marks_handler)
+        part = self.move.parts["Lid"]
+        self.edit("nudge")
+        self.assertFalse(rigmoves.marks_fit(part, self.lid))
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=False), {"FINISHED"})
+        self.assertTrue(rigmoves.marks_fit(part, self.lid))
+        self.set_origin_and_build()
+
+    def test_a_model_moved_as_a_whole_and_then_edited_is_told_from_one_dragged(self):
+        # No button has caught the rig up yet: the lid stands where the model's
+        # move has carried its Before, which is as good as on it.
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(4.0, 1.0, 0.0)), {"FINISHED"})
+        self.assertEqual(bpy.ops.transform.rotate(value=math.radians(40.0), orient_axis="Z"),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+        part = self.move.parts["Lid"]
+        self.edit("nudge")
+        self.assertTrue(rigmoves.marks_fit(part, self.lid, rigmoves.moved_since(
+            rig(), rig().rigmoves)))
+        self.set_origin_and_build()
+
+    def test_and_so_when_a_button_is_what_notices_the_move_and_the_edit(self):
+        bpy.app.handlers.depsgraph_update_post.remove(rigmoves.marks_handler)
+        self.addCleanup(bpy.app.handlers.depsgraph_update_post.append, rigmoves.marks_handler)
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(4.0, 1.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.edit("nudge")
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=False), {"FINISHED"})
+        self.set_origin_and_build()
+
+    def test_a_part_off_its_before_keeps_its_marks(self):
+        # Dragged, it cannot be told from a part with its mesh changed.
+        part = self.move.parts["Lid"]
+        was = list(part.rest_marks)
+        self.lid.location.z += 0.5
+        bpy.context.view_layer.update()
+        rigmoves.retake_marks(self.move.id_data.rigmoves)
+        self.assertEqual(list(part.rest_marks), was)
+
+    def test_playback_does_not_retake_marks(self):
+        # Frames that deform the lid put no mesh among the updates.
+        handle = rig().pose.bones[self.move.handle_name]
+        handle.location.y = 0.0
+        handle.keyframe_insert("location", frame=1)
+        handle.location.y = self.move.rail
+        handle.keyframe_insert("location", frame=20)
+        with mock.patch.object(rigmoves, "note_rest", wraps=rigmoves.note_rest) as noted:
+            for frame in (1, 5, 10, 20, 7):
+                bpy.context.scene.frame_set(frame)
+                bpy.context.view_layer.update()
+            self.assertEqual(noted.call_count, 0)
+
+    def test_the_handler_writes_only_when_a_mark_moved_and_never_raises(self):
+        part = self.move.parts["Lid"]
+        updated = types.SimpleNamespace(updates=[types.SimpleNamespace(id=self.lid.data)])
+        with mock.patch.object(rigmoves, "note_rest", wraps=rigmoves.note_rest) as noted:
+            rigmoves.marks_handler(None, updated)
+            self.assertEqual(noted.call_count, 0)
+            self.lid.data.vertices[part.rest_which[0]].co.x += 0.1
+            rigmoves.marks_handler(None, updated)
+            self.assertEqual(noted.call_count, 1)
+            rigmoves.marks_handler(None, updated)
+            self.assertEqual(noted.call_count, 1)
+        for nothing in (None, 5, types.SimpleNamespace(updates=None),
+                        types.SimpleNamespace(updates=[types.SimpleNamespace(id=None)])):
+            self.assertIsNone(rigmoves.marks_handler(None, nothing))
+        self.assertIsNone(rigmoves.marks_handler())
+
+    def test_an_object_in_edit_mode_is_waited_for(self):
+        part = self.move.parts["Lid"]
+        was = list(part.rest_marks)
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            editing = bmesh.from_edit_mesh(self.lid.data)
+            editing.verts.ensure_lookup_table()
+            editing.verts[part.rest_which[0]].co.x += 0.1
+            bmesh.update_edit_mesh(self.lid.data)
+            bpy.context.view_layer.update()
+            self.assertEqual(list(part.rest_marks), was)
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+        self.assertNotEqual(list(part.rest_marks), was)
+
+
+class TestApplyAndSetOriginOnTheRig(ChestCase):
+    """Ctrl+A on the rig, or Set Origin on it, moves nothing on screen: Blender
+    changes the object and the bones the other way and keeps the children where
+    they were. The rig's new matrix was read as the whole model having moved, and
+    everything it remembered was carried by it: the next Build, Record, eye, Add
+    To This Group or Lift put the lid a metre off."""
+
+    def tidy(self, how):
+        if how in ("all", "all_selected"):
+            if how == "all_selected":
+                bpy.ops.object.select_all(action="SELECT")
+            else:
+                select(rig())
+            self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=True,
+                                                            scale=True), {"FINISHED"})
+        elif how == "location":
+            select(rig())
+            self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=False,
+                                                            scale=False), {"FINISHED"})
+        else:
+            # Where the origin goes is anywhere but where it is.
+            bpy.context.scene.cursor.location = rig().matrix_world.translation + Vector(
+                (1.5, -2.0, -0.6))
+            select(rig())
+            self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_nothing_moves_on_screen_to_begin_with(self):
+        for how in ("all", "location", "origin", "all_selected"):
+            with self.subTest(how):
+                self.tidy(how)
+                self.check_lid()
+
+    def test_the_next_build_leaves_the_lid_where_it_was(self):
+        for how in ("all", "location", "origin", "all_selected"):
+            with self.subTest(how):
+                bpy.ops.wm.read_factory_settings(use_empty=True)
+                ChestCase.setUp(self)
+                self.tidy(how)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.check_lid()
+
+    def test_the_next_record_and_the_eye_leave_it_too(self):
+        self.tidy("all")
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.show(index=0, which="AFTER"), {"FINISHED"})
+        self.assertLess(drift(self.lid, [turn_about(self.hinge, "X", -self.SWING) @ p
+                                         for p in self.shut]), TOLERANCE)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.tidy("origin")
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_add_to_this_group_and_lift_leave_it_too(self):
+        self.tidy("location")
+        coin = cube("Coin", (0.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.lid.keyframe_insert("location", frame=1)
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_a_model_moved_after_applying_is_still_carried(self):
+        self.tidy("all")
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation((5.0, 2.0, 0.0)))
+
+    def test_the_seat_is_where_the_root_bone_stands(self):
+        data = rig().rigmoves
+        self.assertTrue(data.seat_on_root)
+        self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat),
+                                             rigmoves.seat_of(rig()), 1e-5))
+        # The Root bone's rest in the world, its length the size of its axes.
+        root = rig().data.bones["Root"]
+        self.assertTrue(rigmoves.same_matrix(
+            rigmoves.seat_of(rig()),
+            rig().matrix_world @ root.matrix_local @ Matrix.Scale(root.length, 4), 1e-6))
+
+    def seen_at_the_ends_and_half_way(self):
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            out[share] = world_points(self.lid)
+        drive(self.move, 0.0)
+        return out
+
+    def check_the_lid_is(self, was):
+        for share, points in was.items():
+            drive(self.move, share)
+            self.assertLess(drift(self.lid, points), TOLERANCE, "at {:.0%}".format(share))
+        drive(self.move, 0.0)
+
+    def test_apply_scale_on_a_rig_that_was_scaled_moves_nothing(self):
+        # The object's scale becomes the bones' length, and the model is still
+        # the size it was made.
+        select(rig())
+        self.assertEqual(bpy.ops.transform.resize(value=(2.0, 2.0, 2.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        was = self.seen_at_the_ends_and_half_way()
+        self.assertAlmostEqual(rig().scale.x, 2.0, places=5)
+        select(rig())
+        self.assertEqual(bpy.ops.object.transform_apply(location=False, rotation=False,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(rig().scale.x, 1.0, places=5)
+        self.check_the_lid_is(was)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_the_lid_is(was)
+
+    def test_scaling_everything_and_then_applying_it_all_moves_nothing(self):
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.resize(value=(0.5, 0.5, 0.5)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        was = self.seen_at_the_ends_and_half_way()
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=True,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.check_the_lid_is(was)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_the_lid_is(was)
+
+    def test_a_rig_without_a_root_is_seated_by_its_object(self):
+        # A rig of its own, with bones of its own and no "Root".
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        armature = bpy.data.armatures.new("Hand built")
+        built = bpy.data.objects.new("Hand built", armature)
+        bpy.context.scene.collection.objects.link(built)
+        built.location = (1.0, 2.0, 3.0)
+        bpy.context.view_layer.update()
+        self.assertTrue(rigmoves.same_matrix(rigmoves.seat_of(built), built.matrix_world, 1e-9))
+
+    def test_a_seat_kept_the_old_way_is_caught_up_once_and_then_kept_on_the_root(self):
+        # A file from 0.19.0: the seat is the rig object's matrix, and the model
+        # was moved as a whole since.
+        data = rig().rigmoves
+        data.seat = rigmoves.flat(rig().matrix_world)
+        data.seat_on_root = False
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation((5.0, 2.0, 0.0)))
+        self.assertTrue(data.seat_on_root)
+        self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat),
+                                             rigmoves.seat_of(rig()), 1e-5))
+        # And from then on a Ctrl+A on the rig moves nothing.
+        self.tidy("all")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation((5.0, 2.0, 0.0)))
+
+
+class ArmCase(CopyThatCase):
+    """A robot arm of three boxes - upper arm, forearm, hand - chained and
+    curled, and built: the model the review's robot arm was made on."""
+
+    SHOULDER, ELBOW, WRIST = (Vector((0.0, 0.0, 1.0)), Vector((2.0, 0.0, 1.0)),
+                              Vector((4.0, 0.0, 1.0)))
+
+    def setUp(self):
+        super().setUp()
+        self.parts = {"Upper": cube("Upper", (1.0, 0.0, 1.0)),
+                      "Fore": cube("Fore", (3.0, 0.0, 1.0)),
+                      "Hand": cube("Hand", (4.3, 0.0, 1.0))}
+        for name, scale in (("Upper", (2.0, 0.3, 0.3)), ("Fore", (2.0, 0.25, 0.25)),
+                            ("Hand", (0.6, 0.4, 0.2))):
+            self.parts[name].scale = scale
+        bpy.context.view_layer.update()
+        self.home = {name: obj.matrix_world.copy() for name, obj in self.parts.items()}
+        self.shut = {name: rest_points(obj) for name, obj in self.parts.items()}
+        select(self.parts["Upper"], self.parts["Fore"], self.parts["Hand"])
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for name, where in (("Upper", self.SHOULDER), ("Fore", self.ELBOW),
+                            ("Hand", self.WRIST)):
+            bpy.context.scene.cursor.location = where
+            select(self.parts[name])
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        select(self.parts["Upper"], self.parts["Fore"], self.parts["Hand"])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.parts["Upper"].matrix_world = turn_about(self.SHOULDER, "Y", 30.0) @ self.home["Upper"]
+        bpy.context.view_layer.update()
+        select(self.parts["Upper"])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=1.0), {"FINISHED"})
+        select(self.parts["Upper"], self.parts["Fore"], self.parts["Hand"])
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        drive(self.move, 1.0)
+        self.bent = {name: world_points(obj) for name, obj in self.parts.items()}
+        drive(self.move, 0.0)
+
+    def check_arm(self, shares=(0.0, 1.0)):
+        """Every box at rest, and bent as it was recorded."""
+        for share in shares:
+            drive(self.move, share)
+            for name, obj in self.parts.items():
+                want = self.shut[name] if share == 0.0 else self.bent[name]
+                self.assertLess(drift(obj, want), TOLERANCE, "{:s} at {:.0%}".format(name, share))
+        drive(self.move, 0.0)
+
+
+class TestApplyOnTheRigOfAnArm(ArmCase):
+
+    def test_apply_all_on_the_rig_leaves_every_joint_where_it_was(self):
+        self.check_arm()
+        select(rig())
+        self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=True,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        select(self.parts["Upper"])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_arm()
+
+
+class TestAReframedForearmWithAKeyedHand(ArmCase):
+    """The origin of a built forearm is set, and a stray Auto Key is left on the
+    hand, which hangs from it. The forearm cannot be put back on its frame while
+    its child has keys of its own, and Lift Those Keyframes - the button the panel
+    offers for the key - was refused for the forearm's origin all the same, as
+    were Build and Record, none of them naming the key."""
+
+    def setUp(self):
+        super().setUp()
+        bpy.context.scene.cursor.location = Vector((2.7, 0.2, 1.3))
+        select(self.parts["Fore"])
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        self.parts["Hand"].keyframe_insert("location", frame=1)
+        bpy.context.view_layer.update()
+
+    def keyed(self):
+        return [obj.name for _move, _part, obj in rigmoves.keyed_parts(rig().rigmoves)]
+
+    def test_build_and_record_say_it_is_the_hands_keys(self):
+        for press in (lambda: bpy.ops.rigmoves.build(),
+                      lambda: bpy.ops.rigmoves.record(index=0, which="AFTER")):
+            self.assertEqual(press(), {"CANCELLED"})
+            said = rig().rigmoves.report
+            self.assertIn("'Fore' was given a new origin, scale or rotation after it was "
+                          "bound, and cannot be put back safely (it has a child with keys or "
+                          "drivers of its own ('Hand')): Lift Those Keyframes to take its keys "
+                          "off, or press Ctrl+Z to undo that.", said)
+        self.assertEqual(self.keyed(), ["Hand"])
+
+    def test_lift_those_keyframes_works_and_then_build_puts_the_forearm_back(self):
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"FINISHED"})
+        self.assertEqual(self.keyed(), [])
+        said = rig().rigmoves.report
+        self.assertIn("3 keyframe track(s) lifted off the parts", said)
+        self.assertIn("'Fore' had its origin, scale or rotation changed after it was bound", said)
+        # The forearm is on its frame again, and has not moved.
+        self.assertTrue(rigmoves.same_matrix(
+            self.parts["Fore"].matrix_world,
+            rigmoves.as_matrix(self.move.parts["Fore"].before), 1e-5))
+        self.assertLess(drift(self.parts["Fore"], self.shut["Fore"]), TOLERANCE)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_arm()
+
+    def test_a_parts_other_reason_is_named_too(self):
+        # No child with keys: a constraint on the forearm itself.
+        self.parts["Hand"].animation_data_clear()
+        self.parts["Fore"].constraints.new("COPY_LOCATION")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        self.assertIn("cannot be put back safely (it has constraints): press Ctrl+Z",
+                      rig().rigmoves.report)
+
+    def test_a_child_with_only_a_driver_is_not_told_to_lift(self):
+        # Lift Those Keyframes never takes a driver off.
+        self.parts["Hand"].animation_data_clear()
+        driver = self.parts["Hand"].driver_add("location", 2)
+        driver.driver.expression = "0.0"
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        said = rig().rigmoves.report
+        self.assertIn("(it has a child with keys or drivers of its own ('Hand')): press Ctrl+Z",
+                      said)
+        self.assertNotIn("Lift Those Keyframes", said)
+
+
+def fit_rigid(source, target):
+    """(angle in degrees, rms miss) of the best turn and shift that carries one
+    list of points onto another: a mesh that is only turned fits with no miss,
+    one that is sheared does not."""
+    import numpy
+    one = numpy.array([tuple(p) for p in source], dtype=float)
+    other = numpy.array([tuple(p) for p in target], dtype=float)
+    middle_one, middle_other = one.mean(axis=0), other.mean(axis=0)
+    left, _sizes, right = numpy.linalg.svd((one - middle_one).T @ (other - middle_other))
+    flip = numpy.sign(numpy.linalg.det(right.T @ left.T))
+    turn = right.T @ numpy.diag([1.0, 1.0, flip]) @ left.T
+    shift = middle_other - turn @ middle_one
+    miss = float(numpy.sqrt(((one @ turn.T + shift - other) ** 2).sum(axis=1).mean()))
+    cosine = max(-1.0, min(1.0, (numpy.trace(turn) - 1.0) / 2.0))
+    return math.degrees(math.acos(cosine)), miss
+
+
+class TestApplyScaleOnABuiltChain(CopyThatCase):
+    """Two boxes with a non-uniform scale, chained and built, and Ctrl+A Scale on
+    both. Nothing moves, and Build says so; but the forearm hung from the upper
+    arm by a parent inverse that no longer cancelled its scale, and every turn
+    it was given after that came out sheared and short: 8.1 degrees for the 50
+    it was dragged to, 83 for the 81 Curl asked for."""
+
+    SHOULDER, ELBOW = Vector((0.0, 0.0, 1.0)), Vector((2.0, 0.0, 1.0))
+
+    def setUp(self):
+        super().setUp()
+        self.upper = cube("Upper", (1.0, 0.0, 1.0))
+        self.upper.scale = (2.0, 0.3, 0.3)
+        self.fore = cube("Fore", (3.0, 0.0, 1.0))
+        self.fore.scale = (2.0, 0.25, 0.25)
+        bpy.context.view_layer.update()
+        self.home = {o.name: o.matrix_world.copy() for o in (self.upper, self.fore)}
+        self.shut = {o.name: rest_points(o) for o in (self.upper, self.fore)}
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj, where in ((self.upper, self.SHOULDER), (self.fore, self.ELBOW)):
+            bpy.context.scene.cursor.location = where
+            select(obj)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.upper.matrix_world = turn_about(self.SHOULDER, "Y", 30.0) @ self.home["Upper"]
+        bpy.context.view_layer.update()
+        select(self.upper)
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=1.0), {"FINISHED"})
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        drive(self.move, 1.0)
+        self.bent = {o.name: world_points(o) for o in (self.upper, self.fore)}
+        drive(self.move, 0.0)
+
+    def apply_scale_and_build(self):
+        select(self.upper, self.fore)
+        self.assertEqual(bpy.ops.object.transform_apply(location=False, rotation=False,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for share, want in ((0.0, self.shut), (1.0, self.bent)):
+            drive(self.move, share)
+            for obj in (self.upper, self.fore):
+                self.assertLess(drift(obj, want[obj.name]), TOLERANCE, obj.name)
+        drive(self.move, 0.0)
+
+    def test_the_forearm_dragged_after_applying_scale_is_a_rigid_copy_turned_50_degrees(self):
+        self.apply_scale_and_build()
+        self.fore.matrix_world = turn_about(self.ELBOW, "Y", 50.0) @ self.fore.matrix_world
+        bpy.context.view_layer.update()
+        select(self.fore, self.upper)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 1.0)
+        angle, miss = fit_rigid(self.shut["Fore"], world_points(self.fore))
+        self.assertLess(miss, 1e-4)
+        self.assertAlmostEqual(angle, 50.0, delta=0.01)
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.fore, self.shut["Fore"]), TOLERANCE)
+
+    def test_curl_after_applying_scale_gives_the_angle_it_was_asked_for(self):
+        self.apply_scale_and_build()
+        self.upper.matrix_world = turn_about(self.SHOULDER, "Y", 45.0) @ self.upper.matrix_world
+        bpy.context.view_layer.update()
+        select(self.upper)
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=0.8), {"FINISHED"})
+        # 45 degrees of upper arm, and 0.8 of that again at the elbow.
+        angle, miss = fit_rigid(self.shut["Fore"], world_points(self.fore))
+        self.assertLess(miss, 1e-4)
+        self.assertAlmostEqual(angle, 45.0 * 1.8, delta=0.01)
+        select(self.fore, self.upper)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 1.0)
+        angle, miss = fit_rigid(self.shut["Fore"], world_points(self.fore))
+        self.assertLess(miss, 1e-4)
+        self.assertAlmostEqual(angle, 45.0 * 1.8, delta=0.01)
+        drive(self.move, 0.0)
+
+    def test_putting_a_re_framed_parent_back_restores_its_childs_frame_exactly(self):
+        parent = cube("Parent", (0.0, 0.0, 1.0))
+        parent.scale = (2.0, 0.5, 1.0)
+        kid = cube("Kid", (2.0, 0.0, 1.0))
+        kid.scale = (0.5, 1.0, 2.0)
+        bpy.context.view_layer.update()
+        kid.parent = parent
+        kid.matrix_parent_inverse = parent.matrix_world.inverted()
+        # What Blender's Apply leaves a child: an inverse that carries a scale.
+        kid.matrix_parent_inverse = (Matrix.Diagonal((0.5, 2.0, 1.0, 1.0))
+                                     @ kid.matrix_parent_inverse)
+        kid.matrix_world = (Matrix.Translation((2.0, 0.0, 1.0))
+                            @ Matrix.Diagonal((0.5, 1.0, 2.0, 1.0)))
+        bpy.context.view_layer.update()
+        was = [m.copy() for m in (kid.matrix_world, kid.matrix_parent_inverse, kid.matrix_basis,
+                                  parent.matrix_world)]
+        frame = Matrix.Translation((0.0, 0.0, 1.5)) @ Matrix.Rotation(0.4, 4, "Z")
+        framed = [rigmoves.reframe(parent, frame)]
+        bpy.context.view_layer.update()
+        # Held where it stood, and hung from the parent as Build hangs a follower.
+        self.assertTrue(rigmoves.same_matrix(kid.matrix_world, was[0], 1e-5))
+        self.assertTrue(rigmoves.same_matrix(kid.matrix_parent_inverse, frame.inverted(), 1e-5))
+        rigmoves.put_back(framed)
+        bpy.context.view_layer.update()
+        for now, before in zip((kid.matrix_world, kid.matrix_parent_inverse, kid.matrix_basis,
+                                parent.matrix_world), was):
+            self.assertTrue(rigmoves.same_matrix(now, before, 1e-5))
+
+
+class TestAnAnimatedRigIsLeftWhereItIs(ChestCase):
+    """A rig whose own location is keyed - a car driving off with its model -
+    and a Build. Build moves the armature object onto the middle of its bones,
+    and moves the bones back by the same amount; the keys put the object back on
+    the next frame and the bones stayed moved, so the whole model was off by that
+    much at every frame (half a metre, once a coin was added)."""
+
+    FRAMES = (1, 20, 40)
+
+    def key_the_rig(self):
+        scene = bpy.context.scene
+        base = rig().location.copy()
+        for frame, where in zip(self.FRAMES, (base, base + Vector((3.0, 0.0, 0.0)),
+                                              base + Vector((3.0, 4.0, 0.0)))):
+            scene.frame_set(frame)
+            rig().location = where
+            rig().keyframe_insert("location", frame=frame)
+        scene.frame_set(20)
+        bpy.context.view_layer.update()
+
+    def seen(self, objects):
+        """Where each object is at each frame, with the slider at 0, and where the
+        rig is."""
+        out = {}
+        for frame in self.FRAMES:
+            bpy.context.scene.frame_set(frame)
+            bpy.context.view_layer.update()
+            drive(self.move, 0.0)
+            out[frame] = ({obj.name: world_points(obj) for obj in objects},
+                          rig().matrix_world.copy())
+        bpy.context.scene.frame_set(20)
+        bpy.context.view_layer.update()
+        return out
+
+    def coin_at_frame_20(self):
+        coin = cube("Coin", (3.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        return coin
+
+    def check_everything(self, was, coin_was, coin):
+        """The lid where it was at every frame, and the coin carried by the rig
+        from where it was put at frame 20."""
+        now = self.seen([self.lid, coin])
+        for frame in self.FRAMES:
+            self.assertLess(drift_of(now[frame][0]["Lid"], was[frame][0]["Lid"]), TOLERANCE,
+                            "Lid at frame {:d}".format(frame))
+            carry = was[frame][1] @ was[20][1].inverted()
+            self.assertLess(drift_of(now[frame][0][coin.name], [carry @ p for p in coin_was]),
+                            TOLERANCE, "Coin at frame {:d}".format(frame))
+
+    def test_a_coin_added_at_frame_20_and_a_build_leave_everything_where_it_was(self):
+        self.key_the_rig()
+        was = self.seen([self.lid])
+        coin = self.coin_at_frame_20()
+        coin_was = world_points(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_everything(was, coin_was, coin)
+
+    def test_set_pivot_on_an_animated_rig_leaves_everything_where_it_was(self):
+        self.key_the_rig()
+        was = self.seen([self.lid])
+        coin = self.coin_at_frame_20()
+        coin_was = world_points(coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        # The hinge, where it is at frame 20.
+        bpy.context.scene.cursor.location = was[20][1] @ was[1][1].inverted() @ self.hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.check_everything(was, coin_was, coin)
+
+    def test_a_rig_that_does_not_move_itself_is_still_seated(self):
+        # The rig is moved onto the middle of what it drives, as ever.
+        where = rig().location.copy()
+        coin = cube("Coin", (6.0, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        coin_was = world_points(coin)
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertGreater((rig().location - where).length, 0.5)
+        self.assertLess(drift(coin, coin_was), TOLERANCE)
+        self.check_lid()
+
+    def test_a_rig_on_an_animated_parent_is_still_seated(self):
+        # The rig's own transform is not animated, only what it hangs from.
+        hand = bpy.data.objects.new("Hand", None)
+        bpy.context.scene.collection.objects.link(hand)
+        bpy.context.view_layer.update()
+        select(hand, rig())
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=True),
+                         {"FINISHED"})
+        hand.keyframe_insert("location", frame=1)
+        hand.location.x += 3.0
+        hand.keyframe_insert("location", frame=20)
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        where = rig().location.copy()
+        coin = cube("Coin", (6.0, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        coin_was = world_points(coin)
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertGreater((rig().location - where).length, 0.5)
+        self.assertLess(drift(coin, coin_was), TOLERANCE)
+        self.check_lid()
+
+
+class TestAModelCarriedFarFromTheOrigin(ChestCase):
+    """A model carried a few hundred metres, and turned. Every Before and After
+    is carried with it as a single-precision matrix, which keeps seven digits: a
+    hair over 1e-5 out there. An untouched part read as dragged by that, so Set
+    Pivot, Ride Along and Ring refused with "has been moved and not recorded",
+    and Record wrote "moved by hand, read as a pose"; and catch_up took the
+    rounding of the rig's own matrix for a move, and carried it again and again."""
+
+    PLACES = ((287.123457, 311.3141592, 0.4), (301.7777771, 268.1234563, 0.7),
+              (322.0000123, 290.9999877, 0.1), (279.5432101, 305.2718282, 0.9),
+              (314.1592653, 297.8765432, 0.3), (296.0123456, 318.5551212, 0.6))
+    TURNS = (37.0, 11.0, 63.0, 29.0, 48.0, 75.0)
+
+    def carry_the_model(self, rounds=6):
+        """Select everything and carry it to each place in turn, with a turn,
+        pressing the eye between."""
+        for place, turn in list(zip(self.PLACES, self.TURNS))[:rounds]:
+            bpy.ops.object.select_all(action="SELECT")
+            self.assertEqual(bpy.ops.transform.translate(
+                value=Vector(place) - self.lid.matrix_world.translation), {"FINISHED"})
+            self.assertEqual(bpy.ops.transform.rotate(value=math.radians(turn),
+                                                      orient_axis="Z"), {"FINISHED"})
+            bpy.context.view_layer.update()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.show(index=0, which="BEFORE"), {"FINISHED"})
+
+    def test_set_pivot_and_record_after_six_far_carries_see_no_drag(self):
+        self.carry_the_model()
+        self.assertGreater(self.lid.matrix_world.translation.length, 250.0)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertNotIn("moved by hand", rig().rigmoves.report)
+
+    def test_the_rounding_a_far_trip_leaves_is_allowed_for_back_near_the_origin(self):
+        # What carrying a model out to 300 m and home again leaves in what it
+        # keeps: its places are a hair off the object's own, by up to a few 1e-5.
+        # That is rounding where the rig has been that far, and a drag where it
+        # has not.
+        part = self.move.parts["Lid"]
+        left = rigmoves.as_matrix(part.before)
+        left.translation.x += 3.5e-5
+        part.before = rigmoves.flat(left)
+        self.assertIsNotNone(rigmoves.hand_moved(part)[1])
+        rig().rigmoves.far = 320.0
+        self.assertIsNone(rigmoves.hand_moved(part)[1])
+        # And a real drag is still one.
+        self.lid.location.z += 0.01
+        bpy.context.view_layer.update()
+        self.assertIsNotNone(rigmoves.hand_moved(part)[1])
+
+    def test_set_pivot_is_not_refused_back_near_the_origin_after_a_far_trip(self):
+        self.carry_the_model(3)
+        for place in ((1.2345678, 0.8765432, 0.0), (2.7182818, 1.4142135, 0.5)):
+            bpy.ops.object.select_all(action="SELECT")
+            self.assertEqual(bpy.ops.transform.translate(
+                value=Vector(place) - self.lid.matrix_world.translation), {"FINISHED"})
+            bpy.context.view_layer.update()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.show(index=0, which="BEFORE"), {"FINISHED"})
+        self.assertLess(self.lid.matrix_world.translation.length, 5.0)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_ring_and_ride_along_are_not_refused_far_out(self):
+        self.carry_the_model(1)
+        bpy.context.scene.cursor.location = self.lid.matrix_world.translation
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_a_rig_standing_still_is_not_carried_again_for_its_rounding(self):
+        self.carry_the_model(2)
+        with mock.patch.object(rigmoves, "carry_stored", wraps=rigmoves.carry_stored) as carried:
+            for _ in range(3):
+                self.assertEqual(rigmoves.catch_up(rig()), "")
+            self.assertEqual(carried.call_count, 0)
+
+    def test_the_farthest_the_rig_has_stood_is_remembered(self):
+        self.assertEqual(rig().rigmoves.far, 0.0)
+        self.carry_the_model(1)
+        rigmoves.catch_up(rig())
+        self.assertGreater(rig().rigmoves.far, 250.0)
+
+    def test_a_real_move_far_out_is_still_carried(self):
+        self.carry_the_model(1)
+        rigmoves.catch_up(rig())
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(0.0, 0.05, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        with mock.patch.object(rigmoves, "carry_stored", wraps=rigmoves.carry_stored) as carried:
+            self.assertEqual(rigmoves.catch_up(rig()), "")
+            self.assertEqual(carried.call_count, 1)
+
+    def test_a_part_a_hand_off_its_before_is_still_a_drag_far_out(self):
+        self.carry_the_model(1)
+        rigmoves.catch_up(rig())
+        self.lid.location.z += 0.3
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"CANCELLED"})
+        self.assertIn("moved and not recorded", rig().rigmoves.report)
+
+
+class TestAnAnimatedRigAlongALongPath(ChestCase):
+    """A rig keyed along a path of some 214 metres, and a button pressed at
+    several frames, the last near the start again: the rounding of the far
+    frames stays in the matrices the move keeps, and the rig back near the
+    origin was refused for it (4.7e-5, at 1 metre)."""
+
+    def test_set_pivot_is_not_refused_at_any_frame(self):
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        rig().keyframe_insert("location", frame=1)
+        rig().keyframe_insert("rotation_euler", frame=1)
+        rig().location = rig().location + Vector((213.7, 118.2, 0.0))
+        rig().rotation_euler.z = math.radians(37.0)
+        rig().keyframe_insert("location", frame=50)
+        rig().keyframe_insert("rotation_euler", frame=50)
+        for frame in (12, 25, 38, 3):
+            scene.frame_set(frame)
+            bpy.context.view_layer.update()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"), {"FINISHED"},
+                             "frame {:d}: {:s}".format(frame, rig().rigmoves.report))
+            self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+
+class TestARigScaledToNothing(ChestCase):
+    """A rig that grows in, its scale keyed from 0, and a button pressed on the
+    frame where it is nothing: the rig's matrix cannot be undone, and carrying
+    every Before and After by it left them all singular for good. Back at scale
+    1 the next Build put the lid nearly five metres off."""
+
+    def grow_in(self):
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        rig().scale = (0.0, 0.0, 0.0)
+        rig().keyframe_insert("scale", frame=1)
+        rig().scale = (1.0, 1.0, 1.0)
+        rig().keyframe_insert("scale", frame=10)
+        scene.frame_set(10)
+        bpy.context.view_layer.update()
+        self.at_rest = world_points(self.lid)
+        drive(self.move, 1.0)
+        self.open = world_points(self.lid)
+        drive(self.move, 0.0)
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+
+    def check_at_frame_10(self):
+        bpy.context.scene.frame_set(10)
+        bpy.context.view_layer.update()
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.lid, self.at_rest), TOLERANCE)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.lid, self.open), TOLERANCE)
+        drive(self.move, 0.0)
+
+    def test_the_eye_at_scale_0_and_a_build_at_scale_1_leave_the_lid_where_it_stood(self):
+        self.grow_in()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.show(index=0, which="BEFORE"), {"FINISHED"})
+        bpy.context.scene.frame_set(10)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_at_frame_10()
+
+    def test_any_other_button_at_scale_0_leaves_what_is_kept_alone_too(self):
+        # Whether it goes ahead or says the lid looks moved (it has no size).
+        for press in (lambda: bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"),
+                      lambda: bpy.ops.rigmoves.build(),
+                      lambda: bpy.ops.rigmoves.free_keys()):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            ChestCase.setUp(self)
+            self.grow_in()
+            select(self.lid)
+            press()
+            bpy.context.scene.frame_set(10)
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+            self.check_at_frame_10()
+
+    def test_record_and_build_at_scale_0_say_so_and_write_nothing(self):
+        # Record would key a pose for the lid, that has collapsed and looks moved;
+        # Build would bind a new part through the rig's inverse.
+        for which in ("BEFORE", "AFTER"):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            ChestCase.setUp(self)
+            self.grow_in()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.record(index=0, which=which), {"CANCELLED"})
+            self.assertIn("is scaled to nothing at this frame", rig().rigmoves.report)
+            self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+            self.assertIn("is scaled to nothing at this frame", rig().rigmoves.report)
+            bpy.context.scene.frame_set(10)
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+            self.check_at_frame_10()
+
+    def test_a_part_added_at_scale_0_is_bound_by_the_build_at_scale_1_where_it_stands(self):
+        self.grow_in()
+        coin = cube("Coin", (0.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.scene.frame_set(10)
+        bpy.context.view_layer.update()
+        was = world_points(coin)
+        bpy.context.scene.frame_set(1)
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        bpy.context.scene.frame_set(10)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 0.0)
+        self.assertLess(drift(coin, was), TOLERANCE)
+        self.check_at_frame_10()
+
+    def test_nothing_is_carried_and_the_seat_is_kept_while_the_rig_is_nothing(self):
+        self.grow_in()
+        data = rig().rigmoves
+        before = list(self.move.parts["Lid"].before)
+        seat = list(data.seat)
+        with mock.patch.object(rigmoves, "carry_stored") as carried:
+            self.assertEqual(rigmoves.catch_up(rig()), "")
+        self.assertEqual(carried.call_count, 0)
+        self.assertEqual(list(self.move.parts["Lid"].before), before)
+        self.assertEqual(list(data.seat), seat)
+
+    def test_a_seat_that_is_singular_is_taken_afresh_once_the_rig_has_a_size(self):
+        # A file saved by 0.19.0 after the fault: there is nothing to carry from.
+        data = rig().rigmoves
+        data.seat = [0.0] * 16
+        before = list(self.move.parts["Lid"].before)
+        self.assertEqual(rigmoves.catch_up(rig()), "")
+        self.assertEqual(list(self.move.parts["Lid"].before), before)
+        self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat),
+                                             rigmoves.seat_of(rig()), 1e-5))
+        self.check_lid()
+
+    def test_a_small_rig_is_still_caught_up(self):
+        # A hundredth is small, not nothing: the rig made that small, its model
+        # with it about the rig's origin, is carried to where it now stands.
+        about = rig().matrix_world.translation.copy()
+        select(rig())
+        self.assertEqual(bpy.ops.transform.resize(value=(0.01, 0.01, 0.01)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation(about) @ Matrix.Scale(0.01, 4)
+                       @ Matrix.Translation(-about))
+
+    def test_a_rig_a_ten_thousandth_the_size_is_small_and_not_nothing(self):
+        # What a model made in millimetres is, in metres: its determinant is far
+        # under 1e-9 and it is no less a rig for that.
+        select(rig())
+        self.assertEqual(bpy.ops.transform.resize(value=(0.0004, 0.0004, 0.0004)),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertFalse(rigmoves.is_singular(rigmoves.seat_of(rig())))
+        before = list(self.move.parts["Lid"].before)
+        with mock.patch.object(rigmoves, "carry_stored", wraps=rigmoves.carry_stored) as carried:
+            self.assertEqual(rigmoves.catch_up(rig()), "")
+        self.assertEqual(carried.call_count, 1)
+        self.assertNotEqual(list(self.move.parts["Lid"].before), before)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def test_what_has_no_size_is_singular_and_what_is_small_or_big_is_not(self):
+        for scale, nothing in ((0.0, True), (1e-7, True), (0.0004, False), (1.0, False),
+                               (250.0, False)):
+            self.assertEqual(rigmoves.is_singular(Matrix.Scale(scale, 4)), nothing, scale)
+        flat = Matrix.Diagonal((1.0, 1.0, 0.0, 1.0))
+        self.assertTrue(rigmoves.is_singular(flat))
+        self.assertTrue(rigmoves.is_singular(Matrix.Diagonal((1.0, 1.0, 1e-8, 1.0))))
+        self.assertFalse(rigmoves.is_singular(Matrix.Diagonal((1.0, 1.0, 1e-3, 1.0))))
+
+
+class TestARigSwitchedOffInTheViewport(ChestCase):
+    """The rig's Show in Viewports (the screen icon in the Outliner) is off. A
+    rig cannot be put into edit mode like that, and Build, Remove, Ring and Set
+    Pivot raised "Cannot edit hidden object" half way: a first Build had already
+    taken the lid off its parent, Remove had deleted the move and left its bones,
+    and Ring's rollback ran a Build that raised again and left eight copies."""
+
+    def said(self):
+        return ("Show '{:s}' in the viewport first (the screen icon in the Outliner): it "
+                "cannot be edited while it is switched off.".format(rig().name))
+
+    def state(self):
+        """Everything these buttons add or change, as it is now."""
+        shown = {}
+        for share in (0.0, 1.0):
+            drive(self.move, share)
+            shown[share] = world_points(self.lid)
+        drive(self.move, 0.0)
+        return {
+            "objects": sorted(o.name for o in bpy.data.objects),
+            "meshes": sorted(m.name for m in bpy.data.meshes),
+            "moves": [(m.name, [(p.name, p.bone_name) for p in m.parts], m.built)
+                      for m in rig().rigmoves.moves],
+            "bones": sorted(b.name for b in rig().data.bones),
+            "constraints": sorted((pb.name, c.name) for pb in rig().pose.bones
+                                  for c in pb.constraints),
+            "lid": (self.lid.parent.name if self.lid.parent else None,
+                    [m.name for m in self.lid.modifiers],
+                    [g.name for g in self.lid.vertex_groups]),
+            "shown": shown,
+        }
+
+    def check_refused(self, press):
+        rig().hide_viewport = True
+        bpy.context.view_layer.update()
+        select(self.lid)
+        before = self.state()
+        self.assertEqual(press(), {"CANCELLED"})
+        self.assertEqual(rig().rigmoves.report, self.said())
+        after = self.state()
+        for key in before:
+            if key == "shown":
+                for share in before[key]:
+                    self.assertLess(drift_of(after[key][share], before[key][share]), TOLERANCE)
+            else:
+                self.assertEqual(after[key], before[key], key)
+
+    def test_build_is_refused_before_it_changes_anything(self):
+        self.check_refused(lambda: bpy.ops.rigmoves.build())
+
+    def test_remove_is_refused_before_it_changes_anything(self):
+        self.check_refused(lambda: bpy.ops.rigmoves.remove(index=0))
+
+    def test_ring_is_refused_before_it_makes_anything(self):
+        bpy.context.scene.cursor.location = Vector((0.0, 0.0, 0.0))
+        self.check_refused(lambda: bpy.ops.rigmoves.ring(index=0, count=5, use="COPY"))
+
+    def test_set_pivot_is_refused_before_it_changes_anything(self):
+        pivot = list(self.move.parts["Lid"].pivot)
+        self.check_refused(lambda: bpy.ops.rigmoves.set_pivot(index=0, kind="BASE"))
+        self.assertEqual(list(self.move.parts["Lid"].pivot), pivot)
+
+    def test_the_other_buttons_that_would_build_are_refused_too(self):
+        for press in (lambda: bpy.ops.rigmoves.record(index=0, which="AFTER"),
+                      lambda: bpy.ops.rigmoves.show(index=0, which="AFTER"),
+                      lambda: bpy.ops.rigmoves.free_keys()):
+            rig().hide_viewport = False
+            self.check_refused(press)
+
+    def test_a_first_build_leaves_the_lid_as_it_was(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        body = cube("Body", (0.0, 0.0, 0.5))
+        body.scale = (2.0, 1.2, 1.0)
+        lid = cube("Lid", (0.0, 0.0, 1.1))
+        lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        lid.parent = body
+        lid.matrix_parent_inverse = body.matrix_world.inverted()
+        bpy.context.view_layer.update()
+        home = lid.matrix_world.copy()
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        lid.matrix_world = turn_about(self.hinge, "X", -70.0) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        rig().hide_viewport = True
+        bpy.context.view_layer.update()
+        part = rig().rigmoves.moves[0].parts[0]
+        parent, matrix = lid.parent, lid.matrix_world.copy()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        self.assertIs(lid.parent, parent)
+        self.assertTrue(rigmoves.same_matrix(lid.matrix_world, matrix, 1e-9))
+        self.assertEqual((part.bone_name, len(lid.modifiers), len(lid.vertex_groups)), ("", 0, 0))
+        self.assertEqual(part.home_parent, "")
+        self.assertFalse(rig().rigmoves.moves[0].built)
+
+    def test_shown_again_it_works_as_ever(self):
+        rig().hide_viewport = True
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        rig().hide_viewport = False
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_a_rig_that_is_not_in_the_view_layer_is_refused_too(self):
+        owner = rig()
+        for collection in list(owner.users_collection):
+            collection.objects.unlink(owner)
+        bpy.context.view_layer.update()
+        said = []
+        fake = types.SimpleNamespace(report=lambda kind, text: said.append(text))
+        self.assertFalse(rigmoves.ready(fake, owner, owner.rigmoves))
+        self.assertIn("is not in this view layer", said[0])
+        self.assertEqual(owner.rigmoves.report, said[0])
+
+
+class StretchedParentCase(CopyThatCase):
+    """A built model whose rig hangs from an Empty that is then scaled unevenly,
+    turned and moved. Everything the move recorded goes with the model, so every
+    evaluated mesh must be the Empty's matrix on what it was before - at the ends
+    of the slider and half way."""
+
+    SHARES = (0.0, 0.5, 1.0)
+
+    def hang_the_rig_from_an_empty(self):
+        self.hand = bpy.data.objects.new("Hand", None)
+        bpy.context.scene.collection.objects.link(self.hand)
+        bpy.context.view_layer.update()
+        select(self.hand, rig())
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=True),
+                         {"FINISHED"})
+
+    def seen(self, objects):
+        out = {}
+        for share in self.SHARES:
+            drive(rig().rigmoves.moves[0], share)
+            out[share] = {obj.name: world_points(obj) for obj in objects}
+        drive(rig().rigmoves.moves[0], 0.0)
+        return out
+
+    def stretch_and_build(self, objects, scale, turn=25.0):
+        was = self.seen(objects)
+        stood = self.hand.matrix_world.copy()
+        self.hand.scale = scale
+        self.hand.rotation_euler.z = math.radians(turn)
+        self.hand.location = (7.0, 3.0, 0.0)
+        bpy.context.view_layer.update()
+        # What the model was carried by, from where the Empty stood before.
+        matrix = self.hand.matrix_world @ stood.inverted()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        now = self.seen(objects)
+        worst = {}
+        for share in self.SHARES:
+            for name, points in now[share].items():
+                gap = drift_of(points, [matrix @ p for p in was[share][name]])
+                worst[name] = max(worst.get(name, 0.0), gap)
+        return worst
+
+
+class TestRingCopiesUnderAStretchedParent(StretchedParentCase, ChestCase):
+    """Ring(4) on a lid, the rig hung from an Empty scaled (1, 2, 1), turned 25
+    degrees and moved: 'Lid 2' and 'Lid 4' stood 0.92 m off at every share of the
+    slider, 'Lid' and 'Lid 3' exactly where they belong. Build worked out the
+    seats of the riders again from their carried world matrices, which a parent
+    that stretches shears, and a shear is not a place a bone can stand."""
+
+    def ring_the_lid(self):
+        bpy.context.scene.cursor.location = Vector((0.0, 0.0, 0.0))
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        self.copies = [bpy.data.objects[name] for name in ("Lid 2", "Lid 3", "Lid 4")]
+        self.hang_the_rig_from_an_empty()
+
+    def test_the_copies_turn_the_leaders_move_about_the_ring_before_any_stretch(self):
+        # The oracle: a copy is the leader turned about the ring's axis.
+        self.ring_the_lid()
+        was = self.seen([self.lid] + self.copies)
+        for number, copy in enumerate(self.copies, start=1):
+            turn = turn_about(Vector((0.0, 0.0, 0.0)), "Z", 90.0 * number)
+            for share in self.SHARES:
+                self.assertLess(drift_of(was[share][copy.name],
+                                         [turn @ p for p in was[share]["Lid"]]), TOLERANCE,
+                                "{:s} at {:.0%}".format(copy.name, share))
+
+    def test_every_copy_stays_where_the_model_puts_it_when_the_empty_is_stretched_in_y(self):
+        self.ring_the_lid()
+        worst = self.stretch_and_build([self.lid] + self.copies, (1.0, 2.0, 1.0))
+        for name, gap in worst.items():
+            self.assertLess(gap, TOLERANCE, name)
+
+    def test_and_in_x_and_in_z_and_evenly(self):
+        for scale in ((2.0, 1.0, 1.0), (1.0, 1.0, 3.0), (2.0, 2.0, 2.0)):
+            with self.subTest(scale=scale):
+                bpy.ops.wm.read_factory_settings(use_empty=True)
+                ChestCase.setUp(self)
+                self.ring_the_lid()
+                worst = self.stretch_and_build([self.lid] + self.copies, scale)
+                for name, gap in worst.items():
+                    self.assertLess(gap, TOLERANCE, name)
+
+    def test_the_rider_bones_are_not_moved_by_the_build(self):
+        self.ring_the_lid()
+        was = {b.name: b.matrix_local.copy() for b in rig().data.bones}
+        self.stretch_and_build([self.lid] + self.copies, (1.0, 2.0, 1.0))
+        for bone in rig().data.bones:
+            if bone.name in was:
+                self.assertTrue(rigmoves.same_matrix(bone.matrix_local, was[bone.name], 1e-4),
+                                bone.name)
+
+
+class TestMirroredRidersUnderAStretchedParent(StretchedParentCase):
+    """A wing that moves out and tips, a copy of it mirrored the way Ctrl+M leaves
+    one, and a second that faces the other way and plays the move with Mirror X:
+    under an Empty scaled (1, 2, 1), turned and moved they too have to stay where
+    the model puts them."""
+
+    def setUp(self):
+        super().setUp()
+        self.wing = cube("Wing", (1.5, 0.0, 0.0))
+        self.wing.rotation_euler.z = math.radians(20.0)
+        bpy.context.view_layer.update()
+        self.home = self.wing.matrix_world.copy()
+
+        def pose():
+            self.wing.matrix_world = (self.home @ Matrix.Translation((1.0, 0.0, 0.0))
+                                      @ Matrix.Rotation(math.radians(30.0), 4, "Y"))
+
+        record_move([self.wing], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        across = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        self.mirrored = cube("Mirrored", (0.0, 0.0, 0.0))
+        self.mirrored.matrix_world = Matrix.Translation((0.0, 3.0, 0.0)) @ across @ self.home
+        self.door = cube("Door", (-1.5, 4.0, 0.0))
+        self.door.rotation_euler.z = math.radians(160.0)
+        bpy.context.view_layer.update()
+        for other in (self.mirrored, self.door):
+            select(other, self.wing)
+            bpy.context.view_layer.objects.active = self.wing
+            self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Wing",
+                                                         rig_name=rig().name), {"FINISHED"})
+        position = list(self.move.parts).index(self.move.parts["Door"])
+        self.assertEqual(bpy.ops.rigmoves.set_mirror(index=0, part=position, axis="X"),
+                         {"FINISHED"})
+        self.everything = [self.wing, self.mirrored, self.door]
+        self.hang_the_rig_from_an_empty()
+
+    def test_the_riders_play_the_leaders_move_before_any_stretch(self):
+        # The mirrored copy plays the move mirrored across the plane it was put
+        # by; the door, mirrored across its own X and turned by where it stands.
+        across = Matrix.Translation((0.0, 3.0, 0.0)) @ Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            expected = [across @ p for p in world_points(self.wing)]
+            self.assertLess(drift(self.mirrored, expected), TOLERANCE, share)
+
+    def test_every_rider_stays_where_the_model_puts_it_when_the_empty_is_stretched(self):
+        for scale in ((1.0, 2.0, 1.0), (2.0, 1.0, 1.0)):
+            with self.subTest(scale=scale):
+                worst = self.stretch_and_build(self.everything, scale)
+                for name, gap in worst.items():
+                    self.assertLess(gap, TOLERANCE, name)
+
+
+class TestRigidFit(unittest.TestCase):
+    """The fit of three marks onto three others, which tells a part that was
+    framed another way from one that was moved."""
+
+    TRIANGLE = [Vector((0.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)), Vector((0.5, 1.0, 0.0))]
+
+    def test_a_turn_and_a_shift_are_found(self):
+        move = turn_about(Vector((1.0, 2.0, 3.0)), (0.3, 0.5, 0.8), 37.0)
+        move.translation += Vector((4.0, -1.0, 2.5))
+        # (A Blender matrix keeps single precision.)
+        fit, miss = rigmoves.rigid_fit(self.TRIANGLE, [move @ p for p in self.TRIANGLE])
+        self.assertLess(miss, 1e-5)
+        for p in self.TRIANGLE:
+            self.assertLess((fit @ p - move @ p).length, 1e-5)
+
+    def test_three_points_in_a_line_have_no_fit(self):
+        line = [Vector((x, 2.0 * x, -x)) for x in (0.0, 1.0, 3.0)]
+        self.assertEqual(rigmoves.rigid_fit(line, self.TRIANGLE), (None, math.inf))
+        self.assertEqual(rigmoves.rigid_fit(self.TRIANGLE, line), (None, math.inf))
+
+    def test_a_different_shape_misses(self):
+        bigger = [Vector((p.x * 1.5, p.y, p.z)) for p in self.TRIANGLE]
+        fit, miss = rigmoves.rigid_fit(self.TRIANGLE, bigger)
+        self.assertGreater(miss, 0.5)
 
 
 if __name__ == "__main__":

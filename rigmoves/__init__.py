@@ -1422,6 +1422,11 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
     # before it was kept.
     rest_marks: bpy.props.FloatVectorProperty(size=9)
     rest_count: bpy.props.IntProperty(default=0)
+    # Which three vertices those are, by number: picked to stand as far apart
+    # as the mesh lets three be (see note_rest). Minus one in a part from before
+    # that was kept, whose three were the first, a third of the way through and
+    # two thirds.
+    rest_which: bpy.props.IntVectorProperty(size=3, default=(-1, -1, -1))
     has_before: bpy.props.BoolProperty(default=False)
     has_after: bpy.props.BoolProperty(default=False)
     start: bpy.props.FloatProperty(
@@ -1688,6 +1693,16 @@ class RIGMOVES_Rig(bpy.types.PropertyGroup):
     # the rig has gone since. False for a rig made before this was kept.
     seat: bpy.props.FloatVectorProperty(size=16)
     seated: bpy.props.BoolProperty(default=False)
+    # Whether the seat above is where the Root bone's rest stands in the world
+    # (see seat_of) rather than the rig object's own matrix, as it was kept by
+    # 0.19.0: Apply and Set Origin on the rig change the object and the bones
+    # by the same amount, and the model has not moved.
+    seat_on_root: bpy.props.BoolProperty(default=False)
+    # The farthest from the world's origin the seat has stood, as far as catch_up
+    # has seen it carried. Blender's matrices keep seven digits, so what is carried
+    # a few hundred metres off is rounded by the carrying, and keeps that rounding
+    # when the rig is back near the origin: hand_moved allows for it by this much.
+    far: bpy.props.FloatProperty(default=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -1844,7 +1859,23 @@ def unbind_object(rig, part):
     return True
 
 
-def hand_moved(part):
+def same_place(one, other, near, far=0.0):
+    """Whether two world matrices are the same place, to the rounding they carry.
+
+    A matrix keeps seven digits, so one that stands a few hundred metres from the
+    world's origin is only right to a hair over 1e-5, and one carried there and
+    back is a little less right than that for good. Its turn and scale are not
+    out by more than 1e-5 whatever the distance; its position is by 1e-5 of
+    1 + `near`, how far from the origin the two stand, and 2e-6 of `far`, the
+    farthest the rig has been carried (see RIGMOVES_Rig.far).
+    """
+    turn = max(abs(a - b) for row_a, row_b in zip(one.to_3x3(), other.to_3x3())
+               for a, b in zip(row_a, row_b))
+    shift = max(abs(a - b) for a, b in zip(one.translation, other.translation))
+    return turn <= 1e-5 and shift <= 1e-5 * (1.0 + near) + 2e-6 * far
+
+
+def hand_moved(part, shift=None):
     """A bound object's own transform, if it has been dragged off its Before.
 
     Binding makes the object's own transform the rig's rest: the modifier
@@ -1853,16 +1884,20 @@ def hand_moved(part):
     quietly redefined where the move starts, and every slider on it is then
     wrong by that much. Spotting the drift is what lets it be read as a pose
     instead, which is what somebody dragging it plainly meant.
+
+    With `shift`, how far the whole model has been moved since the rig was last
+    caught up (see moved_since), its Before is where it would stand carried by
+    that.
     """
     obj = part_object(part)
     if obj is None:
         return None, None
     rest = as_matrix(part.before)
+    if shift is not None:
+        rest = shift @ rest
     world = obj.matrix_world.copy()
-    moved = max(abs(a - b)
-                for row_a, row_b in zip(world, rest)
-                for a, b in zip(row_a, row_b))
-    return obj, (world if moved > 1e-5 else None)
+    near = max(world.translation.length, rest.translation.length)
+    return obj, (None if same_place(world, rest, near, part.id_data.rigmoves.far) else world)
 
 
 TRANSFORM_PATHS = ("location", "rotation_euler", "rotation_quaternion",
@@ -2329,25 +2364,71 @@ def mentioning_invoke(run):
 
 
 def marked_vertices(count):
-    """The three vertices a part is told by: the first, a third of the way
-    through and two thirds."""
+    """The three vertices a part from 0.19.0 is told by: the first, a third of
+    the way through and two thirds."""
     return (0, count // 3, 2 * count // 3)
+
+
+def spread_vertices(vertices):
+    """The numbers of three of a mesh's vertices that stand as far apart as
+    three can: one far from the middle, the one farthest from that, and the one
+    farthest from the line through the two.
+
+    Three vertices at the start of a mesh's list can be neighbours, or in a
+    line, and a turn cannot be read from those; these span the mesh. Done in
+    numpy so that a big mesh costs no more than a read of it; the fallback is
+    the same three passes, slowly.
+    """
+    try:
+        import numpy
+    except ImportError:
+        numpy = None
+    if numpy is not None:
+        values = numpy.empty(3 * len(vertices), dtype=numpy.float32)
+        vertices.foreach_get("co", values)
+        points = values.reshape(-1, 3).astype(float)
+        first = int(numpy.argmax(((points - points.mean(axis=0)) ** 2).sum(axis=1)))
+        second = int(numpy.argmax(((points - points[first]) ** 2).sum(axis=1)))
+        line = points[second] - points[first]
+        length = float(numpy.sqrt((line ** 2).sum()))
+        off = points - points[first]
+        if length > 0.0:
+            off = off - numpy.outer(off @ (line / length), line / length)
+        return first, second, int(numpy.argmax((off ** 2).sum(axis=1)))
+    values = [0.0] * (3 * len(vertices))
+    vertices.foreach_get("co", values)
+    points = [Vector(values[i:i + 3]) for i in range(0, len(values), 3)]
+    middle = sum(points, Vector()) / len(points)
+    first = max(range(len(points)), key=lambda i: (points[i] - middle).length_squared)
+    second = max(range(len(points)), key=lambda i: (points[i] - points[first]).length_squared)
+    line = points[second] - points[first]
+    along = line.normalized() if line.length > 0.0 else line
+
+    def gap(i):
+        off = points[i] - points[first]
+        return (off - along * off.dot(along)).length_squared
+
+    return first, second, max(range(len(points)), key=gap)
 
 
 def note_rest(part, obj):
     """Remember where three of an object's vertices are in the world at the
     part's Before, so that an object framed differently later - its origin set,
     its scale applied - can be told from one that was dragged: the first has
-    its vertices where they were."""
+    its vertices where they were. Which three, by number, is kept as well, so
+    that they can be found again when the mesh has changed since."""
     count = len(obj.data.vertices) if obj.type == "MESH" else 0
     if count < 3:
         part.rest_count = 0
+        part.rest_which = (-1, -1, -1)
         return
+    which = spread_vertices(obj.data.vertices)
     world = as_matrix(part.before)
     marks = []
-    for index in marked_vertices(count):
+    for index in which:
         marks.extend(world @ obj.data.vertices[index].co)
     part.rest_marks = marks
+    part.rest_which = which
     part.rest_count = count
 
 
@@ -2358,29 +2439,183 @@ def take_before(part, obj, place=None):
     note_rest(part, obj)
 
 
-def reach_of(obj):
-    """How big an object is across, in the world."""
-    return max(diagonal([obj.matrix_world @ c for c in corners_of(obj)]), 1e-6)
+def reach_of(obj, corners=None):
+    """How big an object is across, in the world. `corners`, if the caller has
+    them already, are those of corners_of."""
+    corners = corners_of(obj) if corners is None else corners
+    return max(diagonal([obj.matrix_world @ c for c in corners]), 1e-6)
+
+
+def triangle_frame(a, b, c):
+    """A frame standing on the first of three points: its X along the first
+    edge, its Z square to the triangle, its Y between. None when the three lie
+    (nearly) in a line, and no frame stands on them."""
+    along, across = b - a, c - a
+    normal = along.cross(across)
+    if along.length < 1e-12 or normal.length < 1e-4 * along.length * across.length:
+        return None
+    x = along.normalized()
+    z = normal.normalized()
+    y = z.cross(x)
+    return Matrix(((x.x, y.x, z.x, a.x),
+                   (x.y, y.y, z.y, a.y),
+                   (x.z, y.z, z.z, a.z),
+                   (0.0, 0.0, 0.0, 1.0)))
+
+
+def rigid_fit(then, now):
+    """The turn and shift - one 4x4 matrix - that carries three points onto
+    three others, and how far the worst of them misses: nothing when they are
+    the same shape, however far apart. (None, infinity) when either three lie
+    (nearly) in a line, and say nothing about a turn.
+
+    A frame is stood on each triangle, and the fit is the one frame on the
+    other: exact for the first point, and for the others as far as the two
+    triangles are alike.
+    """
+    start, end = triangle_frame(*then), triangle_frame(*now)
+    if start is None or end is None:
+        return None, math.inf
+    fit = end @ start.inverted_safe()
+    return fit, max((fit @ a - b).length for a, b in zip(then, now))
+
+
+def rest_marks_of(part):
+    """The places a part's marks were taken at, in the world, as three vectors."""
+    return [Vector(part.rest_marks[3 * number:3 * number + 3]) for number in range(3)]
+
+
+def rest_places(part, obj):
+    """Where the vertices a part is told by are now, in the world - or None when
+    they cannot be read: the part has none, the object is no mesh, or the mesh
+    no longer has them. A part from 0.19.0 names its three by position in a
+    mesh of the same size; a newer one by number, so a mesh that has grown, its
+    old vertices where they were, can still be read."""
+    if not part.rest_count or obj is None or obj.type != "MESH":
+        return None
+    vertices = obj.data.vertices
+    which = tuple(part.rest_which)
+    if which[0] < 0:
+        if len(vertices) != part.rest_count:
+            return None
+        which = marked_vertices(part.rest_count)
+    elif max(which) >= len(vertices):
+        return None
+    return [obj.matrix_world @ vertices[index].co for index in which]
+
+
+def rest_slack(obj, points, corners=None):
+    """How far from where it was a mark may be and still be there: a little of
+    the object's size, and of the rounding that comes with standing far from
+    the world's origin."""
+    return (1e-5 * reach_of(obj, corners)
+            + 1e-6 * max([abs(c) for p in points for c in p] or [0.0]))
+
+
+def frame_gap(corners, one, other):
+    """How far apart two frames put a mesh whose corners (in its own space) are
+    these: its origin and a point as far along each of its axes as it is across.
+    Nothing when the two are the same frame."""
+    size = max(diagonal(corners), 1e-6)
+    probes = (Vector((0.0, 0.0, 0.0)), Vector((size, 0.0, 0.0)),
+              Vector((0.0, size, 0.0)), Vector((0.0, 0.0, size)))
+    return max((one @ p - other @ p).length for p in probes)
 
 
 def was_reframed(part, obj):
-    """Whether an object that is off its Before only has its mesh framed in
-    another way: the same number of vertices, and the ones the part is told by
-    exactly where they were."""
-    if not part.rest_count or obj.type != "MESH" or len(obj.data.vertices) != part.rest_count:
+    """The drag of an object that has had its frame changed - its origin set, its
+    scale or rotation applied - as the matrix it moved the mesh by; or None.
+
+    The mesh of such an object is where it was, or where it was moved to, and
+    only the numbers have changed. The three vertices the part is told by are
+    fitted onto where they are now. If they cannot be - the mesh has changed
+    shape, or size - there is nothing to say. If the object's frame is the one
+    the drag would have left it in, it was dragged, or not moved: also None.
+    Else the frame was changed, and the drag is what the mesh was moved by -
+    the identity when it was not moved at all.
+    """
+    places = rest_places(part, obj)
+    if places is None:
+        return None
+    then = rest_marks_of(part)
+    fit, miss = rigid_fit(then, places)
+    corners = corners_of(obj)
+    slack = rest_slack(obj, then + places, corners)
+    if fit is None or miss > slack:
+        return None
+    still = all((a - b).length <= slack for a, b in zip(then, places))
+    drag = Matrix.Identity(4) if still else fit
+    if frame_gap(corners, obj.matrix_world, drag @ as_matrix(part.before)) <= slack:
+        return None
+    return drag
+
+
+def marks_fit(part, obj, shift=None):
+    """Whether the vertices a part is told by can be read and are where the part's
+    marks say, as they are for an object standing on its Before (carried by
+    `shift`, if the model has been moved). (The size they are measured against is
+    the marks' own, not the mesh's, so that this is quick to ask of every part at
+    every button.)"""
+    places = rest_places(part, obj)
+    if places is None:
         return False
-    slack = 1e-5 * reach_of(obj)
-    world = obj.matrix_world
-    for number, index in enumerate(marked_vertices(part.rest_count)):
-        mark = Vector(part.rest_marks[3 * number:3 * number + 3])
-        if (world @ obj.data.vertices[index].co - mark).length > slack:
-            return False
-    return True
+    then = rest_marks_of(part)
+    if shift is not None:
+        then = [shift @ mark for mark in then]
+    slack = (1e-5 * max((a - b).length for a in then for b in then)
+             + 1e-6 * max(abs(c) for p in then + places for c in p))
+    return all((a - b).length <= slack for a, b in zip(then, places))
+
+
+def retake_marks(data, meshes=None, shift=None):
+    """Take new marks for every object part that stands exactly on its Before
+    and whose marks no longer fit: its mesh was edited since they were taken,
+    so that a vertex moved or the vertices were numbered another way.
+
+    A part off its Before cannot be told from one dragged, and gets none. An
+    object in Edit Mode is waited for. With `meshes`, only the parts whose
+    object uses one of those. With `shift` - the model was moved as a whole
+    since the rig was last caught up, and what it remembers is still where it
+    was - a part stands on its Before if it stands where that is carried to;
+    its marks are taken at the Before it still has, and carried with it later.
+    """
+    for move in data.moves:
+        for part in move.parts:
+            if part.kind != "OBJECT" or not part.has_before:
+                continue
+            if meshes is not None:
+                held = part.object
+                if held is None or held.type != "MESH" or held.data not in meshes:
+                    continue
+            obj, world = hand_moved(part, shift)
+            if (obj is None or world is not None or obj.type != "MESH" or obj.mode == "EDIT"
+                    or len(obj.data.vertices) < 3):
+                continue
+            if not marks_fit(part, obj, shift):
+                note_rest(part, obj)
+
+
+@bpy.app.handlers.persistent
+def marks_handler(*arguments):
+    """Called after each update of the scene: when a mesh was edited, the parts
+    that use it get new marks at once, so that a Set Origin or an Apply that
+    follows the edit is told from a drag. Does nothing unless a mesh is among
+    what was updated, writes only when a mark has moved, and never raises."""
+    try:
+        meshes = {update.id.original for update in arguments[-1].updates
+                  if isinstance(update.id, bpy.types.Mesh)}
+        if not meshes:
+            return
+        for obj in bpy.data.objects:
+            if obj.type == "ARMATURE" and len(obj.rigmoves.moves):
+                retake_marks(obj.rigmoves, meshes, moved_since(obj, obj.rigmoves))
+    except Exception:
+        pass
 
 
 def take_back_reframed(rig, data):
     """Put objects whose origin, scale or rotation was changed after they were
-    bound back on the frame their move was recorded in, the mesh moved the
+    recorded back on the frame their move was recorded in, the mesh moved the
     other way, so that nothing is seen to move. Returns why it cannot, or "".
 
     Set Origin, or Apply Scale or Rotation, changes the object's own transform
@@ -2390,51 +2625,75 @@ def take_back_reframed(rig, data):
     up somewhere else. Done by the machinery Ring uses to stand an object on a
     new frame, and checked the same way: what Blender shows is compared before
     and after, and anything that differs is put back exactly.
+
+    Every part that has a Before is looked at, bound or not, a rider too. One
+    that was moved as well is stood on its Before moved by that much, which is
+    what a part dragged without being touched looks like: the rest of the
+    add-on reads that as a pose, if it is bound, and as where it was put, if not.
     """
     jobs = []
     for move in data.moves:
-        for part in follow_order(move, bound_parts(move)):
+        parts = [part for part in move.parts if part.kind == "OBJECT" and part.has_before]
+        for part in follow_order(move, parts):
             obj, world = hand_moved(part)
-            if obj is not None and world is not None and was_reframed(part, obj):
-                jobs.append((part, obj))
+            drag = was_reframed(part, obj) if world is not None else None
+            if drag is not None:
+                jobs.append((part, obj, drag, drag @ as_matrix(part.before)))
     if not jobs:
         return ""
 
-    def refuse(part):
-        return ("'{:s}' was given a new origin, scale or rotation after it was "
-                "bound, and cannot be put back safely: press Ctrl+Z to undo "
-                "that, or take it out of its move (x) and add it again."
-                .format(short(part.name, 18)))
+    def refuse(part, obj, why):
+        """The refusal, which names what stops the part being put back: the
+        reason reframe_blocker gave - or, when it was tried and looked different,
+        that. A child with keys is the one thing the panel has a button for."""
+        why = why or "re-framing it would change how it looks"
+        if why.startswith("has "):
+            why = "it " + why
+        lifted = {held for _move, _part, held in keyed_parts(data)}
+        if (why.startswith("it has a child with keys")
+                and any(kid in lifted for kid in obj.children)):
+            advice = "Lift Those Keyframes to take its keys off, or press Ctrl+Z to undo that."
+        else:
+            advice = "press Ctrl+Z to undo that, or take it out of its move (x) and add it again."
+        return ("'{:s}' was given a new origin, scale or rotation after it was bound, and "
+                "cannot be put back safely ({:s}): {:s}"
+                .format(short(part.name, 18), why, advice))
 
-    users = bpy.data.user_map(subset={obj for _part, obj in jobs}, value_types={"OBJECT"})
+    users = bpy.data.user_map(subset={obj for _part, obj, _drag, _frame in jobs},
+                              value_types={"OBJECT"})
     # The rig uses every part's object, by the pointer the part keeps.
     users = {obj: {user for user in found if user is not rig} for obj, found in users.items()}
-    for part, obj in jobs:
-        if reframe_blocker(obj, as_matrix(part.before), None, users):
-            return refuse(part)
+    for part, obj, _drag, frame in jobs:
+        why = reframe_blocker(obj, frame, None, users)
+        if why:
+            return refuse(part, obj, why)
     view_layer = bpy.context.view_layer
     view_layer.update()
-    looks = {obj.name: look_of(obj) for _part, obj in jobs}
-    framed = [reframe(obj, as_matrix(part.before)) for part, obj in jobs]
+    looks = {obj.name: look_of(obj) for _part, obj, _drag, _frame in jobs}
+    framed = [reframe(obj, frame) for _part, obj, _drag, frame in jobs]
     view_layer.update()
-    for part, obj in jobs:
+    for part, obj, _drag, _frame in jobs:
         points = looks[obj.name][0]
         far = max([abs(c) for p in points for c in p] or [0.0])
         if not looks_the_same(looks[obj.name], look_of(obj), 1e-5 * reach_of(obj) + 1e-6 * far):
             put_back(framed)
             view_layer.update()
-            return refuse(part)
+            return refuse(part, obj, "")
     settle(framed)
+    moved = sum(1 for _part, _obj, drag, _frame in jobs if drag != Matrix.Identity(4))
     if len(jobs) == 1:
         said = ("'{:s}' had its origin, scale or rotation changed after it was bound; "
                 "it was put back on the frame its move was recorded in - its mesh did "
-                "not move. To change where it turns, use Pivot."
-                .format(short(jobs[0][0].name, 18)))
+                "not move.{:s} To change where it turns, use Pivot."
+                .format(short(jobs[0][0].name, 18),
+                        " It had been moved as well, and that move was kept." if moved else ""))
     else:
         said = ("{:d} parts had their origin, scale or rotation changed after they were "
                 "bound; they were put back on the frame their move was recorded in - "
-                "their meshes did not move. To change where a part turns, use Pivot."
-                .format(len(jobs)))
+                "their meshes did not move.{:s} To change where a part turns, use Pivot."
+                .format(len(jobs),
+                        " {:d} of them had been moved as well, and that move was kept."
+                        .format(moved) if moved else ""))
     HEARD["notes"].append((rig.name, said))
     return ""
 
@@ -2480,18 +2739,91 @@ def carry_stored(data, shift):
                 part.rest_marks = marks
 
 
-def catch_up(rig, data=None):
+def seat_of(rig):
+    """Where the model stands, as a matrix: the Root bone's rest in the world.
+
+    Not the rig object's own matrix. Apply and Set Origin on the rig move the
+    object and the bones by the same amount the other way, and keep the children
+    where they were: the object's matrix changes and the model has not moved,
+    where the Root bone does not stir. Move the rig, or the thing it hangs from,
+    and the Root goes with it. A rig with no Root bone of ours is seated by its
+    object.
+
+    The bone's length is the size of its axes. Apply Scale on a rig that is
+    scaled turns the object's scale into the bones' length - their heads and
+    tails move out by it - and a model made twice the size is still that size.
+    """
+    root = rig.data.bones.get("Root")
+    if root is None:
+        return rig.matrix_world.copy()
+    return rig.matrix_world @ root.matrix_local @ Matrix.Scale(root.length, 4)
+
+
+def store_seat(rig, data):
+    """Keep where the rig stands now as where what it remembers is true."""
+    data.seat, data.seated, data.seat_on_root = flat(seat_of(rig)), True, True
+
+
+def moved_since(rig, data):
+    """How far the model has been moved since catch_up last looked, as a matrix:
+    what it will carry what the rig remembers by. None if it has not been, or
+    that cannot be told - the rig has no seat yet, or is scaled to nothing."""
+    if not data.seated:
+        return None
+    now = seat_of(rig) if data.seat_on_root else rig.matrix_world
+    was = as_matrix(data.seat)
+    if is_singular(rig.matrix_world) or is_singular(was):
+        return None
+    return now @ was.inverted_safe()
+
+
+def is_singular(matrix):
+    """Whether a matrix squeezes space flat, or very nearly: it cannot be undone,
+    and what it carries cannot be carried back.
+
+    Judged by how long its axes are, not by its determinant: a model made small
+    on purpose - a rig at a thousandth, from millimetres - has a determinant of
+    1e-9 and is nothing of the kind. An axis a millionth of the longest, or all of
+    them under a millionth of a unit, is nothing.
+    """
+    lengths = [matrix.to_3x3().col[axis].length for axis in range(3)]
+    return max(lengths) < 1e-6 or min(lengths) <= 1e-6 * max(lengths)
+
+
+def has_no_size(operator, rig, data):
+    """Whether the rig is scaled to nothing at this frame, after saying so.
+
+    For the two buttons that write what they read off a rig - Record keys a pose
+    for a part that looks moved, since it has collapsed, and Build binds a new
+    part with a bone placed through the rig's inverse: neither can be told
+    anything by a rig that has no size. (catch_up leaves such a rig alone.)
+    """
+    if not is_singular(rig.matrix_world):
+        return False
+    data.report = ("'{:s}' is scaled to nothing at this frame, so there is no telling "
+                   "where its parts stand: go to a frame where it has a size, and press "
+                   "this again.".format(short(rig.name, 24)))
+    operator.report({"WARNING"}, data.report)
+    return True
+
+
+def catch_up(rig, data=None, reframe=True):
     """Bring what a rig remembers of where its parts stand into step with
     where the rig stands now. Run first by every operator that reads or writes
     it; never from drawing, where nothing may be written.
 
-    Returns a sentence saying why the operator must not go on, or "".
+    Returns a sentence saying why the operator must not go on, or "". With
+    `reframe` off, objects given a new origin or scale are left as they are for
+    the caller to put back (take_back_reframed) once it has done what has to come
+    first.
 
     Every part's Before and After are world matrices, true for as long as the
     rig stood where it did when they were taken. Move the rig - on its own,
     with everything selected, or by parenting it to a hand and moving the
     hand - and the parts go with it, but what is remembered stayed behind: a
-    Build then put every part back where the model used to be.
+    Build then put every part back where the model used to be. Where the rig
+    stands is told by its Root bone (seat_of), so that Apply and Set Origin on
+    the rig, which move nothing, are not taken for a move.
     """
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
@@ -2502,22 +2834,70 @@ def catch_up(rig, data=None):
     own_actions(rig, data)
     own_armature(rig)
     own_curves(rig, data)
-    now = rig.matrix_world.copy()
-    if not data.seated:
+    now = seat_of(rig)
+    if is_singular(rig.matrix_world):
+        # A rig scaled to nothing - a grow-in, on its first frame - stands
+        # nowhere that can be told, and carrying by it squeezes every Before and
+        # After into a point for good. Nothing is done until it has a size again;
+        # the seat is kept, and the next button after that catches up.
+        return ""
+    if not data.seated or is_singular(as_matrix(data.seat)):
         # A new rig, or one from before this was kept: it stands where it
-        # stands, and what it remembers is taken to be true of that.
-        data.seat, data.seated = flat(now), True
+        # stands, and what it remembers is taken to be true of that. So is a seat
+        # that was kept as nothing, by 0.19.0: there is nowhere to carry from.
+        store_seat(rig, data)
     else:
-        shift = now @ as_matrix(data.seat).inverted_safe()
-        if not same_matrix(shift, Matrix.Identity(4), 1e-6):
+        # A seat kept by 0.19.0 is the rig object's matrix: measured against
+        # that this once, then kept on the Root bone.
+        where, was = now if data.seat_on_root else rig.matrix_world, as_matrix(data.seat)
+        shift = where @ was.inverted_safe()
+        # The rounding of a rig far from the origin is not a move: carried, it
+        # would be carried again at every button, and pile up in what is kept.
+        near = max(where.translation.length, was.translation.length)
+        if not same_place(shift, Matrix.Identity(4), near):
             carry_stored(data, shift)
-            data.seat = flat(now)
-    return take_back_reframed(rig, data)
+            data.far = max(data.far, near)
+            store_seat(rig, data)
+        elif not data.seat_on_root:
+            store_seat(rig, data)
+    # Before anything is put back: a part whose mesh was edited since, and then
+    # given a new origin, is told from a part dragged by marks that fit.
+    retake_marks(data)
+    return take_back_reframed(rig, data) if reframe else ""
 
 
-def ready(operator, rig, data):
-    """Catch a rig up, and say why if the operator may not go on."""
-    refusal = catch_up(rig, data)
+def unavailable(context, rig):
+    """Why a rig cannot be edited now, as a sentence - or "" if it can.
+
+    Switched off in the viewport (the screen icon, Show in Viewports) it cannot
+    be put into edit mode, which almost everything this add-on does to a rig
+    needs; and a rig that is not in the view layer cannot be made the active
+    object. Said before anything is changed: found out half way, a first Build
+    had already taken the lid off its parent, and Ring had made its copies.
+    """
+    name = short(rig.name, 24)
+    if not here(context, rig):
+        return "'{:s}' is not in this view layer, so it cannot be edited here.".format(name)
+    if rig.hide_viewport:
+        return ("Show '{:s}' in the viewport first (the screen icon in the Outliner): it "
+                "cannot be edited while it is switched off.".format(name))
+    return ""
+
+
+def cannot_edit(operator, context, rig):
+    """Whether a rig cannot be edited now, after saying why. For an operator
+    that edits the rig but does not go through ready."""
+    why = unavailable(context, rig)
+    if why:
+        rig.rigmoves.report = why
+        operator.report({"WARNING"}, why)
+    return bool(why)
+
+
+def ready(operator, rig, data, reframe=True):
+    """Say why the operator may not go on - the rig cannot be edited - or catch
+    the rig up, and say why if it may not go on then."""
+    refusal = unavailable(bpy.context, rig) or catch_up(rig, data, reframe)
     if not refusal:
         return True
     data.report = refusal
@@ -2702,8 +3082,7 @@ def ensure_rig(context, chosen, force_new=False):
     root.use_deform = False
     bpy.ops.object.mode_set(mode="OBJECT")
     context.scene.rigmoves_rig = rig
-    rig.rigmoves.seat = flat(rig.matrix_world)
-    rig.rigmoves.seated = True
+    store_seat(rig, rig.rigmoves)
     return rig
 
 
@@ -2721,9 +3100,13 @@ def seat_rig(rig, data=None):
     would otherwise drag the whole rig half way to them.
 
     Skipped on a rig somebody has turned or scaled, where "move the object and
-    shift the bones back" is no longer a plain subtraction.
+    shift the bones back" is no longer a plain subtraction. And on a rig that
+    moves itself - keys on its transform, a driver, an NLA strip: they put the
+    object back where it was on the next frame, and the bones, shifted the
+    other way, would stay shifted, and the whole model with them. (A rig on a
+    parent that moves is no such rig: its own transform stays as it is set.)
     """
-    if not len(rig.data.bones):
+    if not len(rig.data.bones) or has_own_motion(rig):
         return False
     turn = rig.matrix_world.to_3x3()
     if (turn - turn.Identity(3)).median_scale > 1e-6:
@@ -2773,9 +3156,9 @@ def seat_rig(rig, data=None):
         child.matrix_parent_inverse = rig.matrix_world.inverted_safe()
         child.matrix_world = world
     # Moved on purpose, with every child held where it stood: nothing a move
-    # remembers has gone anywhere, so this is where the rig stands now.
-    rig.rigmoves.seat = flat(rig.matrix_world)
-    rig.rigmoves.seated = True
+    # remembers has gone anywhere, so this is where the rig stands now. The Root
+    # bone was moved to the object's new place above, and is part of that.
+    store_seat(rig, rig.rigmoves)
     if was_mode != "OBJECT":
         try:
             bpy.ops.object.mode_set(mode=was_mode)
@@ -3134,12 +3517,18 @@ def frame_of(matrix):
 
 
 def leader_frame(rig, leader):
-    """The frame a leader's move is measured in, in world space, and whether
-    the leader is a mirror image."""
+    """The frame a leader's move is measured in, in the rig's own space, and
+    whether the leader is a mirror image.
+
+    In the rig's space, not the world's: a rig that hangs from something
+    stretched stands in a world that is sheared, and the shear is not a frame a
+    bone can stand in. Seen from the rig, which is what the bones are, the model
+    is as it was built.
+    """
     if leader.kind == "OBJECT":
-        return standing(as_matrix(leader.before))
+        return standing(rig.matrix_world.inverted_safe() @ as_matrix(leader.before))
     bone = rig.data.bones.get(part_bone(leader))
-    return standing(rig.matrix_world @ bone.matrix_local)
+    return standing(bone.matrix_local)
 
 
 def leader_of(move, rider):
@@ -3243,7 +3632,7 @@ def rider_reflection(rig, move, leader, rider):
     setting is the copy's, so every joint of a copied finger mirrors across
     the same plane."""
     lead_mirrored = leader_frame(rig, leader)[1]
-    mirrored = standing(as_matrix(rider.before))[1]
+    mirrored = standing(rig.matrix_world.inverted_safe() @ as_matrix(rider.before))[1]
     local = Matrix.Identity(3)
     if mirrored != lead_mirrored:
         local = local @ reflection("X")
@@ -3270,7 +3659,7 @@ def rider_turn(rig, move, leader, rider):
         return None
     lead_frame = leader_frame(rig, leader)[0]
     bone = rig.data.bones[part_bone(leader)]
-    rest = (rig.matrix_world @ bone.matrix_local).to_3x3().normalized()
+    rest = bone.matrix_local.to_3x3().normalized()
     into_bone = rest.transposed() @ lead_frame.to_3x3()
     return into_bone @ local @ into_bone.transposed()
 
@@ -3309,9 +3698,13 @@ def bind_riders(context, rig, data):
     riders are turned from. A rider's own pivot is its leader's, carried over.
     Its bone hangs where rider_holder says: from the root, or for a copied
     finger from the copy of the joint before it.
+
+    All in the rig's own space, where the bones are: a model carried by something
+    stretched has world matrices that are sheared, and standing() of a shear is
+    not where a rider's bone was - the seats of the riders already there moved,
+    and the copies with them.
     """
-    world = rig.matrix_world
-    into = world.inverted_safe()
+    into = rig.matrix_world.inverted_safe()
     fresh, moved, riders = [], [], []
     for move in data.moves:
         for _index, rider in riders_of(move):
@@ -3322,18 +3715,16 @@ def bind_riders(context, rig, data):
                 continue
             bone = rig.data.bones[part_bone(leader)]
             # The leader's bone as the leader sees it, then stood on the rider.
-            own_frame = frame_of(as_matrix(rider.before))
+            own_frame = frame_of(into @ as_matrix(rider.before))
             lead_frame = leader_frame(rig, leader)[0].inverted_safe()
-            carried = own_frame @ lead_frame @ world @ bone.matrix_local
-            seat = frame_of(into @ carried)
+            seat = frame_of(own_frame @ lead_frame @ bone.matrix_local)
             # A mirrored rider turns about the mirror image of its leader's
             # pivot, not the pivot carried straight over: off the mirror's
             # plane the two are apart, and the rider swung about the wrong
             # point and ended up out of place.
             local = rider_reflection(rig, move, leader, rider)
             if local is not None:
-                seat.translation = into @ (own_frame @ local.to_4x4() @ lead_frame
-                                           @ world @ bone.head_local)
+                seat.translation = own_frame @ local.to_4x4() @ lead_frame @ bone.head_local
             riders.append((move, rider))
             own = rig.data.bones.get(rider.bone_name) if rider.bone_name else None
             if own is None:
@@ -4781,12 +5172,15 @@ DELAY_LIMITS = (0.0, 0.99)
 def rider_spot(rig, move, leader, rider):
     """Where a rider turns, in the world, standing where it stands at Before:
     its leader's pivot carried over to it, the way its bone is stood on it -
-    through the frames the two stand in, and mirrored if it mirrors."""
-    own = frame_of(as_matrix(rider.before))
+    through the frames the two stand in (the rig's, as bind_riders has them),
+    and mirrored if it mirrors."""
+    world = rig.matrix_world
+    into = world.inverted_safe()
+    own = frame_of(into @ as_matrix(rider.before))
     back = leader_frame(rig, leader)[0].inverted_safe()
     local = rider_reflection(rig, move, leader, rider)
     mirror = local.to_4x4() if local is not None else Matrix.Identity(4)
-    return own @ mirror @ back @ pivot_world(leader)
+    return world @ (own @ mirror @ back @ (into @ pivot_world(leader)))
 
 
 def part_spot(rig, move, part, middle=False):
@@ -5739,6 +6133,8 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
+        if cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         meant = part_held(move, self.part)
         catch_up(rig, data)
         rider = part_again(move, meant)
@@ -5828,17 +6224,26 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
         if not here(context, rig):
             return {"CANCELLED"}
         data = rig.rigmoves
-        if not ready(self, rig, data):
+        # Parts given a new origin or scale are put back only after the keys are
+        # gone: a child with keys of its own is what stops that, and these are
+        # the keys.
+        if not ready(self, rig, data, reframe=False):
             return {"CANCELLED"}
         objects, bones, still_keyed = clear_autokey(
             rig, data, context.scene.tool_settings.use_keyframe_insert_auto)
+        refusal = take_back_reframed(rig, data)
         if not (objects or bones):
-            data.report = "Nothing is carrying stray keyframes."
-            self.report({"INFO"}, data.report)
+            if refusal:
+                data.report = refusal
+                self.report({"WARNING"}, refusal)
+            else:
+                data.report = "Nothing is carrying stray keyframes."
+                self.report({"INFO"}, data.report)
             return {"CANCELLED"}
 
-        # With the keys gone the rest can finally be put where it belongs.
-        put_back = reseat_bound(data)
+        # With the keys gone the rest can finally be put where it belongs - but
+        # not a part that could not be put back on its frame, which would jump.
+        put_back = 0 if refusal else reseat_bound(data)
         context.view_layer.update()
         data.report = ("{:d} keyframe track(s) lifted off the parts, {:d} off "
                        "the rig.".format(objects, bones))
@@ -5849,8 +6254,11 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
             data.report += (" {:d} put back on its Before.".format(put_back)
                             if put_back == 1 else
                             " {:d} put back on their Before.".format(put_back))
-        data.report += " Build to finish."
-        self.report({"INFO"}, data.report)
+        if refusal:
+            data.report += " " + refusal
+        else:
+            data.report += " Build to finish."
+        self.report({"WARNING"} if refusal else {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -5916,7 +6324,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
         move = data.moves[self.index]
-        if not ready(self, rig, data):
+        if not ready(self, rig, data) or has_no_size(self, rig, data):
             return {"CANCELLED"}
         if not len(move.parts):
             data.report = "'{:s}': no parts yet.".format(move.name)
@@ -6251,15 +6659,8 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         data = rig.rigmoves
         if not len(data.moves):
             return {"CANCELLED"}
-        if not ready(self, rig, data):
+        if not ready(self, rig, data) or has_no_size(self, rig, data):
             return {"CANCELLED"}
-        # A part bound before this was kept has no fingerprint: one is taken
-        # now for every part that is standing on its Before.
-        for move in data.moves:
-            for part in bound_parts(move):
-                obj, world = hand_moved(part)
-                if obj is not None and world is None and not part.rest_count:
-                    note_rest(part, obj)
 
         # Loose objects first: each gets a bone, gets bound to it, and has its
         # two recorded placements written into the move's path. After this a
@@ -6522,10 +6923,18 @@ class RIGMOVES_OT_build(bpy.types.Operator):
 
 def unrecorded(data):
     """Bound parts dragged off their Before and not recorded yet. One that has
-    only had its origin, scale or rotation changed was not dragged."""
-    return [part.name for move in data.moves for part in bound_parts(move)
-            if not part.leader and hand_moved(part)[1] is not None
-            and not was_reframed(part, hand_moved(part)[0])]
+    only had its origin, scale or rotation changed was not dragged; one that
+    has had that and been moved as well was."""
+    out = []
+    for move in data.moves:
+        for part in bound_parts(move):
+            obj, world = hand_moved(part)
+            if part.leader or world is None:
+                continue
+            drag = was_reframed(part, obj)
+            if drag is None or drag != Matrix.Identity(4):
+                out.append(part.name)
+    return out
 
 
 def keeps_drags(operator, data):
@@ -8067,8 +8476,9 @@ def reframe(obj, matrix):
     Its mesh is a new one, and the old one is kept until the ring is settled:
     anything else that shares the old one stays as it was, and putting it back
     is exact. Whatever hangs from the object by its object is held where it
-    is; what hangs from a vertex follows the vertices, which have not moved.
-    Returns what put_back needs to undo it.
+    is, and hung from it again as Build hangs a follower; what hangs from a
+    vertex follows the vertices, which have not moved. Returns what put_back
+    needs to undo it.
     """
     was = obj.matrix_world.copy()
     old = obj.data
@@ -8081,10 +8491,15 @@ def reframe(obj, matrix):
     if inside.determinant() < 0.0:
         turn_faces_over(mesh)
     mesh.update()
-    kept = [(kid, kid.matrix_world.copy()) for kid in obj.children
-            if kid.parent_type == "OBJECT"]
+    kept = [(kid, kid.matrix_world.copy(), kid.matrix_parent_inverse.copy())
+            for kid in obj.children if kid.parent_type == "OBJECT"]
     obj.matrix_world = matrix
-    for kid, world in kept:
+    # Held by writing its own transform alone, a child keeps the parent inverse
+    # Blender's Apply left it, which no longer cancels the parent's matrix when
+    # the parent is stood on a frame with a non-uniform scale again: the child
+    # came out sheared, and every turn it was given after that came out wrong.
+    for kid, world, _inverse in kept:
+        kid.matrix_parent_inverse = matrix.inverted_safe()
         kid.matrix_world = world
     return obj, was, old, kept
 
@@ -8097,7 +8512,8 @@ def put_back(framed):
         if fresh.users == 0:
             bpy.data.meshes.remove(fresh)
         obj.matrix_world = was
-        for kid, world in kept:
+        for kid, world, inverse in kept:
+            kid.matrix_parent_inverse = inverse
             kid.matrix_world = world
 
 
@@ -8722,6 +9138,8 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
     @mentioning
     def execute(self, context):
         rig = rig_of(context)
+        if rig is None or cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         data = rig.rigmoves
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
@@ -8869,6 +9287,8 @@ class RIGMOVES_OT_remove_group(bpy.types.Operator):
 
     def execute(self, context):
         rig = rig_of(context)
+        if rig is None or cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         data = rig.rigmoves
         if not 0 <= self.index < len(data.groups):
             return {"CANCELLED"}
@@ -8896,6 +9316,8 @@ class RIGMOVES_OT_drop_member(bpy.types.Operator):
 
     def execute(self, context):
         rig = rig_of(context)
+        if rig is None or cannot_edit(self, context, rig):
+            return {"CANCELLED"}
         data = rig.rigmoves
         group = data.groups[self.group_index]
         group.members.remove(self.member_index)
@@ -9610,6 +10032,9 @@ def take_down():
     for handler in list(bpy.app.handlers.depsgraph_update_post):
         if getattr(handler, "__name__", "") == "follow_renames_handler":
             bpy.app.handlers.depsgraph_update_post.remove(handler)
+    for handler in list(bpy.app.handlers.depsgraph_update_post):
+        if getattr(handler, "__name__", "") == "marks_handler":
+            bpy.app.handlers.depsgraph_update_post.remove(handler)
     if hasattr(bpy.types.Scene, "rigmoves_rig"):
         del bpy.types.Scene.rigmoves_rig
     if hasattr(bpy.types.Object, "rigmoves"):
@@ -9636,6 +10061,7 @@ def register():
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == "ARMATURE")
     bpy.app.handlers.depsgraph_update_post.append(follow_renames_handler)
+    bpy.app.handlers.depsgraph_update_post.append(marks_handler)
 
 
 def unregister():
