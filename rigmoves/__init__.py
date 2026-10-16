@@ -2243,6 +2243,63 @@ def was_reframed(part, obj):
     return drag
 
 
+def marks_fit(part, obj):
+    """Whether the vertices a part is told by can be read and are where the part's
+    marks say, as they are for an object standing on its Before. (The size they
+    are measured against is the marks' own, not the mesh's, so that this is
+    quick to ask of every part at every button.)"""
+    places = rest_places(part, obj)
+    if places is None:
+        return False
+    then = rest_marks_of(part)
+    slack = (1e-5 * max((a - b).length for a in then for b in then)
+             + 1e-6 * max(abs(c) for p in then + places for c in p))
+    return all((a - b).length <= slack for a, b in zip(then, places))
+
+
+def retake_marks(data, meshes=None):
+    """Take new marks for every object part that stands exactly on its Before
+    and whose marks no longer fit: its mesh was edited since they were taken,
+    so that a vertex moved or the vertices were numbered another way.
+
+    A part off its Before cannot be told from one dragged, and gets none. An
+    object in Edit Mode is waited for. With `meshes`, only the parts whose
+    object uses one of those.
+    """
+    for move in data.moves:
+        for part in move.parts:
+            if part.kind != "OBJECT" or not part.has_before:
+                continue
+            if meshes is not None:
+                held = part.object
+                if held is None or held.type != "MESH" or held.data not in meshes:
+                    continue
+            obj, world = hand_moved(part)
+            if (obj is None or world is not None or obj.type != "MESH" or obj.mode == "EDIT"
+                    or len(obj.data.vertices) < 3):
+                continue
+            if not marks_fit(part, obj):
+                note_rest(part, obj)
+
+
+@bpy.app.handlers.persistent
+def marks_handler(*arguments):
+    """Called after each update of the scene: when a mesh was edited, the parts
+    that use it get new marks at once, so that a Set Origin or an Apply that
+    follows the edit is told from a drag. Does nothing unless a mesh is among
+    what was updated, writes only when a mark has moved, and never raises."""
+    try:
+        meshes = {update.id.original for update in arguments[-1].updates
+                  if isinstance(update.id, bpy.types.Mesh)}
+        if not meshes:
+            return
+        for obj in bpy.data.objects:
+            if obj.type == "ARMATURE" and len(obj.rigmoves.moves):
+                retake_marks(obj.rigmoves, meshes)
+    except Exception:
+        pass
+
+
 def take_back_reframed(rig, data):
     """Put objects whose origin, scale or rotation was changed after they were
     recorded back on the frame their move was recorded in, the mesh moved the
@@ -2386,6 +2443,9 @@ def catch_up(rig, data=None):
         if not same_matrix(shift, Matrix.Identity(4), 1e-6):
             carry_stored(data, shift)
             data.seat = flat(now)
+    # Before anything is put back: a part whose mesh was edited since, and then
+    # given a new origin, is told from a part dragged by marks that fit.
+    retake_marks(data)
     return take_back_reframed(rig, data)
 
 
@@ -6117,13 +6177,6 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             return {"CANCELLED"}
         if not ready(self, rig, data):
             return {"CANCELLED"}
-        # A part bound before this was kept has no fingerprint: one is taken
-        # now for every part that is standing on its Before.
-        for move in data.moves:
-            for part in bound_parts(move):
-                obj, world = hand_moved(part)
-                if obj is not None and world is None and not part.rest_count:
-                    note_rest(part, obj)
 
         # Loose objects first: each gets a bone, gets bound to it, and has its
         # two recorded placements written into the move's path. After this a
@@ -9452,6 +9505,9 @@ def take_down():
     for handler in list(bpy.app.handlers.depsgraph_update_post):
         if getattr(handler, "__name__", "") == "follow_renames_handler":
             bpy.app.handlers.depsgraph_update_post.remove(handler)
+    for handler in list(bpy.app.handlers.depsgraph_update_post):
+        if getattr(handler, "__name__", "") == "marks_handler":
+            bpy.app.handlers.depsgraph_update_post.remove(handler)
     if hasattr(bpy.types.Scene, "rigmoves_rig"):
         del bpy.types.Scene.rigmoves_rig
     if hasattr(bpy.types.Object, "rigmoves"):
@@ -9478,6 +9534,7 @@ def register():
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == "ARMATURE")
     bpy.app.handlers.depsgraph_update_post.append(follow_renames_handler)
+    bpy.app.handlers.depsgraph_update_post.append(marks_handler)
 
 
 def unregister():

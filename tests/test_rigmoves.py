@@ -8182,6 +8182,128 @@ class TestAReframedPartNotBuiltYet(CopyThatCase):
         self.assertLess(drift(lid, [turn_about(hinge, "X", -70.0) @ p for p in shut]), TOLERANCE)
 
 
+class TestAnEditedMeshThenANewOrigin(ChestCase):
+    """The mesh of a built lid is edited in Edit Mode - a vertex nudged, or the
+    mesh subdivided - and then the lid is given a new origin. The marks that tell
+    a part framed another way from one dragged were never taken again, so the
+    lid was put back as if the edit had not been made: 0.82 m off at rest."""
+
+    CURSOR = Vector((0.7, 0.3, 1.4))
+
+    def edit(self, how):
+        """Edit the lid's mesh in Edit Mode and come out, as a user does."""
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        editing = bmesh.from_edit_mesh(self.lid.data)
+        editing.verts.ensure_lookup_table()
+        if how == "nudge":
+            # Vertices the part is told by: the first of its three, and the first
+            # vertex, which a part from 0.19.0 was told by.
+            part = self.move.parts["Lid"]
+            for index in {0, getattr(part, "rest_which", (0,))[0]}:
+                editing.verts[index].co.x += 0.1
+        else:
+            bmesh.ops.subdivide_edges(editing, edges=list(editing.edges), cuts=1,
+                                      use_grid_fill=True)
+        bmesh.update_edit_mesh(self.lid.data)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def set_origin_and_build(self):
+        """Set Origin to the cursor, Build, and where the lid stands at 0."""
+        seen = world_points(self.lid)
+        bpy.context.scene.cursor.location = self.CURSOR
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.lid, seen), TOLERANCE)
+
+    def test_a_nudged_marked_vertex_then_set_origin_moves_nothing(self):
+        self.edit("nudge")
+        self.set_origin_and_build()
+
+    def test_a_subdivided_lid_then_set_origin_moves_nothing(self):
+        self.edit("subdivide")
+        self.assertEqual(len(self.lid.data.vertices), 26)
+        self.set_origin_and_build()
+
+    def test_the_marks_are_taken_again_as_soon_as_edit_mode_is_left(self):
+        part = self.move.parts["Lid"]
+        was = list(part.rest_marks)
+        self.assertTrue(rigmoves.marks_fit(part, self.lid))
+        self.edit("nudge")
+        self.assertTrue(rigmoves.marks_fit(part, self.lid))
+        self.assertNotEqual(list(part.rest_marks), was)
+        self.assertIn(rigmoves.marks_handler, bpy.app.handlers.depsgraph_update_post)
+
+    def test_a_button_takes_them_again_when_nothing_else_has(self):
+        bpy.app.handlers.depsgraph_update_post.remove(rigmoves.marks_handler)
+        self.addCleanup(bpy.app.handlers.depsgraph_update_post.append, rigmoves.marks_handler)
+        part = self.move.parts["Lid"]
+        self.edit("nudge")
+        self.assertFalse(rigmoves.marks_fit(part, self.lid))
+        self.assertEqual(bpy.ops.rigmoves.show_paths(index=0, show=False), {"FINISHED"})
+        self.assertTrue(rigmoves.marks_fit(part, self.lid))
+        self.set_origin_and_build()
+
+    def test_a_part_off_its_before_keeps_its_marks(self):
+        # Dragged, it cannot be told from a part with its mesh changed.
+        part = self.move.parts["Lid"]
+        was = list(part.rest_marks)
+        self.lid.location.z += 0.5
+        bpy.context.view_layer.update()
+        rigmoves.retake_marks(self.move.id_data.rigmoves)
+        self.assertEqual(list(part.rest_marks), was)
+
+    def test_playback_does_not_retake_marks(self):
+        # Frames that deform the lid put no mesh among the updates.
+        handle = rig().pose.bones[self.move.handle_name]
+        handle.location.y = 0.0
+        handle.keyframe_insert("location", frame=1)
+        handle.location.y = self.move.rail
+        handle.keyframe_insert("location", frame=20)
+        with mock.patch.object(rigmoves, "note_rest", wraps=rigmoves.note_rest) as noted:
+            for frame in (1, 5, 10, 20, 7):
+                bpy.context.scene.frame_set(frame)
+                bpy.context.view_layer.update()
+            self.assertEqual(noted.call_count, 0)
+
+    def test_the_handler_writes_only_when_a_mark_moved_and_never_raises(self):
+        part = self.move.parts["Lid"]
+        updated = types.SimpleNamespace(updates=[types.SimpleNamespace(id=self.lid.data)])
+        with mock.patch.object(rigmoves, "note_rest", wraps=rigmoves.note_rest) as noted:
+            rigmoves.marks_handler(None, updated)
+            self.assertEqual(noted.call_count, 0)
+            self.lid.data.vertices[part.rest_which[0]].co.x += 0.1
+            rigmoves.marks_handler(None, updated)
+            self.assertEqual(noted.call_count, 1)
+            rigmoves.marks_handler(None, updated)
+            self.assertEqual(noted.call_count, 1)
+        for nothing in (None, 5, types.SimpleNamespace(updates=None),
+                        types.SimpleNamespace(updates=[types.SimpleNamespace(id=None)])):
+            self.assertIsNone(rigmoves.marks_handler(None, nothing))
+        self.assertIsNone(rigmoves.marks_handler())
+
+    def test_an_object_in_edit_mode_is_waited_for(self):
+        part = self.move.parts["Lid"]
+        was = list(part.rest_marks)
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            editing = bmesh.from_edit_mesh(self.lid.data)
+            editing.verts.ensure_lookup_table()
+            editing.verts[part.rest_which[0]].co.x += 0.1
+            bmesh.update_edit_mesh(self.lid.data)
+            bpy.context.view_layer.update()
+            self.assertEqual(list(part.rest_marks), was)
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+        self.assertNotEqual(list(part.rest_marks), was)
+
+
 class TestRigidFit(unittest.TestCase):
     """The fit of three marks onto three others, which tells a part that was
     framed another way from one that was moved."""
