@@ -6316,6 +6316,37 @@ class TestSpreadDialogFollowsItsSettings(CopyThatCase):
         self.assertTrue(props["sizing"].is_hidden)
 
 
+class TestRingDialogMemory(CopyThatCase):
+    """Blender opens an operator's dialog with what it was last used with, for
+    every property not marked SKIP_SAVE. Ring keeps Use, Count, Round, About and
+    Linked copies from the last Ring - the next flower is likely to be made the
+    same way - but not the Lead step: after the outer petals' step, the leaf's
+    Ring opened with it and, left alone, the second leaf opened ahead of the
+    first."""
+
+    @staticmethod
+    def next_dialog_opens_with(used):
+        """What Blender puts back from the last use, as a script can see it: the
+        properties that are not marked SKIP_SAVE. The rest are the default."""
+        props = bpy.ops.rigmoves.ring.get_rna_type().properties
+        return {name: value for name, value in used.items() if not props[name].is_skip_save}
+
+    def test_two_rings_in_a_row_the_second_opens_with_no_lead_step(self):
+        outer_petals = {"use": "ADOPT", "count": 8, "center": "ORIGIN", "axis": "X",
+                        "linked": False, "lead_step": -9}
+        reopened = self.next_dialog_opens_with(outer_petals)
+        self.assertEqual(reopened, {"use": "ADOPT", "count": 8, "center": "ORIGIN",
+                                    "axis": "X", "linked": False})
+        self.assertNotIn("lead_step", reopened)
+        self.assertEqual(bpy.ops.rigmoves.ring.get_rna_type().properties["lead_step"].default, 0)
+
+    def test_what_a_ring_keeps_it_keeps(self):
+        props = bpy.ops.rigmoves.ring.get_rna_type().properties
+        for name in ("use", "count", "center", "axis", "linked"):
+            self.assertFalse(props[name].is_skip_save, name)
+        self.assertTrue(props["lead_step"].is_skip_save)
+
+
 class TestRingDuplicateOnTop(RingFlows):
     """Shift+D, then a right-click to cancel the move, leaves a copy exactly on
     the part. That is not a copy off the ring - the advice for those, the centre

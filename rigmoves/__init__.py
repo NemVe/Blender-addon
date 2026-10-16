@@ -7113,8 +7113,11 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         description="Share the original's mesh, so editing one edits them all. "
                     "Build gives each part a mesh of its own, because Blender "
                     "keeps a mesh's vertex groups with the mesh")
+    # Not remembered from the last Ring, as the others are: a step that fitted
+    # the outer petals is not the leaf's, and left alone, the second leaf opened
+    # ahead of the first.
     lead_step: bpy.props.IntProperty(
-        name="Lead step", default=0, min=-50, max=50,
+        name="Lead step", default=0, min=-50, max=50, options={"SKIP_SAVE"},
         description="What each copy's Lead is stepped by, further from the "
                     "original round the ring: the two next to it are 1 step "
                     "out, the two next to those 2, and so on, both ways round. "

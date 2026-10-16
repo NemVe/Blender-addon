@@ -326,7 +326,8 @@ What it makes, and the rest:
   filled now are given a Lead; those of an earlier ring keep theirs. A copied
   finger has one Lead, its first joint's, so the fingers go one after another
   with their joints in step. Leave it at 0 and every copy moves with the
-  original.
+  original. The dialog keeps Use, Count, Round, About and Linked copies from the
+  last Ring; Lead step always opens at 0.
 
 It asks before it makes anything: a part that is not in the move, a rider, a
 part with no Before, or a part dragged and not recorded on a built move are
@@ -1300,6 +1301,11 @@ and one lifted 1 m:
   default of Both ways worked only the first time, and an **Only the selected** left
   on after a spread of Delays reached only the riders Ring had left selected, which
   is what 0.17 had stopped it doing.
+- **Ring's Lead step was remembered from the last Ring.** Blender opens a dialog
+  with what it was last used with, and the Lead step was not marked otherwise: after
+  the outer petals' step of 9, the Ring dialog of the leaf opened with 9 as well,
+  and, left alone, the second leaf opened ahead of the first. The Lead step always
+  opens at 0 now. Use, Count, Round, About and Linked copies are still remembered.
 
 ## Known rough edges
 

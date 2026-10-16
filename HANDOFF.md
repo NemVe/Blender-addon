@@ -267,7 +267,13 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
   or `invoke` is about to) the step is `sized_step`: -10 / 0.1, less if the top
   place would pass 40 of 50 (Lead) or 0.9 of 0.99 (Delay). `invoke` also turns
   Both ways on for Leads around a ring when it was not set; `execute` does not
-  (scripts keep the literal default). Ring's `lead_step` stays 0 unless typed.
+  (scripts keep the literal default). Ring's `lead_step` stays 0 unless typed:
+  it is SKIP_SAVE (0.19) - Blender restores every property of an operator that is
+  not, on the next invoke, so the outer petals' step reached the leaf's dialog -
+  while Use, Count, Round, About and Linked copies are remembered on purpose.
+  Blender stores the last use only when a dialog's OK runs the operator, not for a
+  script's call (`window_manager.operator_properties_last` stays at the defaults
+  headless), so the tests read the `is_skip_save` flag and a real window shows it.
   **The dialog keeps the step sized** (0.19): `invoke` writes it and sets the
   hidden SKIP_SAVE `sizing` flag; the `update=` callback `_spread_changed` on Order,
   By, Both ways, Only the selected, Axis and Seed sizes it again (`sized_for`, which
