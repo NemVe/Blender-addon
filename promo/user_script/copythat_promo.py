@@ -2128,6 +2128,13 @@ class Stage:
         space = area.spaces.active
         frame, before = scene.frame_current, view_snapshot(space)
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # Blender's own startup scene - a cube, a camera and a light - is still
+        # in the session. The file is for somebody to open and adjust, so it
+        # goes; with no scene left to hold them, its objects are not written.
+        for other in list(bpy.data.scenes):
+            if (other != scene
+                    and sorted(o.name for o in other.objects) == ["Camera", "Cube", "Light"]):
+                bpy.data.scenes.remove(other)
         try:
             scene.frame_set(scene.frame_end)
             self.view_now({"camera": camera})
