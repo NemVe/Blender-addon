@@ -1039,24 +1039,27 @@ def take_out_gone(rig, data):
     constraints, its drivers and its bone's curves go with it, and its bone at
     the next Build.
 
-    One that leads riders stays: its bone still plays the path they copy. It
-    is given a name that is free for a new object, "Hand (deleted)", and
-    everything in its move that named it names that. Said through HEARD, as
-    the rest of what catch_up does is.
+    One that leads riders stays: its bone still plays the path they copy. So
+    does a rider that other riders ride on - the middle joint of a copied
+    finger, whose tip hangs from its bone: taken out, the tip would hang from
+    the original finger instead. It is given a name that is free for a new
+    object, "Hand (deleted)", and everything in its move that named it names
+    that. Said through HEARD, as the rest of what catch_up does is.
     """
     for move in data.moves:
         gone = [p.name for p in move.parts if p.gone]
         if not gone:
             continue
         leading = {p.leader for p in move.parts if p.leader}
-        keep = [name for name in gone if name in leading]
-        out = [name for name in gone if name not in leading]
+        carrying = {p.rides_on for p in move.parts if p.rides_on}
+        keep = [name for name in gone if name in leading or name in carrying]
+        out = [name for name in gone if name not in keep]
         said = []
         if out:
             one = len(out) == 1
             said.append("{:s} {:s} deleted, so {:s} {:s} taken out of '{:s}'.".format(
-                named(out), "was" if one else "were", "it" if one else "they",
-                "was" if one else "were", move.name))
+                named([plain_name(name) for name in out]), "was" if one else "were",
+                "it" if one else "they", "was" if one else "were", move.name))
         taken, renamed = {p.name for p in move.parts}, []
         for name in keep:
             # Kept, and renamed, by an earlier catch-up.
@@ -1066,12 +1069,15 @@ def take_out_gone(rig, data):
             while new in taken:
                 new, number = "{:s}{:s} {:d}".format(name, DELETED, number), number + 1
             taken.add(new)
-            riders = sum(1 for p in move.parts if p.leader == name)
-            said.append("'{:s}' was deleted, but {:s} {:s} its move, so it is kept as "
-                        "'{:s}': take {:s} out and it goes too.".format(
+            copying = sum(1 for p in move.parts if p.leader == name)
+            riders = copying or sum(1 for p in move.parts if p.rides_on == name)
+            one = riders == 1
+            said.append("'{:s}' was deleted, but {:s} {:s}, so it is kept as '{:s}': take "
+                        "{:s} out and it goes too.".format(
                             short(name, 18), counted(riders, "rider"),
-                            "copies" if riders == 1 else "copy", short(new, 28),
-                            "it" if riders == 1 else "them"))
+                            ("copies its move" if one else "copy its move") if copying
+                            else ("hangs from it" if one else "hang from it"),
+                            short(new, 28), "it" if one else "them"))
             renamed.append((move.parts[name], new))
         rename_parts(move, renamed)
         # What followed a part that is going follows nothing now, standing where
@@ -1086,8 +1092,6 @@ def take_out_gone(rig, data):
                 hang(other)
             elif other.follows in ghosts:
                 hang(other)
-            if other.rides_on in going:
-                other.rides_on = ""
         if out:
             take_riders_out(rig, move, out)
         for text in said:

@@ -4306,8 +4306,10 @@ class FingerCase(CopyThatCase):
             bpy.context.scene.cursor.location = knuckle
             select(segment)
             self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
-        self.move.parts["Seg2"].follows = "Seg1"
-        self.move.parts["Seg3"].follows = "Seg2"
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.assertEqual({p.name: p.follows for p in self.move.parts},
+                         {"Seg1": "", "Seg2": "Seg1", "Seg3": "Seg2"})
         carry = Matrix.Identity(4)
         for segment, knuckle, home in zip(self.segments, self.KNUCKLES, homes):
             carry = (carry @ Matrix.Translation(knuckle)
@@ -4425,6 +4427,42 @@ class TestADeletedPartLeavesItsMove(FingerCase):
                          {"FINISHED"})
         self.assertIs(rigmoves.part_object(self.move.parts["Petal"]), new)
         self.assertIsNone(rigmoves.part_object(self.move.parts["Petal (deleted)"]))
+
+    def test_the_middle_joint_of_a_copied_finger_stays_for_the_tip_that_hangs_from_it(self):
+        # Taken out, the tip of the copy would hang from the original finger's
+        # middle joint instead, and fly about with it.
+        self.finger()
+        bpy.context.scene.cursor.location = (0.0, 0.0, -3.0)
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=2), {"FINISHED"})
+        tip = bpy.data.objects["Seg3 2"]
+        plays = {}
+        for share in (0.5, 1.0):
+            drive(self.move, share)
+            plays[share] = world_points(tip)
+        drive(self.move, 0.0)
+        self.assertEqual(self.move.parts["Seg3 2"].rides_on, "Seg2 2")
+        delete_in_the_viewport(bpy.data.objects["Seg2 2"])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.move.parts["Seg3 2"].rides_on, "Seg2 2 (deleted)")
+        self.assertTrue(self.move.parts["Seg2 2 (deleted)"].gone)
+        self.assertIn("'Seg2 2' was deleted, but 1 rider hangs from it, so it is kept as "
+                      "'Seg2 2 (deleted)'", rig().rigmoves.report)
+        for share, points in plays.items():
+            drive(self.move, share)
+            self.assertLess(drift(tip, points), TOLERANCE, "{:.0%}".format(share))
+
+    def test_a_deleted_leader_that_stayed_goes_when_its_last_rider_does(self):
+        petal = self.petals()
+        delete_in_the_viewport(petal)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for riders_left in (3, 2, 1):
+            self.assertEqual(len(self.move.parts), riders_left + 1)
+            self.assertEqual(bpy.ops.rigmoves.drop_rider(index=0, part=1), {"FINISHED"})
+        self.assertEqual([p.name for p in self.move.parts], [])
+        self.assertNotIn("Petal", rig().data.bones)
+        self.assertIn("'Petal' was deleted, so it was taken out of 'Move 1'.",
+                      rig().rigmoves.report)
 
     def test_removing_the_move_takes_the_bone_of_a_deleted_leader_too(self):
         petal = self.petals()
