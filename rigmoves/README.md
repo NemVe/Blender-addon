@@ -34,6 +34,12 @@ Starting from loose objects, with no rig anywhere:
 3. Move and rotate them by hand, however you like. **Record** on the After row.
 4. **Build Sliders**.
 
+Select the whole machine at step 1. A handle parented (Ctrl+P) to a lid hangs from
+the lid's object, but the rig moves the lid by deforming its mesh: the handle moves
+with it only if it is a part of the move too. Left out, it stays where the shut lid
+was, and New Move, Add To This Group and Build say so, naming it (up to three at a
+time): select it too and press Add To This Group.
+
 That last press is where the rig appears: each object is given a bone of its
 own, bound to it, and put on the path between its two recordings. From then on
 the move behaves exactly like one recorded on bones, so everything below
@@ -1298,6 +1304,11 @@ and one lifted 1 m:
   the copy was drawn seven metres from where it stands, and an After posed by that eye
   played somewhere else. An object that joins a move is taken off what bound it to
   another part first, so it stands still where it is.
+- **A handle parented to a lid stayed behind, and nothing said so.** Ctrl+P a handle to
+  a lid, select only the lid, New Move, pose, Record, Build: at the end the handle was
+  two metres from where it should be. It is not in the move, so it is left where it is;
+  that is not changed, but New Move, Add To This Group and Build now name it and say
+  what to do. An empty or a light cannot be in a move, and the report says that.
 
 ## Known rough edges
 
@@ -1340,6 +1351,9 @@ and one lifted 1 m:
 - An object parented to something outside the rig - a finger to a hand that
   is not in the move - is taken off that parent while it is bound, so moving
   the hand leaves it behind. Parent the rig to the hand instead.
+- A child of a part - a handle Ctrl+P'd to a lid - moves with it only if it is a part
+  of the move too. Only meshes can be: an empty or a light parented to a part stays
+  where it is, and is named in the report as one that cannot move with it.
 - A part whose origin, scale or rotation was changed after it was bound is put
   back on its frame only if what Blender shows is the same before and after. With
   a constraint on it, or a modifier that measures from its frame, it is not: undo

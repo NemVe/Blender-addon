@@ -6432,6 +6432,89 @@ class TestACopyAddedToAMove(ChestCase):
         self.assertLess(drift(copy, rest_points(copy)), TOLERANCE)
 
 
+class TestAChildLeftBehind(CopyThatCase):
+    """A handle is parented to a lid (Ctrl+P), only the lid is selected, and the
+    lid is swung. The rig moves the lid by deforming its mesh, so the lid's
+    object stays where it is and so does the handle: it stayed where the shut
+    lid was, two metres off at the end, and nothing said so."""
+
+    SAID = ("'Handle' hangs from 'Lid' but is not in a move, so it will not move with "
+            "it: select it too and press Add To This Group.")
+
+    def setUp(self):
+        super().setUp()
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        self.handle = cube("Handle", (0.0, -0.66, 1.1))
+        self.handle.scale = (0.3, 0.1, 0.08)
+        bpy.context.view_layer.update()
+        self.hang(self.handle)
+
+    def hang(self, child):
+        select(child, self.lid)
+        bpy.context.view_layer.objects.active = self.lid
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=False),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_new_move_on_the_lid_alone_names_the_handle(self):
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_with_the_handle_selected_too_nothing_is_said(self):
+        select(self.handle, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.assertNotIn("hangs from", rig().rigmoves.report)
+        self.assertEqual(sorted(p.name for p in rig().rigmoves.moves[0].parts),
+                         ["Handle", "Lid"])
+
+    def test_build_says_it_again_while_the_handle_is_left_behind(self):
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.lid.rotation_euler.x = math.radians(-100.0)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_add_to_this_group_names_the_children_of_what_it_adds(self):
+        coin = cube("Coin", (5.0, 0.0, 0.6))
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.assertNotIn("hangs from", rig().rigmoves.report)
+        select(self.lid, coin)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_a_child_that_is_not_a_mesh_cannot_move_with_it(self):
+        self.handle.select_set(False)
+        bpy.data.objects.remove(self.handle, do_unlink=True)
+        lamp = bpy.data.objects.new("Lamp", None)
+        bpy.context.scene.collection.objects.link(lamp)
+        bpy.context.view_layer.update()
+        self.hang(lamp)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.assertIn("'Lamp' hangs from 'Lid' but is not a mesh, so it cannot move with it.",
+                      rig().rigmoves.report)
+        self.assertNotIn("press Add To This Group", rig().rigmoves.report)
+
+    def test_up_to_three_are_named(self):
+        for number in range(4):
+            knob = cube("Knob {:d}".format(number), (float(number) * 0.3, -0.66, 1.1))
+            knob.scale = (0.1, 0.1, 0.1)
+            self.hang(knob)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        said = rig().rigmoves.report
+        self.assertIn("hang from 'Lid' but are not in a move, so they will not move with "
+                      "it: select them too and press Add To This Group.", said)
+        self.assertIn(" and 2 more hang", said)
+        self.assertEqual(said.count("'Knob") + said.count("'Handle'"), 3)
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):

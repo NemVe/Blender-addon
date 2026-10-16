@@ -4787,6 +4787,9 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
                        .format(move.name, len(move.parts)))
         if said:
             data.report += " " + said
+        behind = left_behind(chosen_objects, chosen_objects)
+        if behind:
+            data.report += " " + left_behind_words(behind)
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -4823,6 +4826,59 @@ def left_out_words(held):
     return ("{:s} {:s} already in a move, so {:s} left out: an object moves in one "
             "move. For a second motion, add a Step to its move.".format(
                 shown, "is" if one else "are", "it was" if one else "they were"))
+
+
+def left_behind(objects, taking=()):
+    """The children of these objects that are in no move, as [(child, parent)].
+
+    A handle parented to a lid hangs from the lid's object, but the rig moves
+    the lid by deforming its mesh: its object stays where it is, and so does
+    the handle, unless the handle is a part of the move too. `taking` are
+    objects about to be added, which are not left behind.
+    """
+    parents = set(objects)
+    ours = objects_in_moves() | set(taking)
+    for owner in bpy.data.objects:
+        if owner.type == "ARMATURE":
+            for move in owner.rigmoves.moves:
+                ours.update(p.path_curve for p in move.parts if p.path_curve is not None)
+                if move.paths_object is not None:
+                    ours.add(move.paths_object)
+    return [(obj, obj.parent) for obj in bpy.data.objects
+            if obj.parent in parents and obj not in ours]
+
+
+def left_behind_words(found):
+    """What is said of children that will not move with the part they hang
+    from: up to three are named."""
+    def named(pairs):
+        shown = ["'{:s}'".format(short(child.name, 18)) for child, _parent in pairs]
+        return (", ".join(shown[:3])
+                + (" and {:d} more".format(len(shown) - 3) if len(shown) > 3 else ""))
+
+    def from_what(pairs):
+        owners = sorted({parent.name for _child, parent in pairs})
+        return "'{:s}'".format(short(owners[0], 18)) if len(owners) == 1 else "parts"
+
+    said = []
+    for kind in ("MESH", "OTHER"):
+        pairs = [(c, p) for c, p in found if (c.type == "MESH") == (kind == "MESH")]
+        if not pairs:
+            continue
+        one = len(pairs) == 1
+        same = len({p.name for _c, p in pairs}) == 1
+        if kind == "MESH":
+            said.append("{:s} {:s} from {:s} but {:s} not in a move, so {:s} will not move "
+                        "with {:s}: select {:s} too and press Add To This Group.".format(
+                            named(pairs), "hangs" if one else "hang", from_what(pairs),
+                            "is" if one else "are", "it" if one else "they",
+                            "it" if same else "them", "it" if one else "them"))
+        else:
+            said.append("{:s} {:s} from {:s} but {:s} not {:s}, so {:s} cannot move with {:s}."
+                        .format(named(pairs), "hangs" if one else "hang", from_what(pairs),
+                                "is" if one else "are", "a mesh" if one else "meshes",
+                                "it" if one else "they", "it" if same else "them"))
+    return " ".join(said)
 
 
 def doubled(data):
@@ -4995,6 +5051,9 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
                        .format(len(fresh), move.name))
         if said:
             data.report += " " + said
+        behind = left_behind(fresh, fresh)
+        if behind:
+            data.report += " " + left_behind_words(behind)
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -5961,6 +6020,10 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += (" {:d} stray keyframe track(s) on the parts and "
                             "{:d} on the rig were lifted, or the rig could not "
                             "move them.".format(keyed_objects, keyed_bones))
+        behind = left_behind([o for o in (part_object(p) for m in data.moves for p in m.parts)
+                              if o is not None])
+        if behind:
+            data.report += " " + left_behind_words(behind)
         if twice:
             warn_twice = True
             obj, moves = next(iter(twice.items()))
@@ -5992,7 +6055,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += " {:d} turned about a new pivot.".format(pivoted)
         if laid:
             data.report += " {:d} path(s) laid along a curve.".format(laid)
-        warn = warn_parents or warn_twice
+        warn = warn_parents or warn_twice or bool(behind)
         if still_keyed:
             data.report += (" {:s} is animated by hand and was left as it is."
                             .format(", ".join(still_keyed[:3])))

@@ -272,6 +272,14 @@ Features, in the order the user asked for them:
   `take_back_reframed` leaves it out of `user_map`. `own_actions` (in `catch_up`): a
   move whose Action another rig plays through its constraints takes a copy named
   "<Action> <rig>", and this rig's constraints are pointed at it.
+- **A child left behind (0.19):** the rig moves a part by deforming its mesh, so the
+  part's object stays put and so does an object parented to it that is not a part.
+  `left_behind(objects, taking)` finds, in one pass over `bpy.data.objects`, the children of
+  these that are in no move (not `objects_in_moves()`, not about to be added, not a path
+  curve or a drawn path), and `left_behind_words` says it: the design's sentence for one
+  mesh, "hang ... they ... them" for several (three named, then "and N more"), "is not a
+  mesh, so it cannot move with it" for the rest. A report only: New Move, Add To This
+  Group and Build; Build warns.
 - **A copy joins a move free (0.19):** Blender copies a rigged mesh with its vertex group
   and its Armature modifier, so a Shift+D or Alt+D copy of a bound part swings about the
   original's bone. `set_free(obj)`, run by New Move, Add To This Group and Ride Along on
