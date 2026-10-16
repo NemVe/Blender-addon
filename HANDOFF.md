@@ -388,7 +388,19 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     identity turn: a Shift+D cancelled with a right-click): not `off`, not in
     `left`, and `stacked_words` is Fill's refusal and Use what's there's note. Use
     what's there says "Fill the gaps would copy the part there" only when Fill
-    would not be refused (no note).
+    would not be refused (no note). `ours` (the riders of the part's earlier copies,
+    which `left` never names) is every rider whose leader is ANY joint of the ringed
+    chain, not the first joint's alone; `left` calls an object standing in a place
+    with the part's mesh and a mirrored frame that does not fit "a mirror image of
+    ... (not the same on both sides) ... can ride along with Ride Along, which
+    mirrors by itself", not "not turned to its place". Reports read: what was done,
+    the Leads step, the advice (`notes`, or the `empty` hint - never both), what was
+    skipped, THEN `outs`, then the places left alone: the panel's box (`_draw_report`)
+    shows nine lines, and past them ends the ninth with "…" and adds "(the full
+    report is in the Info editor)". The note about copies off the ring says "check
+    the centre (3D cursor), About and Count": a ring about the wrong axis looks the
+    same. Ride Along's "N copies of 'X' ride along" names the first joint any copy
+    has (not `chain[0]`, a palm that was never copied).
     Before any change `reframe_blocker` refuses constraints, instancing, particles,
     a vertex/bone parent, any dependent in `bpy.data.user_map` but an OBJECT-parented
     child (and that child must have no `has_own_motion`: its keys, driver or NLA

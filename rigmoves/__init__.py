@@ -4618,7 +4618,11 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
         for obj in alone:
             joining.append((obj, leader.name,
                             ride_on_existing(move, leader, body(obj, obj.matrix_world))))
-        lead_name, root_name = leader.name, chain[0].name
+        lead_name = leader.name
+        # The copies are of the first joint any of them has, for the report: the
+        # root of the chain may be a palm that was never copied.
+        root_name = next((joint.name for joint in chain
+                          if any(joint.name in copy for copy in copies)), lead_name)
         # Where each stands now is the place it copies the move from. That is
         # all there is to record: the path itself is the leader's.
         for obj, joint, rides in joining:
@@ -6887,6 +6891,14 @@ def find_standing(pool, joints, turns, free, ours=()):
             why = "stands on the same place as '{:s}'".format(short(rival[one.name], 18))
         elif one.name in owner:
             why = "fits a place where the rest of the chain is missing"
+        elif in_a_place and copy and one.matrix.determinant() < 0.0:
+            # Standing in a place with the part's own mesh and a mirrored frame -
+            # a half made with Ctrl+M - and it does not fit: the part is not the
+            # same on both sides, so its mirror image is another shape. Turning it
+            # would not help, and "not turned to its place" is what it is not.
+            why = ("is a mirror image of '{:s}' (not the same on both sides), so it is "
+                   "not a copy - it can ride along with Ride Along, which mirrors by "
+                   "itself".format(short(like.name, 18)))
         elif in_a_place:
             why = ("is a copy of '{:s}' that is not turned to its place" if copy else
                    "stands in a place and is not a copy of '{:s}'").format(
@@ -7227,7 +7239,11 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         standing, notes = Standing(), ""
         if self.use != "COPY":
             context.view_layer.update()
-            ours = {p.name for p in move.parts if p.leader == name}
+            # Every joint of the copies the part has already, not only the
+            # first's: the inner joints of a finger's copies copy the joints
+            # below the first, and are no more "left out" than the first is.
+            ringed = {joint[0] for joint in joints}
+            ours = {p.name for p in move.parts if p.leader in ringed}
             standing = find_standing(standing_pool(context, rig, {j[0] for j in joints}),
                                      joints, turns, free, ours)
             # Copies of the part standing near the ring and on none of its
@@ -7249,8 +7265,10 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             if standing.stacked:
                 sentences.append(stacked_words(standing.stacked, name))
             if near:
+                # A ring about the wrong axis shows the same picture as one round
+                # the wrong point: copies near it, and on none of its places.
                 sentences.append(
-                    "{:s} of '{:s}' {:s} near the ring but off its places: check the centre (3D cursor) and Count.".format(
+                    "{:s} of '{:s}' {:s} near the ring but off its places: check the centre (3D cursor), About and Count.".format(
                         counted(len(near), "copy", "copies"), short(name, 18),
                         "stands" if len(near) == 1 else "stand"))
             notes = " ".join(sentences)
@@ -7358,10 +7376,14 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             else:
                 said = ("Every place round that ring already holds something, so nothing was "
                         "taken up or made.")
+            # What to do about it comes before the list of what was left out:
+            # the panel's box cuts a long report, and the end of it was the advice.
+            if notes:
+                said += " " + notes
             if empty:
                 said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
                     counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
-            self.refuse(data, said + outs + (" " + notes if notes else ""))
+            self.refuse(data, said + outs)
             return {"CANCELLED"}
         context.view_layer.update()
         objects = [obj for obj, _joint in riders]
@@ -7415,12 +7437,39 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         # step to undo it by. Settling the meshes is last, so that nothing is
         # half settled when something else fails.
         try:
+            stepped = ""
+            if self.lead_step:
+                # Out from the original both ways round: the two sides match. Only
+                # for the copies made now: the Leads of riders already there are
+                # theirs. A copied finger has the one Lead, its first joint's.
+                roots = [move.parts[obj.name] for obj, joint in riders
+                         if joint == first_joint]
+                ranks = spread_ranks(rig, move, [(move.parts[name], roots)], "LEAD",
+                                     "AROUND", "Z", True, 0)
+                limited = spread_put("LEAD", roots,
+                                     [self.lead_step * ranks[r.name] for r in roots])
+                refresh_drivers(rig, data, move)
+                stepped = " Leads step by {:d}, out from it both ways round.".format(
+                    self.lead_step)
+                if limited:
+                    stepped += " {:d} held at the limit.".format(limited)
+            # What was done, then what to do about what was not, and only then the
+            # list of what was left out: the panel's box shows the first lines.
             said = self.first_sentence(name, joints, len(placed), made_whole)
             if framed:
                 said += (" {:s} re-framed to stand on {:s} place, the mesh moved the "
                          "other way so nothing shifted.".format(
                              counted(len(framed), "object"),
                              "its" if len(framed) == 1 else "their"))
+            said += stepped
+            if notes:
+                said += " " + notes
+            if empty:
+                said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
+                    counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
+            if skipped:
+                said += " {:s} already held a copy and {:s} skipped.".format(
+                    counted(skipped, "place"), "was" if skipped == 1 else "were")
             said += outs
             if standing.partial:
                 said += " {:s} had only part of a chain standing and {:s} left alone.".format(
@@ -7433,29 +7482,6 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                 said += " {:s} hold{:s} a copy that could not safely be re-framed and {:s} left alone.".format(
                     counted(len(gave_up), "place"), "s" if len(gave_up) == 1 else "",
                     "was" if len(gave_up) == 1 else "were")
-            if empty:
-                said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
-                    counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
-            if notes:
-                said += " " + notes
-            if skipped:
-                said += " {:s} already held a copy and {:s} skipped.".format(
-                    counted(skipped, "place"), "was" if skipped == 1 else "were")
-            if self.lead_step:
-                # Out from the original both ways round: the two sides match. Only
-                # for the copies made now: the Leads of riders already there are
-                # theirs. A copied finger has the one Lead, its first joint's.
-                roots = [move.parts[obj.name] for obj, joint in riders
-                         if joint == first_joint]
-                ranks = spread_ranks(rig, move, [(move.parts[name], roots)], "LEAD",
-                                     "AROUND", "Z", True, 0)
-                limited = spread_put("LEAD", roots,
-                                     [self.lead_step * ranks[r.name] for r in roots])
-                refresh_drivers(rig, data, move)
-                said += " Leads step by {:d}, out from it both ways round.".format(
-                    self.lead_step)
-                if limited:
-                    said += " {:d} held at the limit.".format(limited)
             settle(framed)
         except Exception as error:
             why = " ".join(str(error).split()).rstrip(".") or type(error).__name__
@@ -8445,8 +8471,15 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             return
         note = layout.box().column(align=True)
         note.enabled = False
-        # Room for the names of what a ring left out.
-        for line in wrapped(data.report, most=9):
+        # Room for the names of what a ring left out. A report longer than that
+        # is cut, and what was cut can be what to do next: it is said to be cut,
+        # and where the rest is - the Info editor has it all.
+        lines = wrapped(data.report, most=1000)
+        if len(lines) > 9:
+            lines = lines[:9]
+            lines[-1] = lines[-1][:33].rstrip() + "…"
+            lines.append("(the full report is in the Info editor)")
+        for line in lines:
             note.label(text=line)
 
 

@@ -258,15 +258,17 @@ else is left exactly as it is, and the report says why:
   middle of the box round it within a quarter of the part's reach of where the
   part would stand. The report says how many places "had something standing there
   that is not a copy". **Use what's there** says how many places had nothing
-  standing in them, and that **Fill the gaps** would copy the part there.
-- **A wrong centre or Count is caught.** When copies of the part stand near the
-  ring - within a ring's radius and a half of its middle, at its height - and on
-  none of its places, the ring is round the wrong point or has the wrong Count, and
-  copying between them would double the flower. **Fill the gaps** is turned down:
-  "7 copies of 'Petal' stand near the ring but off its places: check the centre
-  (3D cursor) and Count. Nothing done." **Use what's there** takes what fits and
-  says the same as a note. **Make copies** is never turned down. Copies a move
-  plays already do not count.
+  standing in them, and that **Fill the gaps** would copy the part there - but only
+  when it would: where Fill the gaps would be turned down, as below, it gives that
+  advice instead.
+- **A wrong centre, About or Count is caught.** When copies of the part stand near
+  the ring - within a ring's radius and a half of its middle, at its height - and
+  on none of its places, the ring is round the wrong point, about the wrong axis or
+  has the wrong Count, and copying between them would double the flower. **Fill the
+  gaps** is turned down: "7 copies of 'Petal' stand near the ring but off its
+  places: check the centre (3D cursor), About and Count. Nothing done." **Use
+  what's there** takes what fits and says the same as a note. **Make copies** is
+  never turned down. Copies a move plays already do not count.
 - **A duplicate left on top of the part is a case of its own.** Shift+D, then a
   right-click to cancel the move, leaves a copy exactly where the part stands. That
   is no place of the ring, and no copy off it: "'Petal.001' stands exactly where
@@ -278,10 +280,16 @@ else is left exactly as it is, and the report says why:
   places first: "'Leaf B1' is not a copy of 'Leaf A1'", "'Petal 4' stands in a place
   and is not a copy of 'Petal'", "'Stray' is a copy of 'Petal' that is not turned to
   its place", "'Far' is a copy of 'Petal' that stands off the ring" (only when it
-  does), "'Twin' stands on the same place as 'Petal 3'". It looks at objects with as
-  many vertices as a joint of the part, because those are the ones you may have
-  meant, and at any object standing in a place. When nothing can be taken or made,
-  Ring is turned down with those names and nothing is changed.
+  does), "'Twin' stands on the same place as 'Petal 3'". A half made with Ctrl+M of
+  a petal that is not the same on both sides is none of those, and is told so:
+  "'Petal.M5' is a mirror image of 'Petal' (not the same on both sides), so it is
+  not a copy - it can ride along with Ride Along, which mirrors by itself". The
+  copies a ring made earlier - every joint of them - are not left out. Ring looks at
+  objects with as many vertices as a joint of the part, because those are the ones
+  you may have meant, and at any object standing in a place. When nothing can be
+  taken or made, Ring is turned down with those names and nothing is changed. What
+  to do about it comes before the names: the panel's box shows nine lines of a
+  report, and the end of a long one was cut.
 
 What it makes, and the rest:
 
@@ -683,6 +691,9 @@ when Paths is pressed again.
   your work, so nothing lifts them: the box says to mute or remove the strip in the
   NLA editor, or to remove the driver in the Drivers editor, and then to Build.
   Build names them as well, and is a warning, not a success, until they are gone.
+- **The report** at the foot of the panel says what the last button did, and what to
+  do next. It shows nine lines. A longer one ends with "…" and a last line, "(the
+  full report is in the Info editor)", where all of it is.
 
 ## What it does underneath
 
@@ -1306,6 +1317,30 @@ and one lifted 1 m:
   the outer petals' step of 9, the Ring dialog of the leaf opened with 9 as well,
   and, left alone, the second leaf opened ahead of the first. The Lead step always
   opens at 0 now. Use, Count, Round, About and Linked copies are still remembered.
+- **A second Ring of a finger listed its own earlier copies as left out, and hid a
+  real stray behind them.** "'Seg2 2' is already part of a move; 'Seg2 3' ...; and 3
+  more": only the first joint of each copy was known to be the ring's own, so the
+  inner joints took up the three names the report gives, and an object that really
+  was in the way was one of the "more". Every joint of the copies the part already
+  has is the ring's own now.
+- **Ride Along said "3 copies of 'Palm' ride along" when the palm was never
+  copied.** The sentence named the root of the Follows chain. It names the first
+  joint any of the copies has - the finger's, here.
+- **Copies off the ring were blamed on the centre and the Count alone.** A ring about
+  the wrong axis shows the same picture, so the advice is "check the centre (3D
+  cursor), About and Count".
+- **Use what's there promised "Fill the gaps would copy the part there" when Fill
+  the gaps would have been turned down** for copies standing off the ring. It says
+  so only when Fill the gaps would copy.
+- **The advice at the end of a long report never showed.** The panel's box shows
+  nine lines and cut the rest without a sign, so the advice that ended a long Ring
+  report was lost. In a refused Ring the advice now comes before the names of what
+  was left out, and a report the box has to cut ends with "…" and "(the full report
+  is in the Info editor)".
+- **A half made with Ctrl+M that is not the same on both sides was "a copy that is
+  not turned to its place".** It is a mirror image, and turning it would not help:
+  "is a mirror image of 'Petal' (not the same on both sides), so it is not a copy -
+  it can ride along with Ride Along, which mirrors by itself".
 
 ## Known rough edges
 

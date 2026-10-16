@@ -5404,7 +5404,8 @@ class TestRingWhatIsThere(CopyThatCase):
         self.assertEqual(self.ring(use="FILL"), {"CANCELLED"})
         self.assertEqual(self.new_names(before), set())
         self.assertIn("7 copies of 'Outer Leader' stand near the ring but off its places: "
-                      "check the centre (3D cursor) and Count. Nothing done.", self.report())
+                      "check the centre (3D cursor), About and Count. Nothing done.",
+                      self.report())
         self.assertEqual(len([p for p in self.move.parts if p.leader]), 0)
 
     def test_fill_is_refused_when_the_count_is_wrong(self):
@@ -5421,8 +5422,8 @@ class TestRingWhatIsThere(CopyThatCase):
         self.rig_the_flower()
         bpy.context.scene.cursor.location = (0.27, 0.0, 0.0)
         self.assertEqual(self.ring(use="ADOPT"), {"CANCELLED"})
-        self.assertIn("stand near the ring but off its places: check the centre (3D cursor) "
-                      "and Count.", self.report())
+        self.assertIn("stand near the ring but off its places: check the centre (3D cursor), "
+                      "About and Count.", self.report())
         self.assertNotIn("Nothing done", self.report())
         self.assertIn("Nothing standing in the places", self.report())
 
@@ -6314,6 +6315,258 @@ class TestSpreadDialogFollowsItsSettings(CopyThatCase):
                      "only_selected", "sizing"):
             self.assertTrue(props[name].is_skip_save, name)
         self.assertTrue(props["sizing"].is_hidden)
+
+
+def shift_d(obj, name):
+    """Shift+D: a copy of the object with a mesh of its own."""
+    copy = obj.copy()
+    copy.data = obj.data.copy()
+    copy.name = name
+    for collection in obj.users_collection:
+        collection.objects.link(copy)
+    return copy
+
+
+class TestRingReports(RingFlows):
+    """Reports of Ring that named the wrong thing or gave the wrong advice, each
+    played from the flow the review found it in."""
+
+    KNUCKLES = [Vector((float(n), 0.0, 0.0)) for n in range(3)]
+
+    def modelled_flower(self, count=8):
+        """A leader and a copy on every other place round the world's Z, each
+        made with Shift+D and turned about the centre."""
+        shape = prism("Petal Shape", 4, 0.15, 1.0)
+        self.leader = stood("Petal", shape, self.base)
+        self.petals = [self.leader] + [
+            stood("Petal {:d}".format(k + 1), shape.copy(), self.turn(k, count) @ self.base)
+            for k in range(1, count)]
+        bpy.context.view_layer.update()
+        self.record_after(self.leader, turned=60.0)
+
+    def finger(self):
+        """A finger of three segments, chained and bent 30 degrees at After, built,
+        with the cursor on the centre of the ring it is going to be one of."""
+        scene = bpy.context.scene
+        scene.cursor.location = (-2.0, 0.0, 0.0)
+        self.segments = []
+        for number in range(3):
+            segment = cube("Seg{:d}".format(number + 1), (number + 0.5, 0.0, 0.0))
+            segment.scale = (1.0, 0.3, 0.3)
+            self.segments.append(segment)
+        bpy.context.view_layer.update()
+        self.homes = [s.matrix_world.copy() for s in self.segments]
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for segment, knuckle in zip(self.segments, self.KNUCKLES):
+            scene.cursor.location = knuckle
+            select(segment)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        scene.cursor.location = (-2.0, 0.0, 0.0)
+        select(*self.segments)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        carry = Matrix.Identity(4)
+        for knuckle, home, segment in zip(self.KNUCKLES, self.homes, self.segments):
+            carry = carry @ turn_about(knuckle, "Y", 30.0)
+            segment.matrix_world = carry @ home
+            bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    # -- a second Ring of a finger ------------------------------------------
+
+    def test_a_second_ring_of_a_finger_does_not_list_its_own_copies_as_left_out(self):
+        self.finger()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8), {"FINISHED"})
+        report = self.report()
+        self.assertNotIn("is already part of a move", report)
+        self.assertNotIn("Left out", report)
+        self.assertIn("4 copies of 'Seg1' (3 joints each) round the 3D cursor ride along "
+                      "with it, joint for joint.", report)
+        self.assertIn("3 places already held a copy and were skipped", report)
+
+    def test_a_stray_leaf_is_named_not_hidden_behind_the_fingers_own_copies(self):
+        self.finger()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        stood("Stray Leaf", prism("Leaf Shape", 5, 0.12, 0.8),
+              turn_about(Vector((-2.0, 0.0, 0.0)), "Z", 135.0) @ self.homes[0])
+        bpy.context.view_layer.update()
+        select(self.segments[0])
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8), {"FINISHED"})
+        report = self.report()
+        self.assertIn("Left out: 'Stray Leaf' stands in a place and is not a copy of 'Seg1'",
+                      report)
+        self.assertNotIn("is already part of a move", report)
+        self.assertNotIn("and 3 more", report)
+
+    # -- Ride Along with copies of a palm's finger --------------------------
+
+    def test_copies_of_a_palms_finger_are_said_to_be_of_the_finger_not_the_palm(self):
+        palm = cube("Palm", (1.5, 0.0, 0.0))
+        palm.scale = (4.0, 3.0, 0.5)
+        segs, y = [], 1.5
+        for number, length in enumerate((1.0, 0.7, 0.5)):
+            seg = cube("F1_{:d}".format(number + 1), (0.0, y + length / 2.0, 0.0))
+            seg.scale = (0.4, length, 0.3)
+            segs.append(seg)
+            y += length
+        bpy.context.view_layer.update()
+        copies = []
+        for finger, shift in ((2, 1.0), (3, 2.0), (4, 3.0)):
+            for number, seg in enumerate(segs):
+                made = shift_d(seg, "F{:d}_{:d}".format(finger, number + 1))
+                made.location.x += shift
+                copies.append(made)
+        bpy.context.view_layer.update()
+        select(palm, *segs)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        select(palm, *segs)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual(move.parts["F1_1"].follows, "Palm")
+        for where, seg in zip((Vector((0, 1.5, 0)), Vector((0, 2.5, 0)), Vector((0, 3.2, 0))),
+                              segs):
+            bpy.context.scene.cursor.location = where
+            select(seg)
+            bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR")
+        segs[0].matrix_world = turn_about((0, 1.5, 0), "X", 30.0) @ segs[0].matrix_world
+        bpy.context.view_layer.update()
+        select(segs[0])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(*copies, segs[0])
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="F1_1",
+                                                     rig_name=rig().name), {"FINISHED"})
+        self.assertIn("3 copies of 'F1_1' ride along, joint for joint.", self.report())
+        self.assertNotIn("'Palm'", self.report())
+
+    # -- the advice for copies that are off the ring ------------------------
+
+    def test_a_ring_about_the_wrong_axis_is_told_to_check_About_too(self):
+        self.modelled_flower()
+        before = {o.name for o in bpy.data.objects}
+        self.assertEqual(self.ring(self.leader, axis="X"), {"CANCELLED"})
+        self.assertEqual({o.name for o in bpy.data.objects}, before)
+        self.assertEqual(self.report(),
+                         "7 copies of 'Petal' stand near the ring but off its places: check "
+                         "the centre (3D cursor), About and Count. Nothing done.")
+
+    def test_use_what_is_there_does_not_promise_a_fill_that_would_be_refused(self):
+        self.modelled_flower()
+        self.assertEqual(self.ring(self.leader, axis="X", use="ADOPT"), {"CANCELLED"})
+        report = self.report()
+        self.assertIn("check the centre (3D cursor), About and Count.", report)
+        self.assertNotIn("Fill the gaps would copy", report)
+        self.assertNotIn("had nothing standing", report)
+
+    def test_use_what_is_there_still_says_so_when_fill_the_gaps_would_copy(self):
+        self.modelled_flower()
+        for petal in (self.petals[3], self.petals[5]):
+            bpy.data.objects.remove(petal, do_unlink=True)
+        self.assertEqual(self.ring(self.leader, use="ADOPT"), {"FINISHED"})
+        self.assertIn("2 places had nothing standing in them: Fill the gaps would copy the "
+                      "part there.", self.report())
+
+    def test_the_advice_for_a_refused_ring_comes_before_what_was_left_out(self):
+        self.modelled_flower()
+        self.assertEqual(self.ring(self.leader, axis="X", use="ADOPT"), {"CANCELLED"})
+        report = self.report()
+        self.assertIn("Left out:", report)
+        self.assertLess(report.index("check the centre (3D cursor)"), report.index("Left out:"))
+        # And in the panel's first lines, which is all a long report shows.
+        lines = rigmoves.wrapped(report, most=1000)
+        shown = " ".join(lines[:9])
+        self.assertIn("check the centre", shown)
+
+    def test_a_report_with_notes_and_a_success_puts_them_before_what_was_left_out(self):
+        self.modelled_flower()
+        # Seven copies stand where they should, and three more near the ring where
+        # no place is: a Count of 6 takes the ones that fit and notes the rest.
+        self.assertEqual(self.ring(self.leader, use="ADOPT", count=6), {"FINISHED"})
+        report = self.report()
+        self.assertIn("stand near the ring but off its places", report)
+        if "Left out:" in report:
+            self.assertLess(report.index("stand near the ring"), report.index("Left out:"))
+
+    # -- the panel's box ----------------------------------------------------
+
+    @staticmethod
+    def drawn_report(text):
+        lines = []
+
+        class Column:
+            enabled = True
+
+            def label(self, text="", **_kwargs):
+                lines.append(text)
+
+        class Box:
+            def column(self, **_kwargs):
+                return Column()
+
+        class Layout:
+            def box(self):
+                return Box()
+
+        rigmoves.RIGMOVES_PT_panel._draw_report(None, Layout(), types.SimpleNamespace(report=text))
+        return lines
+
+    def test_a_report_the_box_has_room_for_is_shown_whole(self):
+        text = "Spread the Leads of 11 riders in steps of -3 from 0, round the ring."
+        self.assertEqual(self.drawn_report(text), rigmoves.wrapped(text))
+        # Seven words of four letters fill a line, so sixty-three are nine lines.
+        nine = " ".join(["word"] * 63)
+        self.assertEqual(len(rigmoves.wrapped(nine, most=1000)), 9)
+        self.assertEqual(self.drawn_report(nine), rigmoves.wrapped(nine, most=1000))
+        ten = " ".join(["word"] * 64)
+        self.assertEqual(len(rigmoves.wrapped(ten, most=1000)), 10)
+        self.assertEqual(len(self.drawn_report(ten)), 10)
+        self.assertEqual(self.drawn_report(ten)[-1], "(the full report is in the Info editor)")
+
+    def test_a_longer_report_ends_with_a_sign_and_says_where_the_rest_is(self):
+        text = " ".join("word{:d}".format(n) for n in range(80))
+        whole = rigmoves.wrapped(text, most=1000)
+        self.assertGreater(len(whole), 9)
+        lines = self.drawn_report(text)
+        self.assertEqual(len(lines), 10)
+        self.assertTrue(lines[8].endswith("…"), lines[8])
+        self.assertTrue(whole[8].startswith(lines[8][:-1].rstrip()), (whole[8], lines[8]))
+        self.assertEqual(lines[:8], whole[:8])
+        self.assertEqual(lines[9], "(the full report is in the Info editor)")
+        self.assertLessEqual(len(lines[8]), 34)
+
+    # -- a half made with Ctrl+M that is not the same on both sides ---------
+
+    def test_an_asymmetric_ctrl_m_half_is_said_to_be_a_mirror_image(self):
+        shape = prism("Odd Shape", 4, 0.15, 1.0)
+        self.leader = stood("Outer Leader", shape, self.base)
+        flip = Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0)))
+        stood("Outer 2", shape.copy(), flip @ self.turn(7) @ self.base)
+        bpy.context.view_layer.update()
+        self.record_after(self.leader, turned=50.0)
+        for use in ("ADOPT", "FILL"):
+            self.ring(self.leader, use=use)
+            self.assertIn("'Outer 2' is a mirror image of 'Outer Leader' (not the same on "
+                          "both sides), so it is not a copy - it can ride along with Ride "
+                          "Along, which mirrors by itself", self.report(), use)
+            self.assertNotIn("not turned to its place", self.report(), use)
+
+    def test_a_copy_that_is_only_not_turned_to_its_place_is_still_said_so(self):
+        shape = prism("Odd Shape", 4, 0.15, 1.0)
+        self.leader = stood("Outer Leader", shape, self.base)
+        stood("Unturned", shape.copy(),
+              Matrix.Translation((self.turn(2) @ self.base).translation) @ self.base.to_3x3().to_4x4())
+        bpy.context.view_layer.update()
+        self.record_after(self.leader, turned=50.0)
+        self.ring(self.leader, use="ADOPT")
+        self.assertIn("'Unturned' is a copy of 'Outer Leader' that is not turned to its place",
+                      self.report())
+        self.assertNotIn("mirror image", self.report())
 
 
 class TestRingDialogMemory(CopyThatCase):
