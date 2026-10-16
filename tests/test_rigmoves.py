@@ -8304,6 +8304,182 @@ class TestAnEditedMeshThenANewOrigin(ChestCase):
         self.assertNotEqual(list(part.rest_marks), was)
 
 
+class TestApplyAndSetOriginOnTheRig(ChestCase):
+    """Ctrl+A on the rig, or Set Origin on it, moves nothing on screen: Blender
+    changes the object and the bones the other way and keeps the children where
+    they were. The rig's new matrix was read as the whole model having moved, and
+    everything it remembered was carried by it: the next Build, Record, eye, Add
+    To This Group or Lift put the lid a metre off."""
+
+    def tidy(self, how):
+        if how in ("all", "all_selected"):
+            if how == "all_selected":
+                bpy.ops.object.select_all(action="SELECT")
+            else:
+                select(rig())
+            self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=True,
+                                                            scale=True), {"FINISHED"})
+        elif how == "location":
+            select(rig())
+            self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=False,
+                                                            scale=False), {"FINISHED"})
+        else:
+            # Where the origin goes is anywhere but where it is.
+            bpy.context.scene.cursor.location = rig().matrix_world.translation + Vector(
+                (1.5, -2.0, -0.6))
+            select(rig())
+            self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_nothing_moves_on_screen_to_begin_with(self):
+        for how in ("all", "location", "origin", "all_selected"):
+            with self.subTest(how):
+                self.tidy(how)
+                self.check_lid()
+
+    def test_the_next_build_leaves_the_lid_where_it_was(self):
+        for how in ("all", "location", "origin", "all_selected"):
+            with self.subTest(how):
+                bpy.ops.wm.read_factory_settings(use_empty=True)
+                ChestCase.setUp(self)
+                self.tidy(how)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.check_lid()
+
+    def test_the_next_record_and_the_eye_leave_it_too(self):
+        self.tidy("all")
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.show(index=0, which="AFTER"), {"FINISHED"})
+        self.assertLess(drift(self.lid, [turn_about(self.hinge, "X", -self.SWING) @ p
+                                         for p in self.shut]), TOLERANCE)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.tidy("origin")
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_add_to_this_group_and_lift_leave_it_too(self):
+        self.tidy("location")
+        coin = cube("Coin", (0.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.lid.keyframe_insert("location", frame=1)
+        self.assertEqual(bpy.ops.rigmoves.free_keys(), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_a_model_moved_after_applying_is_still_carried(self):
+        self.tidy("all")
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation((5.0, 2.0, 0.0)))
+
+    def test_the_seat_is_where_the_root_bone_stands(self):
+        data = rig().rigmoves
+        self.assertTrue(data.seat_on_root)
+        self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat),
+                                             rigmoves.seat_of(rig()), 1e-5))
+        root = rig().data.bones["Root"]
+        self.assertTrue(rigmoves.same_matrix(rigmoves.seat_of(rig()),
+                                             rig().matrix_world @ root.matrix_local, 1e-6))
+
+    def test_a_rig_without_a_root_is_seated_by_its_object(self):
+        # A rig of its own, with bones of its own and no "Root".
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        armature = bpy.data.armatures.new("Hand built")
+        built = bpy.data.objects.new("Hand built", armature)
+        bpy.context.scene.collection.objects.link(built)
+        built.location = (1.0, 2.0, 3.0)
+        bpy.context.view_layer.update()
+        self.assertTrue(rigmoves.same_matrix(rigmoves.seat_of(built), built.matrix_world, 1e-9))
+
+    def test_a_seat_kept_the_old_way_is_caught_up_once_and_then_kept_on_the_root(self):
+        # A file from 0.19.0: the seat is the rig object's matrix, and the model
+        # was moved as a whole since.
+        data = rig().rigmoves
+        data.seat = rigmoves.flat(rig().matrix_world)
+        data.seat_on_root = False
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation((5.0, 2.0, 0.0)))
+        self.assertTrue(data.seat_on_root)
+        self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat),
+                                             rigmoves.seat_of(rig()), 1e-5))
+        # And from then on a Ctrl+A on the rig moves nothing.
+        self.tidy("all")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation((5.0, 2.0, 0.0)))
+
+
+class ArmCase(CopyThatCase):
+    """A robot arm of three boxes - upper arm, forearm, hand - chained and
+    curled, and built: the model the review's robot arm was made on."""
+
+    SHOULDER, ELBOW, WRIST = (Vector((0.0, 0.0, 1.0)), Vector((2.0, 0.0, 1.0)),
+                              Vector((4.0, 0.0, 1.0)))
+
+    def setUp(self):
+        super().setUp()
+        self.parts = {"Upper": cube("Upper", (1.0, 0.0, 1.0)),
+                      "Fore": cube("Fore", (3.0, 0.0, 1.0)),
+                      "Hand": cube("Hand", (4.3, 0.0, 1.0))}
+        for name, scale in (("Upper", (2.0, 0.3, 0.3)), ("Fore", (2.0, 0.25, 0.25)),
+                            ("Hand", (0.6, 0.4, 0.2))):
+            self.parts[name].scale = scale
+        bpy.context.view_layer.update()
+        self.home = {name: obj.matrix_world.copy() for name, obj in self.parts.items()}
+        self.shut = {name: rest_points(obj) for name, obj in self.parts.items()}
+        select(self.parts["Upper"], self.parts["Fore"], self.parts["Hand"])
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for name, where in (("Upper", self.SHOULDER), ("Fore", self.ELBOW),
+                            ("Hand", self.WRIST)):
+            bpy.context.scene.cursor.location = where
+            select(self.parts[name])
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        select(self.parts["Upper"], self.parts["Fore"], self.parts["Hand"])
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+        self.parts["Upper"].matrix_world = turn_about(self.SHOULDER, "Y", 30.0) @ self.home["Upper"]
+        bpy.context.view_layer.update()
+        select(self.parts["Upper"])
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0, factor=1.0), {"FINISHED"})
+        select(self.parts["Upper"], self.parts["Fore"], self.parts["Hand"])
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        drive(self.move, 1.0)
+        self.bent = {name: world_points(obj) for name, obj in self.parts.items()}
+        drive(self.move, 0.0)
+
+    def check_arm(self, shares=(0.0, 1.0)):
+        """Every box at rest, and bent as it was recorded."""
+        for share in shares:
+            drive(self.move, share)
+            for name, obj in self.parts.items():
+                want = self.shut[name] if share == 0.0 else self.bent[name]
+                self.assertLess(drift(obj, want), TOLERANCE, "{:s} at {:.0%}".format(name, share))
+        drive(self.move, 0.0)
+
+
+class TestApplyOnTheRigOfAnArm(ArmCase):
+
+    def test_apply_all_on_the_rig_leaves_every_joint_where_it_was(self):
+        self.check_arm()
+        select(rig())
+        self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=True,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        select(self.parts["Upper"])
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_arm()
+
+
 class TestRigidFit(unittest.TestCase):
     """The fit of three marks onto three others, which tells a part that was
     framed another way from one that was moved."""

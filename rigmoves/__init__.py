@@ -1433,6 +1433,11 @@ class RIGMOVES_Rig(bpy.types.PropertyGroup):
     # the rig has gone since. False for a rig made before this was kept.
     seat: bpy.props.FloatVectorProperty(size=16)
     seated: bpy.props.BoolProperty(default=False)
+    # Whether the seat above is where the Root bone's rest stands in the world
+    # (see seat_of) rather than the rig object's own matrix, as it was kept by
+    # 0.19.0: Apply and Set Origin on the rig change the object and the bones
+    # by the same amount, and the model has not moved.
+    seat_on_root: bpy.props.BoolProperty(default=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2414,6 +2419,25 @@ def carry_stored(data, shift):
                 part.rest_marks = marks
 
 
+def seat_of(rig):
+    """Where the model stands, as a matrix: the Root bone's rest in the world.
+
+    Not the rig object's own matrix. Apply and Set Origin on the rig move the
+    object and the bones by the same amount the other way, and keep the children
+    where they were: the object's matrix changes and the model has not moved,
+    where the Root bone does not stir. Move the rig, or the thing it hangs from,
+    and the Root goes with it. A rig with no Root bone of ours is seated by its
+    object.
+    """
+    root = rig.data.bones.get("Root")
+    return rig.matrix_world @ root.matrix_local if root is not None else rig.matrix_world.copy()
+
+
+def store_seat(rig, data):
+    """Keep where the rig stands now as where what it remembers is true."""
+    data.seat, data.seated, data.seat_on_root = flat(seat_of(rig)), True, True
+
+
 def catch_up(rig, data=None):
     """Bring what a rig remembers of where its parts stand into step with
     where the rig stands now. Run first by every operator that reads or writes
@@ -2425,7 +2449,9 @@ def catch_up(rig, data=None):
     rig stood where it did when they were taken. Move the rig - on its own,
     with everything selected, or by parenting it to a hand and moving the
     hand - and the parts go with it, but what is remembered stayed behind: a
-    Build then put every part back where the model used to be.
+    Build then put every part back where the model used to be. Where the rig
+    stands is told by its Root bone (seat_of), so that Apply and Set Origin on
+    the rig, which move nothing, are not taken for a move.
     """
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
@@ -2433,16 +2459,21 @@ def catch_up(rig, data=None):
     follow_renames(rig, data)
     point_at_objects(rig, data)
     own_actions(rig, data)
-    now = rig.matrix_world.copy()
+    now = seat_of(rig)
     if not data.seated:
         # A new rig, or one from before this was kept: it stands where it
         # stands, and what it remembers is taken to be true of that.
-        data.seat, data.seated = flat(now), True
+        store_seat(rig, data)
     else:
-        shift = now @ as_matrix(data.seat).inverted_safe()
+        # A seat kept by 0.19.0 is the rig object's matrix: measured against
+        # that this once, then kept on the Root bone.
+        where = now if data.seat_on_root else rig.matrix_world
+        shift = where @ as_matrix(data.seat).inverted_safe()
         if not same_matrix(shift, Matrix.Identity(4), 1e-6):
             carry_stored(data, shift)
-            data.seat = flat(now)
+            store_seat(rig, data)
+        elif not data.seat_on_root:
+            store_seat(rig, data)
     # Before anything is put back: a part whose mesh was edited since, and then
     # given a new origin, is told from a part dragged by marks that fit.
     retake_marks(data)
@@ -2636,8 +2667,7 @@ def ensure_rig(context, chosen, force_new=False):
     root.use_deform = False
     bpy.ops.object.mode_set(mode="OBJECT")
     context.scene.rigmoves_rig = rig
-    rig.rigmoves.seat = flat(rig.matrix_world)
-    rig.rigmoves.seated = True
+    store_seat(rig, rig.rigmoves)
     return rig
 
 
@@ -2707,9 +2737,9 @@ def seat_rig(rig, data=None):
         child.matrix_parent_inverse = rig.matrix_world.inverted_safe()
         child.matrix_world = world
     # Moved on purpose, with every child held where it stood: nothing a move
-    # remembers has gone anywhere, so this is where the rig stands now.
-    rig.rigmoves.seat = flat(rig.matrix_world)
-    rig.rigmoves.seated = True
+    # remembers has gone anywhere, so this is where the rig stands now. The Root
+    # bone was moved to the object's new place above, and is part of that.
+    store_seat(rig, rig.rigmoves)
     if was_mode != "OBJECT":
         try:
             bpy.ops.object.mode_set(mode=was_mode)
