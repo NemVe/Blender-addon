@@ -39,8 +39,8 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 18, 1),
-    "blender": (4, 4, 0),
+    "version": (0, 18, 2),
+    "blender": (4, 5, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
                    "delays. Works on loose objects with no rig at all, and makes one. "
@@ -1371,16 +1371,17 @@ def own_transform_curves(obj):
     action = obj.animation_data.action
     if action is None:
         return found
+    # Only the channelbags are read. From Blender 4.4 every action keeps its
+    # curves in them (a file made before is converted when it opens), but 4.4
+    # and 4.5 still answer `action.fcurves` as well, with the first slot's
+    # curves over again, so reading both counted every curve twice. 5.0 took
+    # that list away.
     for layer in action.layers:
         for strip in layer.strips:
             for bag in strip.channelbags:
                 for curve in bag.fcurves:
                     if curve.data_path in TRANSFORM_PATHS:
                         found.append((bag, curve))
-    # Blender 4.3 and older, and any action that never got a slot.
-    for curve in getattr(action, "fcurves", ()):
-        if curve.data_path in TRANSFORM_PATHS:
-            found.append((action, curve))
     return found
 
 
@@ -1423,12 +1424,11 @@ def rig_own_curves(rig, data):
             return False
         return bone in names and path.rsplit("].", 1)[-1] in TRANSFORM_PATHS
 
+    # Channelbags only, for the reason given in own_transform_curves.
     for layer in action.layers:
         for strip in layer.strips:
             for bag in strip.channelbags:
                 out.extend((bag, c) for c in bag.fcurves if ours(c.data_path))
-    out.extend((action, c) for c in getattr(action, "fcurves", ())
-               if ours(c.data_path))
     return out
 
 
@@ -1509,10 +1509,9 @@ def drop_empty_action(holder):
     action = animation.action if animation else None
     if action is None:
         return
+    # Channelbags only, for the reason given in own_transform_curves.
     if any(len(bag.fcurves) for layer in action.layers
            for strip in layer.strips for bag in strip.channelbags):
-        return
-    if len(getattr(action, "fcurves", ())):
         return
     animation.action = None
     if action.users == 0 and not action.use_fake_user:
@@ -1903,6 +1902,11 @@ def own_binding(rig, obj, keep):
     stale = copied_groups(rig, obj, keep)
     for name in stale:
         obj.vertex_groups.remove(obj.vertex_groups[name])
+    if stale:
+        # Blender 4.5 and 5.0 do not work the mesh out again when a group is
+        # taken off it from Python (5.2 does), so a healed copy went on showing
+        # the other bone's pull until the file was opened again.
+        obj.data.update_tag()
     for modifier in list(obj.modifiers):
         if (modifier.type == "ARMATURE" and modifier.object is None
                 and modifier.name.startswith("RigMoves")):
@@ -7219,10 +7223,9 @@ def action_curve(rig, data_path, index):
     action = rig.animation_data.action if rig.animation_data else None
     if action is None:
         return None, None
+    # Channelbags only, for the reason given in own_transform_curves.
     holders = [bag for layer in action.layers for strip in layer.strips
                for bag in strip.channelbags]
-    if hasattr(action, "fcurves"):
-        holders.append(action)
     for holder in holders:
         for curve in holder.fcurves:
             if curve.data_path == data_path and (index < 0 or curve.array_index == index):

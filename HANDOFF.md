@@ -47,7 +47,7 @@ promises to the user.
 |---|---|
 | `rigmoves/__init__.py` | the whole add-on, about 8,100 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 325 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 326 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
@@ -65,7 +65,9 @@ and `pip install bpy==5.2.2 ruff`. Their checkout is a clone in
 `Desktop\AutoRigger\Moves\Blender-addon` with `core.autocrlf=false`, so files
 and zips keep LF line endings. Their Blender is 5.2.1.
 
-**Blender:** the add-on targets 4.4+ and is tested on 5.2.2 as a Python
+**Blender:** the add-on targets 4.5+ (4.4 has no Replace mode on the Action
+constraint) and is tested headless on 4.5.14 LTS, 5.0.1 and 5.2.1, run all
+three before a release (`CLAUDE.md` has the paths), and on 5.2.2 as a Python
 module. Chromium is available if you ever need to render a picture for the
 user. The Cycles CPU renders made earlier were done with a small script that
 builds a scene and calls `bpy.ops.render.render(write_still=True)`.
@@ -105,6 +107,7 @@ Features, in the order the user asked for them:
 | 0.18.0 | **Ring uses what is already modelled**: a Use choice (Make copies, Use what's there, Fill the gaps - the default); objects that are exact copies of the part's mesh are taken up, stood on their frame if they are not on it | `find_standing`, `standing_candidates`, `reframe`, `put_back`, `RING_USES`, `RIGMOVES_OT_ring` |
 | 0.18.1 | Review of 0.18.0, fourteen findings, mostly data safety: Ring takes up or re-frames an object only when provably safe (no keys/drivers, not linked, selectable, no frame-reading constraint/modifier/dependent, result compared and put back exactly); matching by point set (mirrored halves, unturned cubes); Fill never copies onto anything standing in a place, and is refused when copies stand near the ring on none of its places; Spread's default step sized to fit | `standing_pool`, `why_not_taken`, `Joint`/`Seen`/`Slot`, `fit_error`, `find_standing`, `reframe_blocker`, `look_of`, `looks_the_same`, `signed_volume`, `settle`, `sized_step` |
 | 0.18.0 | **Spread by Step**: Start and Step for each place in the order (default, -10 for Leads and 0.1 for Delays), ties share a place; Range is the old First and Last; Ring's Lead step is the same | `spread_keys`, `tied_ranks`, `spread_ranks`, `spread_put`, `SPREAD_BY`, `RIGMOVES_OT_spread` |
+| 0.18.2 | **Runs on Blender 4.5 LTS, 5.0 and 5.2; needs 4.5 or newer.** 4.4 has no Replace mode on the Action constraint, so every Build failed there. On 4.5 and 5.0 a healed copy was not redrawn (the mesh is tagged after a group is removed). On 4.4 and 4.5 every action curve was read twice (curves are read from the channelbags only). Guard test: the manifest and `bl_info` name one Blender and one version | `own_binding`, `own_transform_curves`, `rig_own_curves`, `action_curve`, `drop_empty_action`, `bl_info["blender"]`, `blender_manifest.toml`, `TestManifest` |
 
 ## The model underneath (read before changing any maths)
 
@@ -128,7 +131,9 @@ Features, in the order the user asked for them:
   bone's basis so its object lands on a world matrix.
 - **Layered actions** (Blender 4.4+): curves live in slot, layer, strip,
   channelbag. Always reach them through `action_bits(move)` and
-  `curve_for(bag, path, index)`.
+  `curve_for(bag, path, index)`. Never read `action.fcurves` as well: 4.4 and
+  4.5 still answer it with the first slot's curves again, so every curve was
+  counted twice there (5.0 removed it).
 - **Drivers must stay "simple expressions"** so they run with Auto Run
   Python Scripts off, and must stay under 256 characters, or Blender cuts
   them short.

@@ -21,8 +21,19 @@
   .blend files keep working. Don't rename them.
 - The add-on is one file, `rigmoves/__init__.py`, with its user guide
   `rigmoves/README.md`. Keep the guide in step with what the panel shows.
-- Targets Blender 4.4+, which keeps action curves under slots, layers and
-  strips (`action_bits` in the add-on). Tested headless on 5.2.2.
+- Targets Blender 4.5+ (4.4 has no Replace mode on the Action constraint),
+  which keeps action curves under slots, layers and strips (`action_bits` in
+  the add-on). Read curves from the channelbags only, never `action.fcurves`:
+  4.4 and 4.5 answer it with the first slot's curves again. Tested headless
+  on 4.5.14, 5.0.1 and 5.2.1.
+- Before a release, run the suite on all three, each with the command above:
+  5.2.1 `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`, 5.0.1
+  `C:\Program Files\Blender Foundation\Blender 5.0\blender.exe`, 4.5.14 LTS
+  portable `Q:\blender-4.5.14-windows-x64\blender.exe`. Q: is a `subst` drive
+  onto a short folder (gone after a reboot: `subst Q: <folder>` again, or unzip
+  the build to any short path): run 4.5 only from a short path, because from a
+  long one its numpy fails to load (Windows path-length limit) and Spread and
+  Ring fail for no reason.
 - Test: `.venv/bin/python tests/test_rigmoves.py` (the SessionStart hook puts
   `bpy` in `.venv`). Lint: `ruff check rigmoves tests tools`. Zip:
   `python tools/build_zip.py`.

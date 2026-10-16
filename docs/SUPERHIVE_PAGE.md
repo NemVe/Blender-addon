@@ -10,7 +10,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 - Author: **NemVe3D** (https://creators.sa/nemve)
 - Licence: **GPL-3.0-or-later**
-- Needs: **Blender 4.4 or newer**
+- Needs: **Blender 4.5 or newer**
 - Where it lives: the 3D Viewport sidebar (press **N**), tab **CopyThat**
 
 ## What you can make
@@ -24,13 +24,13 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 ## Requirements
 
-- Blender 4.4 or newer. CopyThat is tested on Blender 5.2.
+- Blender 4.5 or newer. CopyThat is tested on Blender 4.5 LTS, 5.0 and 5.2.
 - Mesh objects, or the bones of an armature you already have. Other object types (curves, text and so on) need converting to mesh first.
 - Nothing else. It does not need the internet, other add-ons, or **Auto Run Python Scripts** to be switched on.
 
 ## Installation
 
-CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.18.1.zip`).
+CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.18.2.zip`).
 
 ### Removing an older version first (RigMoves or an old CopyThat)
 
@@ -599,7 +599,7 @@ It depends on the **Use** choice in the dialog. **Make copies** makes new petals
 Press Ctrl+Z. Every CopyThat button is a normal Blender undo step. Ring, Spread, Make Chain and Curl are each exactly one Ctrl+Z, and a Ring that cannot be finished puts everything back as it found it. **Edit > Undo History** lists the steps.
 
 **Which Blender versions does it work with?**
-Blender 4.4 and newer. It is tested on Blender 5.2. It does not work on versions older than 4.4.
+Blender 4.5 and newer. It is tested on Blender 4.5 LTS, 5.0 and 5.2. It does not work on versions older than 4.5.
 
 **The New Move button is greyed out.**
 Select one or more **mesh objects** in Object Mode, or bones in Pose Mode on a rig. Other object types (curves, text, empties) need converting to mesh first.
@@ -632,7 +632,7 @@ Each move's path is an ordinary Blender Action, so you can open it in the Graph 
 Yes. CopyThat is licensed GPL-3.0-or-later, which covers the add-on's own code. The scenes and animations you make with it are yours.
 
 **Can I use it on Windows, macOS and Linux?**
-CopyThat is plain Python with nothing to compile, so it does not depend on your operating system, and it has been run on both Windows and Linux. You only need Blender 4.4 or newer.
+CopyThat is plain Python with nothing to compile, so it does not depend on your operating system, and it has been run on both Windows and Linux. You only need Blender 4.5 or newer.
 
 ## Troubleshooting
 

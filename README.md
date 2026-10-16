@@ -6,7 +6,7 @@ A Blender add-on: move the parts of a machine by hand, record where they were
 and where they ended up, and get one control that plays it. The user guide is
 [rigmoves/README.md](rigmoves/README.md).
 
-Needs Blender 4.4 or later.
+Needs Blender 4.5 or later.
 
 By **NemVe3D** - <https://creators.sa/nemve>
 

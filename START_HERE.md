@@ -41,8 +41,11 @@ guide: what the add-on promises).
 - **Version:**
   - 0.18.0 is pushed (dbc6d22).
   - 0.18.1 (the safety fixes below) is pushed (fddbd6e).
-  - 325 tests pass:
-    `.venv/bin/python tests/test_rigmoves.py`; `ruff check rigmoves tests tools`.
+  - 0.18.2 is pushed: it runs on Blender 4.5 LTS, 5.0 and 5.2, and needs 4.5
+    or newer (4.4 cannot run it at all).
+  - 326 tests pass on 4.5.14, 5.0.1 and 5.2.1 (`CLAUDE.md` has the three
+    Blender paths): `.venv/bin/python tests/test_rigmoves.py`;
+    `ruff check rigmoves tests tools`.
 - **Features, in order:**
   - Before/After/Steps, Build Sliders, Play and the handle;
   - Speed per stretch, Ease;
@@ -92,7 +95,7 @@ Still to do for the release:
 - update the guide's install section for the extension;
 - check the dialogs in a real Blender;
 - add product images and video (the promo below);
-- consider tags and the blender_version_min (4.4.0).
+- consider tags (the blender_version_min is settled: 4.5.0, since 0.18.2).
 
 ## The promo video (folder `promo/`)
 

@@ -17,6 +17,7 @@ vertices, not the objects' own transforms, which the rig never moves.
 import importlib
 import math
 import os
+import re
 import sys
 import tempfile
 import types
@@ -5678,6 +5679,33 @@ class TestRegistration(unittest.TestCase):
         rigmoves = importlib.reload(rigmoves)
         rigmoves.register()
         self.assertTrue(hasattr(bpy.types.Object, "rigmoves"))
+
+
+class TestManifest(unittest.TestCase):
+    """What Blender installs the extension by must say what the add-on says.
+
+    The oldest Blender is typed twice, and a release once claimed 4.4 while a
+    part of it only worked from 4.5: the manifest is what keeps an older
+    Blender from installing it, so it must not drift from bl_info."""
+
+    def manifest_line(self, key):
+        path = os.path.join(os.path.dirname(os.path.abspath(rigmoves.__file__)),
+                            "blender_manifest.toml")
+        with open(path, encoding="utf-8") as handle:
+            found = re.findall(r'(?m)^{:s}\s*=\s*"([^"]*)"\s*$'.format(key), handle.read())
+        self.assertEqual(len(found), 1, key)
+        return found[0]
+
+    def test_the_manifest_and_bl_info_name_one_blender(self):
+        minimum = self.manifest_line("blender_version_min")
+        self.assertEqual(minimum, ".".join(map(str, rigmoves.bl_info["blender"])))
+        # The Blender running the tests is one the add-on claims to work on.
+        self.assertGreaterEqual(tuple(bpy.app.version),
+                                tuple(int(number) for number in minimum.split(".")))
+        # build_zip writes the version into the zip's own copy of the manifest,
+        # but the copy in the tree must not be left behind either.
+        self.assertEqual(self.manifest_line("version"),
+                         ".".join(map(str, rigmoves.bl_info["version"])))
 
 
 if __name__ == "__main__":

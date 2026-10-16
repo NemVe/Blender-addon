@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.18.1
+# CopyThat (experiment) - v0.18.2
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -17,9 +17,10 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 
 ## Install
 
-CopyThat is a Blender extension. First, if an older RigMoves or CopyThat is
-listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
-the two cannot be on at once. Then drag `CopyThat-0.18.1.zip` into Blender,
+CopyThat is a Blender extension, and it needs Blender 4.5 or newer: Blender
+will not install it on an older one. First, if an older RigMoves or CopyThat
+is listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
+the two cannot be on at once. Then drag `CopyThat-0.18.2.zip` into Blender,
 or use Edit > Preferences > **Get Extensions** > the drop-down at the top
 right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
 **CopyThat**. Files made with older versions keep working.
@@ -1200,6 +1201,21 @@ and one lifted 1 m:
   the number of places now, and Both ways opens on for Leads around a ring.
 - **Ring said "none were kept" when every place had only part of a chain.** It
   names the real reason now, and lists what was left out, nearest first.
+
+- **Blender 4.4 was named as enough, and every Build failed there with a Python
+  error.** Each part is played through the Action constraint's Replace mode,
+  which Blender added in 4.5. CopyThat asks for Blender 4.5 or newer now, and
+  Blender will not install it on an older one.
+- **On Blender 4.5 and 5.0 a file healed by Build still looked broken.** A copy
+  bound before 0.16, moved by two bones, was given back its own group, but those
+  versions did not redraw it, so it went on being pulled half by the other bone
+  until the file was opened again. It is redrawn now.
+- **On Blender 4.5 every key was found twice.** The red box that warns about
+  stray keys said "2 key track(s) on this rig's bones" for a single stray key,
+  and "6" for a bone keyed on three channels. Lift Their Own Keyframes and Build
+  reported the right numbers, but Blender's console printed "F-Curve not found"
+  once for every track they took off. Each track is counted once now. Blender
+  5.0 and newer never did it.
 
 ## Known rough edges
 
