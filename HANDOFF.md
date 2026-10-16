@@ -248,7 +248,8 @@ Features, in the order the user asked for them:
 - **Which object a part is (0.19):** a part points at its object (`part.object`) as well
   as naming it. `part_object(part)` is the one lookup, used wherever a part's object is
   wanted (never `bpy.data.objects.get(part.name)`): the pointer, unless the object is
-  in another rig's model (`bound_elsewhere`); else the object the name finds, if it is
+  in another rig's model (`bound_elsewhere`: deformed by that rig or hung straight from
+  it - not merely a child of one of its parts); else the object the name finds, if it is
   in this rig's model (`bound_to`: hangs from the rig, or the rig deforms it); else an
   object bound to this rig with a vertex group named after the part's bone (a renamed
   object, or the copy of a whole model whose parts still carry the originals' names);

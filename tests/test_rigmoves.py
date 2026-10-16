@@ -6515,6 +6515,38 @@ class TestAChildLeftBehind(CopyThatCase):
         self.assertEqual(said.count("'Knob") + said.count("'Handle'"), 3)
 
 
+class TestAPartNextToAnotherModel(ChestCase):
+    """What is in another rig's model is told by the rig that deforms it or holds
+    it, not by a part of that model somewhere above it."""
+
+    def test_a_handle_hung_on_the_lid_can_start_a_move_of_its_own(self):
+        handle = cube("Handle", (0.0, -0.66, 1.1))
+        handle.scale = (0.3, 0.1, 0.08)
+        bpy.context.view_layer.update()
+        select(handle, self.lid)
+        bpy.context.view_layer.objects.active = self.lid
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=False),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+        home = handle.matrix_world.copy()
+        select(handle)
+        self.assertEqual(bpy.ops.rigmoves.new_move(fresh=True), {"FINISHED"})
+        other = rig()
+        self.assertNotEqual(other.name, self.move.id_data.name)
+        move = other.rigmoves.moves[0]
+        self.assertIs(rigmoves.part_object(move.parts[0]), handle)
+        handle.matrix_world = Matrix.Translation((0.0, 0.0, 0.5)) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIs(handle.parent, other)
+        handle_points = [home @ v.co for v in handle.data.vertices]
+        for share, lift in ((0.0, 0.0), (1.0, 0.5)):
+            drive(move, share)
+            self.assertLess(drift(handle, [Matrix.Translation((0.0, 0.0, lift)) @ p
+                                           for p in handle_points]), TOLERANCE, share)
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):

@@ -806,17 +806,16 @@ def bound_to(obj, rig):
 
 
 def bound_elsewhere(obj, rig):
-    """Whether an object is in the model of another rig of ours."""
+    """Whether an object is in the model of another rig of ours: deformed by it,
+    or hung straight from it. (A child of a part is not: it hangs from that
+    part's object, which the rig does not move.)"""
     for modifier in obj.modifiers:
         if (modifier.type == "ARMATURE" and modifier.object is not None
                 and modifier.object is not rig and len(modifier.object.rigmoves.moves)):
             return True
-    parent, steps = obj.parent, 0
-    while parent is not None and steps < 100:
-        if parent is not rig and parent.type == "ARMATURE" and len(parent.rigmoves.moves):
-            return True
-        parent, steps = parent.parent, steps + 1
-    return False
+    parent = obj.parent
+    return (parent is not None and parent is not rig and parent.type == "ARMATURE"
+            and len(parent.rigmoves.moves) > 0)
 
 
 def part_object(part):
@@ -5444,13 +5443,13 @@ class RIGMOVES_OT_use_selected(bpy.types.Operator):
             if part.name not in taken:
                 unhang(part)
         # Keep the timing already set for parts that stay in.
-        timing = {p.name: (p.start, p.kind, p.bone_name) for p in move.parts}
+        timing = {p.name: (p.start, p.kind, p.bone_name, p.object) for p in move.parts}
         move.parts.clear()
         for name in taken:
             part = move.parts.add()
             part.name = name
             if name in timing:
-                part.start, part.kind, part.bone_name = timing[name]
+                part.start, part.kind, part.bone_name, part.object = timing[name]
         # Curves for bones that no longer take part would replay channels
         # nobody asked for, so they go with them.
         _action, _slot, bag = action_bits(move)
