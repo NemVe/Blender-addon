@@ -121,6 +121,16 @@ again. The rig can be animated too: it is caught up at the frame it is at. Only
 the parts moved *without* the rig, one at a time, are read as a pose to record.
 A curve for a part's path that is left behind is carried along with the rest.
 
+### Renaming, and copying a finished model
+
+A part is its object, whatever the object is called. Rename it (F2) and the part
+takes the new name, and so does everything that named the old one - a rider's
+leader, a Follows - at once. Copy a finished model - select the rig and its parts
+and press Shift+D (or Alt+D) - and the copy is a model of its own: its parts are
+its own objects, and it plays a path of its own, so building the copy never
+changes the original, or the other way round. Duplicate the rig on its own and you
+have a rig whose parts are the original's: duplicate them together.
+
 ### Starting the next thing
 
 Select an object the rig has never been told about and the panel says so. What
@@ -1255,6 +1265,16 @@ and one lifted 1 m:
   differently, and it is put back on its frame with the mesh moved the other way.
   If that cannot be done safely - a constraint, a modifier that reads the frame -
   the button says so by name and changes nothing.
+- **Renaming a built part (F2) broke its move.** The panel called it "not in this
+  rig", Record saved no part at all, Build took a drag for the rest, Ring turned it
+  down, and taking the move out left the binding behind. The move found its parts by
+  their names. It finds them by their objects now: the part takes the new name, and
+  so does everything that mentioned the old one.
+- **Copying a whole finished model broke the original.** Select the rig and its parts,
+  Shift+D, move the copy and Build it, and the original played several metres from its
+  lid. The copy's parts still named the original's objects, and both rigs played one
+  Action, which the copy's Build rewrote. The copy's parts are its own objects now, and
+  it plays a path of its own.
 
 ## Known rough edges
 

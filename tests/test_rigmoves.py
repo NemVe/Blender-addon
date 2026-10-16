@@ -6079,6 +6079,194 @@ class TestAReframedPart(ChestCase):
         self.check_lid()
 
 
+class TestARenamedPart(ChestCase):
+    """The lid of a built chest is renamed with F2. The move named it, and
+    looked it up by that name: the panel called it "not in this rig", Record
+    recorded no part, Build took the drag for the rest, Ring refused, and
+    taking it out left the binding behind."""
+
+    def rename(self, name="Cover"):
+        self.lid.name = name
+        bpy.context.view_layer.update()
+        select(self.lid)
+
+    def test_the_part_takes_the_new_name_and_is_no_newcomer(self):
+        self.rename()
+        self.assertEqual(self.move.parts[0].name, "Cover")
+        self.assertEqual(rigmoves.newcomers(bpy.context, rig()), [])
+        buttons = [kind for _where, kind, _text in drawn_panel() if "." in kind]
+        self.assertNotIn("rigmoves.add_to_move", buttons)
+
+    def test_the_part_is_found_by_its_object_before_anything_renames_it(self):
+        # Between a rename and the next update nothing has caught up yet.
+        self.lid.name = "Cover"
+        part = self.move.parts[0]
+        self.assertEqual(part.name, "Lid")
+        self.assertIs(rigmoves.part_object(part), self.lid)
+        select(self.lid)
+        self.assertEqual(rigmoves.newcomers(bpy.context, rig()), [])
+
+    def test_record_after_of_a_drag_records_the_part(self):
+        self.rename()
+        self.lid.matrix_world = turn_about(self.hinge, "X", -60.0) @ self.lid.matrix_world
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertIn("recorded for 1 part(s)", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.lid, [turn_about(self.hinge, "X", -60.0) @ p
+                                         for p in self.shut]), TOLERANCE)
+
+    def test_a_drag_after_a_rename_is_put_back_by_build_like_any_other(self):
+        # Build took it for the rest, and the move then started from there.
+        self.rename()
+        self.lid.location.z += 1.0
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_ring_works_on_a_renamed_part(self):
+        self.rename()
+        bpy.context.scene.cursor.location = Vector((0.0, 0.0, 0.0))
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=3), {"FINISHED"})
+        self.assertEqual(sorted(p.name for p in self.move.parts), ["Cover", "Cover 2", "Cover 3"])
+
+    def test_taking_the_move_out_leaves_nothing_of_the_binding(self):
+        self.rename()
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.assertIsNone(self.lid.parent)
+        self.assertEqual([m.type for m in self.lid.modifiers], [])
+        self.assertEqual([g.name for g in self.lid.vertex_groups], [])
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+
+    def test_what_names_the_part_follows_it(self):
+        # A rider copies "Lid"; Follows and Lead keep their meaning when the
+        # leader is renamed.
+        copy = cube("Copy", (4.0, 0.0, 1.1))
+        copy.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        select(copy, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Lid", rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual(self.move.parts["Copy"].leader, "Lid")
+        self.lid.name = "Cover"
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.move.parts["Copy"].leader, "Cover")
+        self.assertEqual(self.move.parts[0].name, "Cover")
+
+    def test_a_part_renamed_before_the_first_build_builds_and_records(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        lid = cube("Cube", (0.0, 0.0, 1.1))
+        lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        home = lid.matrix_world.copy()
+        select(lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        lid.name = "Lid"
+        bpy.context.view_layer.update()
+        select(lid)
+        lid.matrix_world = turn_about(self.hinge, "X", -self.SWING) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertIn("recorded for 1 part(s)", rig().rigmoves.report)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual(move.parts[0].name, "Lid")
+        shut = [home @ v.co for v in lid.data.vertices]
+        for share in (0.0, 1.0):
+            drive(move, share)
+            turn = turn_about(self.hinge, "X", -self.SWING * share)
+            self.assertLess(drift(lid, [turn @ p for p in shut]), TOLERANCE, share)
+
+    def test_an_object_deleted_in_the_viewport_is_let_go_and_its_name_is_free(self):
+        # The pointer a part keeps is a user of the object: deleting it with X
+        # leaves it in the file, in no scene, keeping its name.
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.delete(), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertIsNone(rigmoves.part_object(self.move.parts[0]))
+        rigmoves.catch_up(rig())
+        self.assertIsNone(bpy.data.objects.get("Lid"))
+        self.assertEqual(cube("Lid", (9.0, 0.0, 0.0)).name, "Lid")
+
+
+class TestACopyOfAWholeModel(ChestCase):
+    """A chest, its rig and its lid are duplicated together (Shift+D) and the
+    copy is moved off. The copy's parts still named the original's objects,
+    and both rigs played one Action, so building the copy re-keyed the
+    original, which then played several metres away from its lid."""
+
+    OFF = Matrix.Translation((6.0, 4.0, 0.0))
+
+    def duplicate(self, **kinds):
+        self.rig1 = rig()
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.object.duplicate(**kinds), {"FINISHED"})
+        self.assertEqual(bpy.ops.transform.translate(value=(6.0, 4.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.rig2 = next(o for o in bpy.context.selected_objects if o.type == "ARMATURE")
+        self.lid2 = next(o for o in bpy.context.selected_objects if o.type == "MESH")
+        self.move2 = self.rig2.rigmoves.moves[0]
+
+    def handle(self, owner, move, share):
+        owner.pose.bones[move.handle_name].location.y = move.rail * share
+        bpy.context.view_layer.update()
+
+    def check_both(self, original=Matrix.Identity(4)):
+        for share in (0.0, 0.5, 1.0):
+            self.handle(self.rig1, self.move, share)
+            self.handle(self.rig2, self.move2, share)
+            self.assertLess(drift(self.lid, self.lid_at(share, original)), TOLERANCE,
+                            "the original at {:.0%}".format(share))
+            self.assertLess(drift(self.lid2, self.lid_at(share, self.OFF)), TOLERANCE,
+                            "the copy at {:.0%}".format(share))
+        self.handle(self.rig1, self.move, 0.0)
+        self.handle(self.rig2, self.move2, 0.0)
+
+    def build(self, owner, obj):
+        select(obj)
+        bpy.context.scene.rigmoves_rig = owner
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def test_what_blender_does_to_the_pointer_of_a_copied_rig(self):
+        # Verified on 5.2 and 4.5: copied with its parts, the copied rig's
+        # pointers are re-pointed to the copies (Shift+D and Alt+D alike);
+        # copied alone, they go on pointing at the originals.
+        self.duplicate()
+        self.assertIs(self.move2.parts[0].object, self.lid2)
+        self.assertIs(self.move.parts[0].object, self.lid)
+        for kinds in ({"linked": False}, {"linked": True}):
+            select(rig())
+            self.assertEqual(bpy.ops.object.duplicate(**kinds), {"FINISHED"})
+            alone = bpy.context.view_layer.objects.active
+            self.assertIs(alone.rigmoves.moves[0].parts[0].object, self.lid)
+
+    def test_the_original_is_untouched_by_building_the_copy(self):
+        self.duplicate()
+        self.check_both()
+        self.build(self.rig2, self.lid2)
+        self.assertEqual(self.move2.parts[0].name, "Lid.001")
+        self.check_both()
+
+    def test_the_copy_plays_an_action_of_its_own_and_the_original_keeps_its_own(self):
+        was = self.move.action_name
+        self.duplicate()
+        self.assertEqual(self.move2.action_name, was)
+        self.build(self.rig2, self.lid2)
+        self.assertNotEqual(self.move2.action_name, was)
+        self.assertEqual(self.move.action_name, was)
+        played = {c.action.name for pb in self.rig2.pose.bones for c in pb.constraints
+                  if c.type == "ACTION"}
+        self.assertEqual(played, {self.move2.action_name})
+
+    def test_building_the_original_afterwards_changes_nothing_for_the_copy(self):
+        self.duplicate()
+        self.build(self.rig2, self.lid2)
+        self.build(self.rig1, self.lid)
+        self.check_both()
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):

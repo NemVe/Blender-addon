@@ -245,6 +245,33 @@ Features, in the order the user asked for them:
   operators' `execute` (and `invoke` of the two dialogs): the outermost operator
   appends it to the rig's report when it is done, so no report written after it
   loses it. Blender counts the arguments of what it registers, hence two decorators.
+- **Which object a part is (0.19):** a part points at its object (`part.object`) as well
+  as naming it. `part_object(part)` is the one lookup, used wherever a part's object is
+  wanted (never `bpy.data.objects.get(part.name)`): the pointer, unless the object is
+  in another rig's model (`bound_elsewhere`); else the object the name finds, if it is
+  in this rig's model (`bound_to`: hangs from the rig, or the rig deforms it); else an
+  object bound to this rig with a vertex group named after the part's bone (a renamed
+  object, or the copy of a whole model whose parts still carry the originals' names);
+  else the name's, if no other rig has it. `part_for(move, obj)` is the other way
+  round, and selections are matched to parts through it (`newcomers`, `held`,
+  `chosen_parts`, `leaders`, `indicated`, `rig_of`), never by name.
+  `follow_renames` renames a part whose object is called something else and every
+  reference to the old name in its move (`leader`, `rides_on`, `follows_kept`,
+  `home_parent`; `follows` is written straight in, so `_follows_changed` does not
+  turn the new name down while the target still has the old one). It runs from
+  `catch_up` and from a `depsgraph_update_post` handler (`follow_renames_handler`,
+  persistent, never raises, writes only when a name differs; a rename does run it).
+  `point_at_objects` fills the pointer for a part from before it was kept. Blender, on
+  5.2 and 4.5: a rig duplicated with its parts has its pointers re-pointed to the
+  copies (Shift+D and Alt+D alike); duplicated alone it still points at the originals.
+  The pointer is an ID user, so an object deleted with X is not freed (no collection,
+  one user, its name kept): `part_object` treats an object in no collection as gone, and
+  `let_go_of_deleted` clears the pointer and removes the object if nothing else uses
+  it, from `catch_up` and from a timer the handler sets (never in the handler, which
+  must not take things out of the file). The rig is a user of every part's object, so
+  `take_back_reframed` leaves it out of `user_map`. `own_actions` (in `catch_up`): a
+  move whose Action another rig plays through its constraints takes a copy named
+  "<Action> <rig>", and this rig's constraints are pointed at it.
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in
