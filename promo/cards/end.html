@@ -14,7 +14,7 @@
     font-family: "Inter"; font-style: normal; font-weight: 500;
     src: url("fonts/Inter-Medium.woff2") format("woff2");
   }
-  /* End card, 1920x1080, 3 s at 30 fps, TRANSPARENT: it is laid over the last
+  /* End card, 1920x1080, 4 s at 30 fps, TRANSPARENT: it is laid over the last
      seconds of the Cycles render, where the open flower sits in the upper
      middle of the frame. The text lives in the lower third, under a soft dark
      gradient that fades in with it. Everything is posed by setTime(t). */
@@ -43,8 +43,11 @@
   .line { position: absolute; left: 0; right: 0; margin: 0; text-align: center; white-space: nowrap;
           text-shadow: 0 2px 28px rgba(0,0,0,.55), 0 0 2px rgba(0,0,0,.25); opacity: 0; }
 
+  /* Four lines of type sit under the flower's stem. With "Now on Superhive"
+     in, the mark and the tagline stand 14 px higher than they did and the
+     credit 6 px lower, which leaves the gaps between the lines about even. */
   #mark {
-    top: 780px;
+    top: 766px;
     font-family: "Inter Display", "Inter", sans-serif;
     font-weight: 300; font-size: 120px; line-height: 1;
     letter-spacing: -.035em;
@@ -55,14 +58,23 @@
   #mark span { display: inline-block; padding-right: .035em; }
 
   #tag {
-    top: 918px;
+    top: 904px;
     font-family: "Inter Display", "Inter", sans-serif;
     font-weight: 300; font-size: 40px; line-height: 1.2;
     letter-spacing: .012em;
     color: var(--ink);
   }
+  /* The one call to action, in gold, a touch bigger than the credit under it. */
+  #shop {
+    top: 956px;
+    font-family: "Inter", sans-serif;
+    font-weight: 500; font-size: 29px; line-height: 1.2;
+    letter-spacing: .1em;
+    padding-left: .1em;      /* the space left after the last letter, taken back so the ink stays centred */
+    color: var(--gold);
+  }
   #by {
-    top: 995px;
+    top: 1001px;
     font-family: "Inter", sans-serif;
     font-weight: 500; font-size: 25px; line-height: 1.2;
     letter-spacing: .12em;
@@ -78,6 +90,7 @@
   <div id="pool"></div>
   <h1 id="mark" class="line"><span>CopyThat</span></h1>
   <p id="tag" class="line">Record a move. Get a slider.</p>
+  <p id="shop" class="line">Now on Superhive</p>
   <p id="by" class="line"><span>by NemVe3D</span><i>&middot;</i><b>creators.sa/nemve</b></p>
 </div>
 
@@ -95,12 +108,13 @@
       'linear-gradient(180deg, rgba(3,3,5,0) 0px, ' + stops.join(', ') + ')';
   })();
 
-  // ---- timeline (seconds): fade in over about a second, then hold ---------
+  // ---- timeline (seconds): the lines come in one after another, then hold ---
   const T = {
     shade: [0.00, 1.00],
     mark:  [0.10, 1.00],
     tag:   [0.35, 1.15],
-    by:    [0.50, 1.30]
+    shop:  [0.50, 1.30],
+    by:    [0.65, 1.45]
   };
 
   const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
@@ -121,6 +135,7 @@
     $('pool').style.opacity = s;
     rise($('mark'), outCubic(ramp(t, T.mark)), 18, 8);
     rise($('tag'), outCubic(ramp(t, T.tag)), 14, 5);
+    rise($('shop'), outCubic(ramp(t, T.shop)), 12, 4);
     rise($('by'),  outCubic(ramp(t, T.by)),  10, 3);
   };
 

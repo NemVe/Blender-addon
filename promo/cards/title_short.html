@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CopyThat title card (short)</title>
+<meta name="viewport" content="width=1920">
+<style>
+  /* The cards must look the same on any machine, and Inter is not installed on Windows by default, so the faces ship in fonts/. */
+  @font-face {
+    font-family: "Inter Display"; font-style: normal; font-weight: 300;
+    src: url("fonts/InterDisplay-Light.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 500;
+    src: url("fonts/Inter-Medium.woff2") format("woff2");
+  }
+  /* Short title card, 1920x1080, 2 s at 30 fps: title.html's wordmark and
+     tagline, the same look and the same motion, only quicker, and without the
+     credit line (the end card carries that). It comes up from black and goes
+     back to black, so the edit can cut straight in and out of it. Everything
+     is posed by setTime(t); nothing here animates on its own. */
+  :root {
+    --gold:    #C9A76A;
+    --gold-hi: #EBD5A4;
+    --ink:     #F2EADB;   /* warm white */
+  }
+  html, body {
+    margin: 0; padding: 0;
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: #000;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: #000; }
+
+  /* Studio backdrop: the render's cool near-black, lifted a little behind
+     the wordmark and falling off to the corners. */
+  #bg {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 1100px 760px at 50% 44%, #15171d 0%, #0d0e12 38%, #070709 68%, #030304 100%);
+  }
+  #glow {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 760px 300px at 50% 41%, rgba(201,167,106,.17) 0%, rgba(201,167,106,.06) 48%, rgba(201,167,106,0) 75%);
+  }
+  /* A fixed film-grain dither, so the dark gradient does not band. The tile is
+     a plain PNG: an SVG noise filter works too, but re-renders every frame. */
+  #grain {
+    position: absolute; inset: 0; opacity: .06;
+    background: url("grain.png") 0 0 / 512px 512px repeat;
+  }
+
+  #comp { position: absolute; inset: 0; transform-origin: 50% 50%; }
+
+  #mark {
+    position: absolute; left: 50%; top: 430px;
+    margin: 0; padding: .14em .2em .22em .2em;
+    transform: translate(-50%, -50%);
+    font-family: "Inter Display", "Inter", sans-serif;
+    font-weight: 300;
+    font-size: 214px; line-height: 1;
+    letter-spacing: -.035em;
+    font-feature-settings: "kern" 1, "liga" 1;
+    white-space: nowrap;
+    color: transparent;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    will-change: filter;
+  }
+  /* The tracking is negative after every glyph, the last one included, so the
+     ink hangs out of the box on the right. This puts the box back. */
+  #mark span { display: inline-block; padding-right: .035em; }
+
+  #rule {
+    position: absolute; left: 50%; top: 586px;
+    width: 440px; height: 2px; margin-left: -220px;
+    background: linear-gradient(90deg, rgba(201,167,106,0) 0%, #C9A76A 22%, #E3C98F 50%, #C9A76A 78%, rgba(201,167,106,0) 100%);
+    transform-origin: 50% 50%;
+    opacity: 0;
+  }
+  #tag {
+    position: absolute; left: 0; right: 0; top: 638px;
+    margin: 0; text-align: center;
+    font-family: "Inter Display", "Inter", sans-serif;
+    font-weight: 300; font-size: 50px; line-height: 1.2;
+    letter-spacing: .012em;
+    color: var(--ink);
+    opacity: 0;
+  }
+  #fade { position: absolute; inset: 0; background: #000; opacity: 0; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bg"></div>
+  <div id="glow"></div>
+  <div id="grain"></div>
+  <div id="comp">
+    <h1 id="mark"><span>CopyThat</span></h1>
+    <div id="rule"></div>
+    <p id="tag">Record a move. Get a slider.</p>
+  </div>
+  <div id="fade"></div>
+</div>
+
+<script>
+  // ---- timeline (seconds) -------------------------------------------------
+  // title.html's, run at about 0.57 of its length. The last frame is 59/30, so
+  // the fade ends there and that frame is black.
+  const T = {
+    bgIn:    [0.00, 0.45],   // backdrop comes up from black
+    mark:    [0.10, 0.92],   // mask wipe, left to right
+    markSharp:[0.10, 1.12],  // blur-to-sharp, settles a little after the wipe
+    rule:    [0.72, 1.04],   // gold rule draws out from its centre
+    tag:     [0.92, 1.28],   // tagline fades up, then a hold until the fade
+    fade:    [1.70, 1.9667]  // fade to black; the last frame (59/30) is black
+  };
+  const DUR = 2.0;
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const ramp  = (t, [a, b]) => clamp((t - a) / (b - a));
+  const outCubic  = x => 1 - Math.pow(1 - x, 3);
+  const inOutSine = x => 0.5 - 0.5 * Math.cos(Math.PI * x);
+  const inOutCubic= x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+  const $ = id => document.getElementById(id);
+  const el = { bg: $('bg'), glow: $('glow'), grain: $('grain'), comp: $('comp'),
+               mark: $('mark'), rule: $('rule'), tag: $('tag'), fade: $('fade') };
+
+  const FEATHER = 34;          // soft edge of the wipe, in % of the wordmark width
+  const INK = '#F2EADB', HI = '#F3DDA9';
+
+  window.setTime = function (t) {
+    // backdrop
+    const bg = inOutSine(ramp(t, T.bgIn));
+    el.bg.style.opacity = bg;
+    el.grain.style.opacity = .06 * bg;
+    const gl = outCubic(ramp(t, [0.17, 1.20]));
+    el.glow.style.opacity = gl * (0.85 + 0.15 * Math.sin(Math.PI * clamp(t / DUR)));
+
+    // slow push-in on everything, so the hold never feels frozen
+    el.comp.style.transform = 'scale(' + (1 + 0.028 * outCubic(clamp(t / DUR))) + ')';
+
+    // wordmark: mask wipe with a soft edge, blur-to-sharp, and a gold sheen
+    // riding just behind the edge of the wipe
+    const w  = inOutSine(ramp(t, T.mark));
+    const p  = w * (100 + FEATHER);
+    const m  = 'linear-gradient(90deg, #000 ' + (p - FEATHER).toFixed(2) + '%, rgba(0,0,0,0) ' + p.toFixed(2) + '%)';
+    el.mark.style.webkitMaskImage = m; el.mark.style.maskImage = m;
+    const s  = 1 - Math.pow(1 - ramp(t, T.markSharp), 2.4);   // lingers, so the blur reads
+    el.mark.style.filter = 'blur(' + (18 * (1 - s)).toFixed(2) + 'px)';
+    el.mark.style.opacity = ramp(t, [0.10, 0.35]);
+    el.mark.style.transform = 'translate(-50%, -50%) scale(' + (1 + 0.045 * (1 - outCubic(ramp(t, [0.10, 1.30])))).toFixed(4) + ')';
+    const c  = p - FEATHER * 0.55, sw = 20;
+    el.mark.style.backgroundImage =
+      'linear-gradient(180deg, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 52%, rgba(201,167,106,.12) 100%),' +
+      'linear-gradient(90deg, ' + INK + ' 0%, ' + INK + ' ' + (c - sw).toFixed(2) + '%, ' + HI + ' ' + c.toFixed(2) + '%, ' +
+      INK + ' ' + (c + sw).toFixed(2) + '%, ' + INK + ' 100%)';
+
+    // gold rule
+    const r = inOutCubic(ramp(t, T.rule));
+    el.rule.style.transform = 'scaleX(' + r.toFixed(4) + ')';
+    el.rule.style.opacity = clamp(r * 6);
+
+    // tagline
+    const g = outCubic(ramp(t, T.tag));
+    el.tag.style.opacity = g;
+    el.tag.style.transform = 'translateY(' + (22 * (1 - g)).toFixed(2) + 'px)';
+    el.tag.style.filter = 'blur(' + (7 * (1 - g)).toFixed(2) + 'px)';
+
+    // fade to black
+    el.fade.style.opacity = inOutSine(ramp(t, T.fade));
+  };
+
+  window.setTime(0);
+  // Handy for looking at one frame:  title_short.html?t=1.4
+  const q = new URLSearchParams(location.search).get('t');
+  if (q !== null) window.setTime(parseFloat(q));
+</script>
+</body>
+</html>

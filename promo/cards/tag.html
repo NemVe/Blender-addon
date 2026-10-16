@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CopyThat corner tag</title>
+<meta name="viewport" content="width=1920">
+<style>
+  /* The cards must look the same on any machine, and Inter is not installed on Windows by default, so the faces ship in fonts/. */
+  @font-face {
+    font-family: "Inter Display"; font-style: normal; font-weight: 300;
+    src: url("fonts/InterDisplay-Light.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 500;
+    src: url("fonts/Inter-Medium.woff2") format("woff2");
+  }
+  /* Corner tag, 1920x1080, TRANSPARENT: a few small words in the bottom right,
+     for the render ("Rendered in Cycles"). The text and the length come from
+     the address:
+         tag.html?text=Rendered in Cycles&dur=3
+     (dur in seconds, 3 if left out). Everything is posed by setTime(t);
+     nothing here animates on its own. */
+  :root {
+    --gold: #C9A76A;
+    --ink:  #F2EADB;   /* warm white */
+  }
+  html, body {
+    margin: 0; padding: 0;
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: transparent; }
+
+  /* The same margins as the lower third (96 px from the side, 120 px up), so
+     the two sit on one frame. */
+  #tag {
+    position: absolute; right: 96px; bottom: 120px;
+    margin: 0 -.04em 0 0; white-space: nowrap; text-align: right;
+    font-family: "Inter", sans-serif;
+    font-weight: 500; font-size: 26px; line-height: 1.2;
+    letter-spacing: .04em;                   /* the margin takes back the space left after the last letter */
+    font-feature-settings: "kern" 1, "liga" 1;
+    color: rgba(242,234,219,.85);
+    text-shadow: 0 1px 14px rgba(3,3,5,.60), 0 0 2px rgba(3,3,5,.30);
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <p id="tag">Rendered in Cycles</p>
+</div>
+
+<script>
+  // ---- the address: ?text=...&dur=... -------------------------------------
+  const P = new URLSearchParams(location.search);
+  const TEXT = P.has('text') ? P.get('text') : 'Rendered in Cycles';
+  const DUR  = parseFloat(P.get('dur')) > 0 ? parseFloat(P.get('dur')) : 3;
+  const FPS  = 30;                 // the film's frame rate
+  const LAST = DUR - 1 / FPS;      // the last frame: the card ends fully clear, as title.html ends fully black
+
+  // ---- timeline (seconds): a plain fade each way ----------------------------
+  const T = {
+    in:  [0.00, 0.30],
+    out: [Math.max(LAST - 0.30, 0.30), LAST]
+  };
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const ramp  = (t, [a, b]) => clamp((t - a) / (b - a));
+  const inOutSine = x => 0.5 - 0.5 * Math.cos(Math.PI * x);
+
+  const tag = document.getElementById('tag');
+  // textContent, so nothing in the text is read as markup; and a real
+  // apostrophe where the address had a straight one (it's -> it&rsquo;s)
+  tag.textContent = TEXT.replace(/(\w)'(\w)/g, '$1' + String.fromCharCode(0x2019) + '$2');
+
+  window.setTime = function (t) {
+    tag.style.opacity = (inOutSine(ramp(t, T.in)) * (1 - inOutSine(ramp(t, T.out)))).toFixed(4);
+  };
+
+  window.setTime(0);
+  // Handy for looking at one frame:  tag.html?text=Rendered in Cycles&t=1
+  const q = P.get('t');
+  if (q !== null) window.setTime(parseFloat(q));
+</script>
+</body>
+</html>

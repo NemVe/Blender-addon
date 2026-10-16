@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CopyThat lower third</title>
+<meta name="viewport" content="width=1920">
+<style>
+  /* The cards must look the same on any machine, and Inter is not installed on Windows by default, so the faces ship in fonts/. */
+  @font-face {
+    font-family: "Inter Display"; font-style: normal; font-weight: 300;
+    src: url("fonts/InterDisplay-Light.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 500;
+    src: url("fonts/Inter-Medium.woff2") format("woff2");
+  }
+  /* Lower third, 1920x1080, TRANSPARENT: the caption for the demo, laid over a
+     full Blender window or over the render. The text and the length come from
+     the address:
+         lower_third.html?text=Pose it once. Record.&dur=3
+     (dur in seconds, 3 if left out). Everything is posed by setTime(t);
+     nothing here animates on its own. */
+  :root {
+    --gold: #C9A76A;
+    --ink:  #F2EADB;   /* warm white */
+  }
+  html, body {
+    margin: 0; padding: 0;
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: transparent; }
+
+  /* 96 px in from the left and 120 px up from the bottom: clear of the
+     toolbar, and above Blender's timeline and status bar when this goes over
+     a recording of the whole window. The dark body reaches 8 px past the text
+     box, so the box itself stands at 128 and the edge you see at 120. */
+  #bar {
+    position: absolute; left: 96px; bottom: 128px;
+    max-width: 1500px;
+    opacity: 0;
+    will-change: transform, opacity;
+    /* The slab below is blurred, which would also soften its left side. This
+       cuts the left at the gold rule, so that edge stays sharp and the other
+       three fade out softly. */
+    clip-path: inset(-100px -100px -100px 0);
+  }
+  /* The dark body. A backdrop blur cannot be drawn on a transparent card, so
+     the same softness comes from blurring its edge. It reaches past the text
+     box, so the middle is full strength and only the rim fades. */
+  #slab {
+    position: absolute; left: -40px; right: -10px; top: -8px; bottom: -8px;
+    background: rgba(10,10,12,.72);
+    filter: blur(9px);
+  }
+  #gold {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: linear-gradient(180deg, #DDC48C 0%, #C9A76A 50%, #BF9D61 100%);
+  }
+  #txt {
+    position: relative; margin: 0;
+    padding: 24px 46px 24px 40px;
+    font-family: "Inter", sans-serif;
+    font-weight: 500; font-size: 40px; line-height: 1.2;
+    letter-spacing: -.004em;
+    font-feature-settings: "kern" 1, "liga" 1;
+    color: var(--ink);
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bar">
+    <div id="slab"></div>
+    <div id="gold"></div>
+    <p id="txt">Ring: one petal becomes a ring of eight.</p>
+  </div>
+</div>
+
+<script>
+  // ---- the address: ?text=...&dur=... -------------------------------------
+  const P = new URLSearchParams(location.search);
+  const TEXT = P.has('text') ? P.get('text') : 'Ring: one petal becomes a ring of eight.';
+  const DUR  = parseFloat(P.get('dur')) > 0 ? parseFloat(P.get('dur')) : 3;
+  const FPS  = 30;                 // the film's frame rate
+  const LAST = DUR - 1 / FPS;      // the last frame: the card ends fully clear, as title.html ends fully black
+
+  // ---- timeline (seconds) -------------------------------------------------
+  const T = {
+    bar:  [0.00, 0.30],                            // in: the bar slides out from the left
+    txt:  [0.06, 0.30],                            // the words come up a touch after the bar
+    out:  [Math.max(LAST - 0.25, 0.30), LAST]      // out: fades, with a short slide back
+  };
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const ramp  = (t, [a, b]) => clamp((t - a) / (b - a));
+  const outCubic  = x => 1 - Math.pow(1 - x, 3);
+  const inOutSine = x => 0.5 - 0.5 * Math.cos(Math.PI * x);
+
+  const $ = id => document.getElementById(id);
+  const el = { bar: $('bar'), txt: $('txt') };
+  // textContent, so nothing in the text is read as markup; and a real
+  // apostrophe where the address had a straight one (leaf's -> leaf&rsquo;s)
+  el.txt.textContent = TEXT.replace(/(\w)'(\w)/g, '$1' + String.fromCharCode(0x2019) + '$2');
+
+  window.setTime = function (t) {
+    const a = outCubic(ramp(t, T.bar));
+    const b = outCubic(ramp(t, T.txt));
+    const o = inOutSine(ramp(t, T.out));
+    el.bar.style.opacity = (a * (1 - o)).toFixed(4);
+    el.bar.style.transform = 'translateX(' + (-24 * (1 - a) - 12 * o).toFixed(2) + 'px)';
+    el.txt.style.opacity = b.toFixed(4);
+  };
+
+  window.setTime(0);
+  // Handy for looking at one frame:  lower_third.html?text=Spread: the timing, in one go.&t=1
+  const q = P.get('t');
+  if (q !== null) window.setTime(parseFloat(q));
+</script>
+</body>
+</html>

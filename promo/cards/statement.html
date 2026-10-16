@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CopyThat statement card</title>
+<meta name="viewport" content="width=1920">
+<style>
+  /* The cards must look the same on any machine, and Inter is not installed on Windows by default, so the faces ship in fonts/. */
+  @font-face {
+    font-family: "Inter Display"; font-style: normal; font-weight: 300;
+    src: url("fonts/InterDisplay-Light.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 500;
+    src: url("fonts/Inter-Medium.woff2") format("woff2");
+  }
+  /* Statement card, 1920x1080, TRANSPARENT: one big line with a short gold rule
+     under it, for the hook, laid over the Cycles render. The text and the length
+     come from the address:
+         statement.html?text=One slider.&dur=1.5
+     (dur in seconds, 1.5 if left out). Everything is posed by setTime(t);
+     nothing here animates on its own. */
+  :root {
+    --gold: #C9A76A;
+    --ink:  #F2EADB;   /* warm white */
+  }
+  html, body {
+    margin: 0; padding: 0;
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: transparent; }
+
+  /* Slightly above the middle. The line is centred on its own box, so the
+     size can change (a long text is set smaller) and the middle stays put. */
+  #line {
+    position: absolute; left: 0; right: 0; top: 480px;
+    margin: 0; text-align: center; white-space: nowrap;
+    font-family: "Inter Display", "Inter", sans-serif;
+    font-weight: 300; font-size: 150px; line-height: 1;
+    letter-spacing: -.028em;
+    word-spacing: .05em;               /* the tight tracking would close the gaps between words */
+    font-feature-settings: "kern" 1, "liga" 1;
+    color: var(--ink);
+    /* It goes over the bright petals, so the letters carry their own dark
+       glow: a tight edge, a soft drop and a wide haze. All of it follows the
+       letters, so there is no box to see. */
+    text-shadow:
+      0 0 2px rgba(3,3,5,.40),
+      0 3px 14px rgba(3,3,5,.52),
+      0 8px 52px rgba(3,3,5,.55),
+      0 0 120px rgba(3,3,5,.40);
+    opacity: 0;
+    will-change: transform, opacity, filter;
+  }
+  /* Negative tracking also follows the last glyph; this keeps the ink centred. */
+  #line span { display: inline-block; padding-right: .028em; }
+
+  /* The title card's rule, shorter and a touch thicker, so it still reads on
+     a busy picture. */
+  #rule {
+    position: absolute; left: 50%; top: 591px;
+    width: 220px; height: 3px; margin-left: -110px;
+    background: linear-gradient(90deg, rgba(201,167,106,0) 0%, #C9A76A 18%, #E3C98F 50%, #C9A76A 82%, rgba(201,167,106,0) 100%);
+    box-shadow: 0 0 18px rgba(3,3,5,.45);
+    transform-origin: 50% 50%;
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <h1 id="line"><span id="txt">21 moving parts.</span></h1>
+  <div id="rule"></div>
+</div>
+
+<script>
+  // ---- the address: ?text=...&dur=... -------------------------------------
+  const P = new URLSearchParams(location.search);
+  const TEXT = P.has('text') ? P.get('text') : '21 moving parts.';
+  const DUR  = parseFloat(P.get('dur')) > 0 ? parseFloat(P.get('dur')) : 1.5;
+  const FPS  = 30;                 // the film's frame rate
+  const LAST = DUR - 1 / FPS;      // the last frame: the card ends fully clear, as title.html ends fully black
+
+  // ---- timeline (seconds) -------------------------------------------------
+  const T = {
+    line: [0.00, 0.25],                           // in: opacity, a small rise and the focus settling
+    rule: [0.06, 0.30],                           // the gold rule draws out from its centre
+    out:  [Math.max(LAST - 0.20, 0.30), LAST]     // out: opacity and a small lift
+  };
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const ramp  = (t, [a, b]) => clamp((t - a) / (b - a));
+  const outCubic  = x => 1 - Math.pow(1 - x, 3);
+  const inOutSine = x => 0.5 - 0.5 * Math.cos(Math.PI * x);
+  const inOutCubic= x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+  const $ = id => document.getElementById(id);
+  const el = { line: $('line'), txt: $('txt'), rule: $('rule') };
+  // textContent, so nothing in the text is read as markup; and a real
+  // apostrophe where the address had a straight one (it's -> it&rsquo;s)
+  el.txt.textContent = TEXT.replace(/(\w)'(\w)/g, '$1' + String.fromCharCode(0x2019) + '$2');
+
+  // A long text is set smaller rather than run off the frame. The width only
+  // counts once the real face is loaded, so this is redone until it is.
+  const FACE = '300 150px "Inter Display"', MAX_W = 1640;
+  let fitted = false;
+  function fit() {
+    el.line.style.fontSize = '';
+    const w = el.txt.offsetWidth;
+    if (w > MAX_W) el.line.style.fontSize = (150 * MAX_W / w).toFixed(2) + 'px';
+    fitted = document.fonts.check(FACE);
+  }
+
+  let lastT = 0;
+  window.setTime = function (t) {
+    lastT = t;
+    if (!fitted) fit();
+
+    // the line: in, hold, out
+    const a = outCubic(ramp(t, T.line));
+    const o = inOutSine(ramp(t, T.out));
+    el.line.style.opacity = (a * (1 - o)).toFixed(4);
+    el.line.style.transform = 'translateY(calc(-50% + ' + (12 * (1 - a) - 6 * o).toFixed(2) + 'px))';
+    el.line.style.filter = 'blur(' + (6 * (1 - a)).toFixed(2) + 'px)';
+
+    // the rule
+    const r = inOutCubic(ramp(t, T.rule));
+    el.rule.style.transform = 'scaleX(' + r.toFixed(4) + ')';
+    el.rule.style.opacity = (clamp(r * 6) * (1 - o)).toFixed(4);
+  };
+
+  document.fonts.load(FACE).then(() => window.setTime(lastT));
+  window.setTime(0);
+  // Handy for looking at one frame:  statement.html?text=One slider.&t=0.8
+  const q = P.get('t');
+  if (q !== null) window.setTime(parseFloat(q));
+</script>
+</body>
+</html>
