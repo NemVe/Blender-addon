@@ -4924,6 +4924,80 @@ class TestAnNlaStripThatPlaysThePartsOwnKeys(CopyThatCase):
                          [inside, plain, muted])
 
 
+class TestMutingAnNlaStrip(CopyThatCase):
+    """Build named a coin moved by an NLA strip and advised "mute or remove it".
+    A strip that is muted still sets every channel it works to its default on
+    every frame, so a coin whose strip was muted sat at the origin at every
+    frame, and the part was no longer named. Muting the track, or deleting the
+    strip, is what works."""
+
+    def setUp(self):
+        super().setUp()
+        scene = bpy.context.scene
+        self.coin = cube("Coin", (0.3, 0.0, 0.6))
+        self.coin.scale = (0.3, 0.3, 0.05)
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+        self.rest = rest_points(self.coin)
+        self.coin.keyframe_insert("location", frame=1)
+        self.coin.location = (0.3, 0.0, 0.9)
+        self.coin.keyframe_insert("location", frame=20)
+        self.coin.location = (0.3, 0.0, 0.6)
+        action = self.coin.animation_data.action
+        self.track = self.coin.animation_data.nla_tracks.new()
+        self.strip = self.track.strips.new("hover", 1, action)
+        if self.strip.action_slot is None:
+            self.strip.action_slot = action.slots[0]
+        self.coin.animation_data.action = None
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+        select(self.coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.coin.matrix_world = Matrix.Translation((0.0, -2.2, 0.0)) @ self.coin.matrix_world
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIn("is moved by an NLA strip of its own", rig().rigmoves.report)
+
+    def build(self):
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        select(self.coin)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        return rig().rigmoves.report
+
+    def plays_the_move_at_every_frame(self):
+        move = rig().rigmoves.moves[0]
+        for frame in (1, 10, 20):
+            bpy.context.scene.frame_set(frame)
+            for share in (0.0, 0.5, 1.0):
+                drive(move, share)
+                self.assertLess(drift(self.coin, [p + Vector((0.0, -2.2 * share, 0.0))
+                                                  for p in self.rest]), TOLERANCE,
+                                "frame {:d}, {:.0%}".format(frame, share))
+
+    def test_a_muted_strip_is_still_named_and_a_muted_track_or_a_deleted_strip_is_not(self):
+        # What the advice used to be: the strip muted. It is still named, and
+        # the advice is the one that works.
+        self.strip.mute = True
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), (["Coin"], []))
+        self.assertIn("'Coin' is moved by an NLA strip of its own, which fights the rig: in "
+                      "the NLA editor, mute its track (the checkbox on the track) or delete "
+                      "the strip, then Build.", self.build())
+        # Its track muted: nothing is named, and the coin plays the move.
+        self.strip.mute = False
+        self.track.mute = True
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), ([], []))
+        self.assertNotIn("fights the rig", self.build())
+        self.plays_the_move_at_every_frame()
+        # The strip deleted: the same.
+        self.track.mute = False
+        self.track.strips.remove(self.strip)
+        self.assertEqual(rigmoves.fighting_parts(rig().rigmoves), ([], []))
+        self.assertNotIn("fights the rig", self.build())
+        self.plays_the_move_at_every_frame()
+
+
 class TestMakeChainOrder(CopyThatCase):
     """The order follows how a joint is built, at the far end of the part before
     it: not whichever pivot happens to be nearest."""
@@ -7504,8 +7578,8 @@ class TestPartsMovedByTheirOwn(CopyThatCase):
     lifts keys - they are somebody's work - so it names them, and says what to
     do."""
 
-    NLA = ("'Lid' is moved by an NLA strip of its own, which fights the rig: mute or "
-           "remove it in the NLA editor, then Build.")
+    NLA = ("'Lid' is moved by an NLA strip of its own, which fights the rig: in the NLA "
+           "editor, mute its track (the checkbox on the track) or delete the strip, then Build.")
     DRIVER = ("'Lid' is moved by a driver on its transform: remove it in the Drivers "
               "editor, then Build.")
 
@@ -7621,16 +7695,15 @@ class TestPartsMovedByTheirOwn(CopyThatCase):
                 for n in range(4)]
         self.start(*lids)
         self.assertIn("'Lid 0', 'Lid 1', 'Lid 2' and 1 more are moved by NLA strips of "
-                      "their own, which fight the rig: mute or remove them in the NLA "
-                      "editor, then Build.", self.said_by_the_panel())
+                      "their own, which fight the rig: in the NLA editor, mute their tracks "
+                      "(the checkbox on each) or delete the strips, then Build.",
+                      self.said_by_the_panel())
 
     def test_nothing_is_said_of_what_plays_nothing(self):
-        # A muted strip, a muted track, the NLA switched off, a muted driver, a
-        # strip with no transform in it: none of them moves the part.
+        # A muted track, the NLA switched off, a muted driver, a strip with no
+        # transform in it: none of them moves the part. (A muted strip does: see
+        # TestMutingAnNlaStrip.)
         cases = []
-        lid = self.lid_with(self.in_the_nla, "Muted Strip", (0.0, 0.0, 1.0))
-        self.strip.mute = True
-        cases.append(lid)
         lid = self.lid_with(self.in_the_nla, "Muted Track", (0.0, 3.0, 1.0))
         self.track.mute = True
         cases.append(lid)
@@ -7703,11 +7776,11 @@ class TestPartsMovedByTheirOwn(CopyThatCase):
         self.assertNotIn("fights the rig", text)
         self.assertEqual(rigmoves.own_transform_curves(self.lid), [])
 
-    def test_build_keeps_saying_so_until_the_strip_is_muted(self):
+    def test_build_keeps_saying_so_until_the_track_is_muted(self):
         self.lid = self.lid_with(self.in_the_nla)
         self.start(self.lid)
         self.assertEqual(self.build_and_hear()[0], {"WARNING"})
-        self.strip.mute = True
+        self.track.mute = True
         kinds, text = self.build_and_hear()
         self.assertEqual(kinds, {"INFO"})
         self.assertNotIn("fights the rig", text)

@@ -2163,12 +2163,14 @@ def clip_strips(strips, muted=False):
 
 
 def moved_by_nla(obj):
-    """Whether an NLA strip that is not muted works an object's transform: one
-    that plays an action with a curve on it, for the slot the strip plays.
+    """Whether an NLA strip works an object's transform: one that plays an
+    action with a curve on it, for the slot the strip plays.
 
     The NLA is evaluated under the object's own action, and the rig plays
     against it all the same. A track muted, or put aside by another that is
-    soloed, plays nothing.
+    soloed, plays nothing. A strip that is muted on a track that plays is not
+    played, but Blender sets every channel it works to its default on every
+    frame: the part sits at the origin, and the rig fights that instead.
     """
     animation = obj.animation_data
     if animation is None or not animation.use_nla:
@@ -2179,7 +2181,7 @@ def moved_by_nla(obj):
     for track in tracks:
         if track.mute:
             continue
-        for strip in clip_strips(track.strips):
+        for strip in clip_strips(track.strips, muted=True):
             if any(curve.data_path in TRANSFORM_PATHS
                    for _bag, curve in slot_curves(strip.action, strip.action_slot)):
                 return True
@@ -2221,12 +2223,14 @@ def fighting_words(nla, driven):
     said = []
     if nla:
         one = len(nla) == 1
-        said.append("{:s} {:s} moved by {:s} of {:s} own, which {:s} the rig: mute or "
-                    "remove {:s} in the NLA editor, then Build.".format(
+        said.append("{:s} {:s} moved by {:s} of {:s} own, which {:s} the rig: in the NLA "
+                    "editor, mute {:s} {:s} (the checkbox on {:s}) or delete the {:s}, "
+                    "then Build.".format(
                         named(nla), "is" if one else "are",
                         "an NLA strip" if one else "NLA strips",
                         "its" if one else "their", "fights" if one else "fight",
-                        "it" if one else "them"))
+                        "its" if one else "their", "track" if one else "tracks",
+                        "the track" if one else "each", "strip" if one else "strips"))
     if driven:
         one = len(driven) == 1
         said.append("{:s} {:s} moved by {:s} on {:s}: remove {:s} in the Drivers editor, "
