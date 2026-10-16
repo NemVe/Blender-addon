@@ -272,6 +272,15 @@ Features, in the order the user asked for them:
   `take_back_reframed` leaves it out of `user_map`. `own_actions` (in `catch_up`): a
   move whose Action another rig plays through its constraints takes a copy named
   "<Action> <rig>", and this rig's constraints are pointed at it.
+- **One object, one move (0.19):** an object is bound to one bone (`own_binding` takes
+  every other part's group off it), so a second move on it left it moved by neither.
+  `moves_holding(context, objects)` says which objects are a part of a move of a rig
+  in the scene ({object: move}; a rig deleted from the scene does not count), and New
+  Move, Add To This Group and Ride Along leave those out with `left_out_words`, refusing
+  with it - changing nothing, not even making a rig - when nothing is left. Bones of a
+  hand-built rig still compose, one move over another. `doubled(data)` finds an object
+  that is the object of two parts (a file from before): `bind_loose` and `heal_bindings`
+  leave it alone, and Build reports it.
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in

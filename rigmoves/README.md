@@ -147,6 +147,11 @@ the object belongs:
 The group the selection points at is offered first and large. Every other
 group on every rig in view is listed underneath, for when it is not.
 
+An object is in one move only, because it is bound to one bone. New Move, Add To
+This Group and Ride Along leave out any object that is a part of a move already,
+and say so by name; with nothing left to take, they refuse and change nothing. For
+a second motion of the same object, add a Step to its move.
+
 When one of the selected objects is a part that already moves, **Ride Along**
 is offered first - see below.
 
@@ -745,7 +750,8 @@ parent's new keys. A part that never follows hangs from the root.
 Top of the stack matters: whatever constraints the bone already had still run
 afterwards, so a hand-built rig can be given a control without being taken
 apart. The first move on a bone replaces its pose, any later move composes on
-top, so two moves can share a part.
+top, so two moves can share a bone of a hand-built rig. An object is bound to one
+bone, so it is in one move: for a second motion, add a Step.
 
 The Action constraint is also why an arbitrary path is possible at all. A
 plain driver can only interpolate a straight line between two numbers; an
@@ -1275,6 +1281,12 @@ and one lifted 1 m:
   lid. The copy's parts still named the original's objects, and both rigs played one
   Action, which the copy's Build rewrote. The copy's parts are its own objects now, and
   it plays a path of its own.
+- **A second move on an object took it away from the first.** Select the lid of a built
+  chest, press New Move, lift it, Record, Build: the lid lost both of its groups and was
+  moved by neither move, and Build said some parts "copied from another" had been put
+  right, which was not so. An object is in one move now: New Move, Add To This Group and
+  Ride Along leave out what is in one, say so, and refuse if nothing is left. Build
+  reports an object that a file already has in two moves, and leaves it alone.
 
 ## Known rough edges
 
@@ -1297,8 +1309,10 @@ and one lifted 1 m:
   coordinates are not checked when an object is re-framed.
 - An object is bound whole, to one bone. Parts that bend need a rig of their
   own and the bone workflow.
-- Two moves sharing a part compose in the order they were made, which is not
-  shown anywhere.
+- Two moves on one bone of a hand-built rig compose in the order they were made,
+  which is not shown anywhere. An object can be in one move only: a file that already
+  has one in two is reported by Build, which leaves it as it is until it is taken out
+  of all but one.
 - A move can be in only one combined control at a time.
 - A part follows another part of the same move.
 - Copies of a finger are matched to it by where their pieces stand. A copy

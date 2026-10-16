@@ -2414,14 +2414,17 @@ def own_binding(rig, obj, keep):
     return len(stale)
 
 
-def heal_bindings(rig, data):
+def heal_bindings(rig, data, leave=()):
     """Every bound object moved by its own bone only - for files bound before
     copies were looked out for. Returns how many were being moved by another
-    part's bone as well."""
+    part's bone as well. An object that is a part of two moves is left as it
+    is: each of its groups is the other's "copy", and healing took both."""
     healed = 0
     for move in data.moves:
         for part in bound_parts(move):
             obj = part_object(part)
+            if obj in leave:
+                continue
             # Two parts sharing a mesh show up here as well: each carries the
             # other's group, and the first one healed takes a mesh of its own.
             if (obj is not None and obj.type == "MESH"
@@ -2515,14 +2518,17 @@ def drop_stale_bones(context, rig, data):
     return len(stale)
 
 
-def bind_loose(context, rig, data):
+def bind_loose(context, rig, data, leave=()):
     """Give every loose object a bone, bind it, and write its two poses.
 
-    Returns how many were bound, and the names of the bones made for them.
+    Returns how many were bound, and the names of the bones made for them. An
+    object that is a part of two moves is not bound a second time: its first
+    binding would be taken off it.
     """
     jobs = []
     for move in data.moves:
-        pending = [p for p in loose_parts(move) if p.has_before]
+        pending = [p for p in loose_parts(move) if p.has_before
+                   and part_object(p) not in leave]
         if pending:
             jobs.append((move, pending))
     if not jobs:
@@ -4686,6 +4692,16 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
         # are selected, and the rig gets made for them.
         chosen_bones = list(context.selected_pose_bones or [])
         chosen_objects = [o for o in context.selected_objects if o.type == "MESH"]
+        # An object moves in one move: those that are in one are left out, and
+        # with nothing left nothing is made - not even a rig.
+        held = moves_holding(context, chosen_objects)
+        said = left_out_words(held) if held else ""
+        chosen_objects = [o for o in chosen_objects if o not in held]
+        if held and not chosen_objects and not chosen_bones:
+            owner = next(iter(held.values())).id_data
+            owner.rigmoves.report = said
+            self.report({"WARNING"}, said)
+            return {"CANCELLED"}
         if chosen_bones:
             rig = rig_of(context)
         else:
@@ -4727,8 +4743,56 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
         data.report = ("'{:s}': {:d} part(s). Where they stand now is Before. "
                        "Move them, then Record After."
                        .format(move.name, len(move.parts)))
+        if said:
+            data.report += " " + said
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
+
+
+def moves_holding(context, objects):
+    """For each of these objects that is a part of a move of a rig in the scene,
+    the move: {object: move}. Rigs deleted from the scene do not count - their
+    parts are free to be moved again."""
+    wanted, held = set(objects), {}
+    for owner in bpy.data.objects:
+        if owner.type != "ARMATURE" or not here(context, owner):
+            continue
+        for move in owner.rigmoves.moves:
+            for part in move.parts:
+                obj = part_object(part)
+                if obj in wanted and obj not in held:
+                    held[obj] = move
+    return held
+
+
+def left_out_words(held):
+    """What is said of objects left out of a move because they are in one
+    already: an object is bound to one bone, so it can be in one move."""
+    names = ["'{:s}'".format(short(obj.name, 18)) for obj in held]
+    shown = ", ".join(names[:3]) + (" and {:d} more".format(len(names) - 3)
+                                    if len(names) > 3 else "")
+    moves = sorted({move.name for move in held.values()})
+    one = len(names) == 1
+    if len(moves) == 1:
+        return ("{:s} {:s} already in '{:s}', so {:s} left out: an object moves in one "
+                "move. For a second motion, add a Step to '{:s}'.".format(
+                    shown, "is" if one else "are", moves[0],
+                    "it was" if one else "they were", moves[0]))
+    return ("{:s} {:s} already in a move, so {:s} left out: an object moves in one "
+            "move. For a second motion, add a Step to its move.".format(
+                shown, "is" if one else "are", "it was" if one else "they were"))
+
+
+def doubled(data):
+    """Objects that are the object of more than one part of a rig: {object:
+    [moves]}. A file made before an object was kept to one move can have them."""
+    seen = {}
+    for move in data.moves:
+        for part in move.parts:
+            obj = part_object(part)
+            if obj is not None:
+                seen.setdefault(obj, []).append(move)
+    return {obj: moves for obj, moves in seen.items() if len(moves) > 1}
 
 
 def newcomers(context, rig):
@@ -4851,9 +4915,15 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
         move = data.moves[self.index]
         if not ready(self, rig, data):
             return {"CANCELLED"}
-        fresh = newcomers(context, rig)
+        # An object moves in one move: one that is in another is left out.
+        chosen = [o for o in context.selected_objects if o.type == "MESH" and o is not rig]
+        held = moves_holding(context, chosen)
+        away = {obj: owned for obj, owned in held.items()
+                if owned.as_pointer() != move.as_pointer()}
+        said = left_out_words(away) if away else ""
+        fresh = [o for o in newcomers(context, rig) if o not in held]
         if not fresh:
-            data.report = "Nothing selected that is not already in this rig."
+            data.report = said or "Nothing selected that is not already in this rig."
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
         # Joining a group on another rig moves the panel over to it, or the
@@ -4880,6 +4950,8 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
                        "end up, then Record After. A follower left as it is "
                        "rides along with what it follows."
                        .format(len(fresh), move.name))
+        if said:
+            data.report += " " + said
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -4947,8 +5019,12 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
         if leader is None or leader.leader or leader.kind != "OBJECT":
             return {"CANCELLED"}
         fresh = newcomers(context, rig)
+        # An object moves in one move: one that is in another rig's is left out.
+        held = moves_holding(context, fresh)
+        left_out = left_out_words(held) if held else ""
+        fresh = [o for o in fresh if o not in held]
         if not fresh:
-            data.report = "Select the objects to ride along, then the part they follow."
+            data.report = left_out or "Select the objects to ride along, then the part they follow."
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
         if move.built and not keeps_drags(self, data):
@@ -5030,6 +5106,8 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
                            "it ahead or behind.".format(", and ".join(told)))
         else:
             data.report = "{:s}. Record its After, then Build.".format(", and ".join(told))
+        if left_out:
+            data.report += " " + left_out
         self.report({"INFO"}, data.report)
         return {"FINISHED"}
 
@@ -5665,7 +5743,8 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         reseated = reseat_bound(data)
         if reseated:
             context.view_layer.update()
-        bound, new_bones = bind_loose(context, rig, data)
+        twice = doubled(data)
+        bound, new_bones = bind_loose(context, rig, data, twice)
         # Followers hung from the parts they follow, their poses kept.
         hung, let_go, refused = apply_parents(context, rig, data, new_bones)
         hang_objects(context, data)
@@ -5683,7 +5762,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         # other part's bone as well, half and half. Once every bone is made:
         # a group left from a deleted rig only starts to pull when a part of
         # its name joins, and its bone is made in this very Build.
-        healed = heal_bindings(rig, data)
+        healed = heal_bindings(rig, data, twice)
 
         # Every move needs a stable name of its own, because a combined
         # control refers to its members by one - names change, this does not.
@@ -5742,9 +5821,10 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                 constraint.use_eval_time = True
                 constraint.frame_start = FIRST_FRAME
                 constraint.frame_end = last_frame(move)
-                # The first move on a part sets its pose; any move after it
-                # composes on top, so two moves sharing a part add up instead
-                # of the second wiping out the first.
+                # The first move on a bone sets its pose; any move after it
+                # composes on top, so two moves sharing a bone add up instead
+                # of the second wiping out the first. (An object has one bone,
+                # and so one move.)
                 constraint.mix_mode = "REPLACE" if not already else "AFTER"
                 # At the top of the stack: whatever the bone already carried
                 # then runs on top of the path, exactly as it ran on top of a
@@ -5837,6 +5917,19 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += (" {:d} stray keyframe track(s) on the parts and "
                             "{:d} on the rig were lifted, or the rig could not "
                             "move them.".format(keyed_objects, keyed_bones))
+        if twice:
+            warn_twice = True
+            obj, moves = next(iter(twice.items()))
+            data.report += (" '{:s}' is a part of {:s}, and an object moves in one move: "
+                            "take it out of all but one (Remove the others{:s}). Build "
+                            "left it as it is."
+                            .format(short(obj.name, 18),
+                                    " and ".join("'{:s}'".format(m.name) for m in moves[:2])
+                                    + (" and others" if len(moves) > 2 else ""),
+                                    "" if len(twice) == 1 else
+                                    ", and {:d} more objects are the same".format(len(twice) - 1)))
+        else:
+            warn_twice = False
         if healed:
             data.report += (" {:d} part(s) copied from another were being moved "
                              "by its bone as well as their own; now only by their "
@@ -5855,7 +5948,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += " {:d} turned about a new pivot.".format(pivoted)
         if laid:
             data.report += " {:d} path(s) laid along a curve.".format(laid)
-        warn = warn_parents
+        warn = warn_parents or warn_twice
         if still_keyed:
             data.report += (" {:s} is animated by hand and was left as it is."
                             .format(", ".join(still_keyed[:3])))

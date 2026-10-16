@@ -6267,6 +6267,108 @@ class TestACopyOfAWholeModel(ChestCase):
         self.check_both()
 
 
+class TestOneObjectOneMove(ChestCase):
+    """An object is bound to one bone, so it can be in one move. A second move
+    on an object that a built move plays gave it a second bone, took the first
+    group off it, and left it moved by neither move, with a Build report about
+    "copied" parts that was not true."""
+
+    SAID = ("'Lid' is already in 'Move 1', so it was left out: an object moves in "
+            "one move. For a second motion, add a Step to 'Move 1'.")
+
+    def coin(self):
+        coin = cube("Coin", (0.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        return coin
+
+    def test_a_second_move_on_the_lid_is_refused_and_nothing_changes(self):
+        select(self.lid)
+        before = set(bpy.data.objects.keys())
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"CANCELLED"})
+        self.assertEqual(rig().rigmoves.report, self.SAID)
+        self.assertEqual(len(rig().rigmoves.moves), 1)
+        self.assertEqual(set(bpy.data.objects.keys()), before)
+        self.assertEqual([g.name for g in self.lid.vertex_groups], ["Lid"])
+        self.check_lid()
+
+    def test_the_coin_is_taken_and_the_lid_is_left_out_with_the_sentence(self):
+        coin = self.coin()
+        coin_home = coin.matrix_world.copy()
+        select(self.lid, coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        second = rig().rigmoves.moves[1]
+        self.assertEqual([p.name for p in second.parts], ["Coin"])
+        self.assertIn(self.SAID, rig().rigmoves.report)
+        coin.matrix_world = Matrix.Translation((0.0, -2.2, -0.575)) @ coin_home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=1, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual([g.name for g in self.lid.vertex_groups], ["Lid"])
+        self.check_lid()
+        drive(second, 1.0)
+        self.assertLess(drift(coin, [Matrix.Translation((0.0, -2.2, -0.575)) @ coin_home @ v.co
+                                     for v in coin.data.vertices]), TOLERANCE)
+
+    def test_add_to_this_group_leaves_out_an_object_of_another_move(self):
+        coin = self.coin()
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        select(self.lid, coin)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=1, rig_name=rig().name),
+                         {"CANCELLED"})
+        self.assertEqual(rig().rigmoves.report, self.SAID)
+        self.assertEqual([p.name for p in rig().rigmoves.moves[1].parts], ["Coin"])
+
+    def test_ride_along_leaves_out_an_object_of_another_rigs_move(self):
+        coin = self.coin()
+        select(coin)
+        self.assertEqual(bpy.ops.rigmoves.new_move(fresh=True), {"FINISHED"})
+        other = rig()
+        self.assertNotEqual(other.name, self.move.id_data.name)
+        copy = cube("Copy", (4.0, 0.0, 1.1))
+        copy.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        select(copy, coin, self.lid)
+        bpy.context.scene.rigmoves_rig = self.move.id_data
+        self.assertEqual(bpy.ops.rigmoves.ride_along(index=0, leader="Lid",
+                                                     rig_name=self.move.id_data.name),
+                         {"FINISHED"})
+        riders = [p.name for p in self.move.parts if p.leader]
+        self.assertEqual(riders, ["Copy"])
+        self.assertIn("'Coin' is already in 'Move 1', so it was left out",
+                      self.move.id_data.rigmoves.report)
+
+    def test_several_objects_left_out_are_named_together(self):
+        one, two = self.coin(), cube("Penny", (0.9, 0.0, 0.6))
+        select(one, two)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        select(self.lid, one, two)
+        held = rigmoves.moves_holding(bpy.context, [self.lid, one, two])
+        self.assertEqual(sorted(o.name for o in held), ["Coin", "Lid", "Penny"])
+        said = rigmoves.left_out_words(held)
+        self.assertIn("'Lid'", said)
+        self.assertIn("are already in a move, so they were left out", said)
+        only = rigmoves.left_out_words({one: held[one], two: held[two]})
+        self.assertIn("are already in 'Move 2', so they were left out", only)
+        self.assertTrue(only.endswith("add a Step to 'Move 2'."), only)
+
+    def test_a_file_with_an_object_in_two_moves_is_reported_and_not_stripped_further(self):
+        # Made the way 0.18.3 let it be made: the guard is off for the setup.
+        with mock.patch.object(rigmoves, "moves_holding", create=True, return_value={}):
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.lid.location.z += 0.2
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=1, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIn("'Lid' is a part of 'Move 1' and 'Move 2', and an object moves in "
+                      "one move", rig().rigmoves.report)
+        self.assertEqual([g.name for g in self.lid.vertex_groups], ["Lid"])
+        self.assertEqual([m.type for m in self.lid.modifiers], ["ARMATURE"])
+        self.check_lid()
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):
