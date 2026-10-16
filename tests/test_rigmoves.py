@@ -8925,6 +8925,152 @@ class TestAnAnimatedRigAlongALongPath(ChestCase):
             self.assertNotIn("moved and not recorded", rig().rigmoves.report)
 
 
+class TestARigScaledToNothing(ChestCase):
+    """A rig that grows in, its scale keyed from 0, and a button pressed on the
+    frame where it is nothing: the rig's matrix cannot be undone, and carrying
+    every Before and After by it left them all singular for good. Back at scale
+    1 the next Build put the lid nearly five metres off."""
+
+    def grow_in(self):
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        rig().scale = (0.0, 0.0, 0.0)
+        rig().keyframe_insert("scale", frame=1)
+        rig().scale = (1.0, 1.0, 1.0)
+        rig().keyframe_insert("scale", frame=10)
+        scene.frame_set(10)
+        bpy.context.view_layer.update()
+        self.at_rest = world_points(self.lid)
+        drive(self.move, 1.0)
+        self.open = world_points(self.lid)
+        drive(self.move, 0.0)
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+
+    def check_at_frame_10(self):
+        bpy.context.scene.frame_set(10)
+        bpy.context.view_layer.update()
+        drive(self.move, 0.0)
+        self.assertLess(drift(self.lid, self.at_rest), TOLERANCE)
+        drive(self.move, 1.0)
+        self.assertLess(drift(self.lid, self.open), TOLERANCE)
+        drive(self.move, 0.0)
+
+    def test_the_eye_at_scale_0_and_a_build_at_scale_1_leave_the_lid_where_it_stood(self):
+        self.grow_in()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.show(index=0, which="BEFORE"), {"FINISHED"})
+        bpy.context.scene.frame_set(10)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_at_frame_10()
+
+    def test_any_other_button_at_scale_0_leaves_what_is_kept_alone_too(self):
+        # Whether it goes ahead or says the lid looks moved (it has no size).
+        for press in (lambda: bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"),
+                      lambda: bpy.ops.rigmoves.build(),
+                      lambda: bpy.ops.rigmoves.free_keys()):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            ChestCase.setUp(self)
+            self.grow_in()
+            select(self.lid)
+            press()
+            bpy.context.scene.frame_set(10)
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+            self.check_at_frame_10()
+
+    def test_record_and_build_at_scale_0_say_so_and_write_nothing(self):
+        # Record would key a pose for the lid, that has collapsed and looks moved;
+        # Build would bind a new part through the rig's inverse.
+        for which in ("BEFORE", "AFTER"):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            ChestCase.setUp(self)
+            self.grow_in()
+            select(self.lid)
+            self.assertEqual(bpy.ops.rigmoves.record(index=0, which=which), {"CANCELLED"})
+            self.assertIn("is scaled to nothing at this frame", rig().rigmoves.report)
+            self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+            self.assertIn("is scaled to nothing at this frame", rig().rigmoves.report)
+            bpy.context.scene.frame_set(10)
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+            self.check_at_frame_10()
+
+    def test_a_part_added_at_scale_0_is_bound_by_the_build_at_scale_1_where_it_stands(self):
+        self.grow_in()
+        coin = cube("Coin", (0.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.scene.frame_set(10)
+        bpy.context.view_layer.update()
+        was = world_points(coin)
+        bpy.context.scene.frame_set(1)
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"CANCELLED"})
+        bpy.context.scene.frame_set(10)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 0.0)
+        self.assertLess(drift(coin, was), TOLERANCE)
+        self.check_at_frame_10()
+
+    def test_nothing_is_carried_and_the_seat_is_kept_while_the_rig_is_nothing(self):
+        self.grow_in()
+        data = rig().rigmoves
+        before = list(self.move.parts["Lid"].before)
+        seat = list(data.seat)
+        with mock.patch.object(rigmoves, "carry_stored") as carried:
+            self.assertEqual(rigmoves.catch_up(rig()), "")
+        self.assertEqual(carried.call_count, 0)
+        self.assertEqual(list(self.move.parts["Lid"].before), before)
+        self.assertEqual(list(data.seat), seat)
+
+    def test_a_seat_that_is_singular_is_taken_afresh_once_the_rig_has_a_size(self):
+        # A file saved by 0.19.0 after the fault: there is nothing to carry from.
+        data = rig().rigmoves
+        data.seat = [0.0] * 16
+        before = list(self.move.parts["Lid"].before)
+        self.assertEqual(rigmoves.catch_up(rig()), "")
+        self.assertEqual(list(self.move.parts["Lid"].before), before)
+        self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat),
+                                             rigmoves.seat_of(rig()), 1e-5))
+        self.check_lid()
+
+    def test_a_small_rig_is_still_caught_up(self):
+        # A hundredth is small, not nothing: the rig made that small, its model
+        # with it about the rig's origin, is carried to where it now stands.
+        about = rig().matrix_world.translation.copy()
+        select(rig())
+        self.assertEqual(bpy.ops.transform.resize(value=(0.01, 0.01, 0.01)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(Matrix.Translation(about) @ Matrix.Scale(0.01, 4)
+                       @ Matrix.Translation(-about))
+
+    def test_a_rig_a_ten_thousandth_the_size_is_small_and_not_nothing(self):
+        # What a model made in millimetres is, in metres: its determinant is far
+        # under 1e-9 and it is no less a rig for that.
+        select(rig())
+        self.assertEqual(bpy.ops.transform.resize(value=(0.0004, 0.0004, 0.0004)),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertFalse(rigmoves.is_singular(rigmoves.seat_of(rig())))
+        before = list(self.move.parts["Lid"].before)
+        with mock.patch.object(rigmoves, "carry_stored", wraps=rigmoves.carry_stored) as carried:
+            self.assertEqual(rigmoves.catch_up(rig()), "")
+        self.assertEqual(carried.call_count, 1)
+        self.assertNotEqual(list(self.move.parts["Lid"].before), before)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+    def test_what_has_no_size_is_singular_and_what_is_small_or_big_is_not(self):
+        for scale, nothing in ((0.0, True), (1e-7, True), (0.0004, False), (1.0, False),
+                               (250.0, False)):
+            self.assertEqual(rigmoves.is_singular(Matrix.Scale(scale, 4)), nothing, scale)
+        flat = Matrix.Diagonal((1.0, 1.0, 0.0, 1.0))
+        self.assertTrue(rigmoves.is_singular(flat))
+        self.assertTrue(rigmoves.is_singular(Matrix.Diagonal((1.0, 1.0, 1e-8, 1.0))))
+        self.assertFalse(rigmoves.is_singular(Matrix.Diagonal((1.0, 1.0, 1e-3, 1.0))))
+
+
 class TestRigidFit(unittest.TestCase):
     """The fit of three marks onto three others, which tells a part that was
     framed another way from one that was moved."""

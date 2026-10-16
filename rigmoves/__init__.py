@@ -2469,6 +2469,36 @@ def store_seat(rig, data):
     data.seat, data.seated, data.seat_on_root = flat(seat_of(rig)), True, True
 
 
+def is_singular(matrix):
+    """Whether a matrix squeezes space flat, or very nearly: it cannot be undone,
+    and what it carries cannot be carried back.
+
+    Judged by how long its axes are, not by its determinant: a model made small
+    on purpose - a rig at a thousandth, from millimetres - has a determinant of
+    1e-9 and is nothing of the kind. An axis a millionth of the longest, or all of
+    them under a millionth of a unit, is nothing.
+    """
+    lengths = [matrix.to_3x3().col[axis].length for axis in range(3)]
+    return max(lengths) < 1e-6 or min(lengths) <= 1e-6 * max(lengths)
+
+
+def has_no_size(operator, rig, data):
+    """Whether the rig is scaled to nothing at this frame, after saying so.
+
+    For the two buttons that write what they read off a rig - Record keys a pose
+    for a part that looks moved, since it has collapsed, and Build binds a new
+    part with a bone placed through the rig's inverse: neither can be told
+    anything by a rig that has no size. (catch_up leaves such a rig alone.)
+    """
+    if not is_singular(seat_of(rig)):
+        return False
+    data.report = ("'{:s}' is scaled to nothing at this frame, so there is no telling "
+                   "where its parts stand: go to a frame where it has a size, and press "
+                   "this again.".format(short(rig.name, 24)))
+    operator.report({"WARNING"}, data.report)
+    return True
+
+
 def catch_up(rig, data=None, reframe=True):
     """Bring what a rig remembers of where its parts stand into step with
     where the rig stands now. Run first by every operator that reads or writes
@@ -2494,9 +2524,16 @@ def catch_up(rig, data=None, reframe=True):
     point_at_objects(rig, data)
     own_actions(rig, data)
     now = seat_of(rig)
-    if not data.seated:
+    if is_singular(now):
+        # A rig scaled to nothing - a grow-in, on its first frame - stands
+        # nowhere that can be told, and carrying by it squeezes every Before and
+        # After into a point for good. Nothing is done until it has a size again;
+        # the seat is kept, and the next button after that catches up.
+        return ""
+    if not data.seated or is_singular(as_matrix(data.seat)):
         # A new rig, or one from before this was kept: it stands where it
-        # stands, and what it remembers is taken to be true of that.
+        # stands, and what it remembers is taken to be true of that. So is a seat
+        # that was kept as nothing, by 0.19.0: there is nowhere to carry from.
         store_seat(rig, data)
     else:
         # A seat kept by 0.19.0 is the rig object's matrix: measured against
@@ -5924,7 +5961,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
         move = data.moves[self.index]
-        if not ready(self, rig, data):
+        if not ready(self, rig, data) or has_no_size(self, rig, data):
             return {"CANCELLED"}
         if not len(move.parts):
             data.report = "'{:s}': no parts yet.".format(move.name)
@@ -6259,7 +6296,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         data = rig.rigmoves
         if not len(data.moves):
             return {"CANCELLED"}
-        if not ready(self, rig, data):
+        if not ready(self, rig, data) or has_no_size(self, rig, data):
             return {"CANCELLED"}
 
         # Loose objects first: each gets a bone, gets bound to it, and has its
