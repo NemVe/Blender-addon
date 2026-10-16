@@ -2,23 +2,48 @@
 
 HOW TO USE (the full steps are in HOW_TO_RECORD.md):
 
-  1. Turn on the CopyThat add-on (0.15.0), in Blender 4.4 or later.
+  1. Turn on the CopyThat add-on (0.18.1 or newer for the flower fast scene,
+     0.15.0 for the others), in Blender 4.5 or later.
   2. Open this file in the Scripting tab's text editor and press Run Script.
   3. Start your screen recorder first, then run the script. A 5 second
      countdown shows in the 3D viewport; keep your hands off the mouse and
      keyboard from then on.
-  4. Four demo scenes play one after another, each in a new scene of its own.
+  4. The demo scenes play one after another, each in a new scene of its own.
      Do this in a fresh file (File > New > General) and do not save it: the
      script changes the 3D view for the recording, and puts it back at the end.
 
-Change the settings just below if you want fewer scenes, no captions, and so
-on. To stop early, set STOP = True and run the script again.
+Change the settings just below if you want other scenes, captions, and so on.
+To stop early, set STOP = True and run the script again.
+
+THE PROMO RECORDING. The default scene, 5, rigs the fast flower of
+FLOWER_FAST.md from scratch, step by step, and is made to be recorded by a
+launcher that starts Blender with --enable-event-simulate (then the Ring and
+Spread dialogs really open, and the sidebar is widened, with simulated input).
+run_recording.py, beside this file, is that launcher:
+
+    blender --factory-startup --enable-event-simulate
+            --window-geometry 0 0 2560 1440 --python run_recording.py -- --out <folder>
+
+  COPYTHAT_PROMO_MODE=slider  the rig is built at once and only the Play slider
+                              is dragged (storyboard shot 4); anything else,
+                              or nothing, plays the whole rigging.
+  COPYTHAT_TIMELINE=<path>    where the timeline JSON goes (otherwise next to the
+                              .blend, else next to this file, else the temp folder).
+  COPYTHAT_SAVE_BLEND=<path>  save the finished flower, rigged and animated, as a .blend
+                              (a copy: the open file stays as it is), see SAVE_BLEND.
+
+The timeline says when each beat was on screen, in seconds after the countdown
+ended (the same moment as a two-frame white flash of the whole window, which
+the edit finds in the recording), and when the bloom started playing.
 """
 
+import json
 import math
+import os
+import tempfile
 import time
 import traceback
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 import bmesh
 import bpy
@@ -29,16 +54,25 @@ from mathutils import Euler, Matrix, Quaternion, Vector
 # Things you may change
 # ===========================================================================
 
-SCENES = [1, 2, 3, 4]          # 1 one cube, 2 ride along, 3 curved path, 4 flower
+SCENES = [5]                   # 1 one cube, 2 ride along, 3 curved path, 4 flower (the long way),
+                               # 5 flower fast: FLOWER_FAST.md rigged from scratch (the promo)
 CAPTIONS = True                # the chip and the step line drawn in the viewport
+FLOWER_FAST_CAPTIONS = False   # scene 5 draws none: the lower thirds are put on in the edit
 COUNTDOWN = 5                  # seconds to start your recorder
 PAUSE_BETWEEN = 1.5            # seconds between one scene and the next
 SPEED = 1.0                    # 1.0 as designed; 1.25 is a quarter faster
 FULL_VIEWPORT = False          # True: the 3D view fills the whole window all through
-MAXIMISE_FOR_BLOOM = True      # scene 4: the 3D view fills the window for the bloom
+MAXIMISE_FOR_BLOOM = True      # scenes 4 and 5: the 3D view fills the window for the bloom
+BLOOM_CLEAN = True             # scene 5: and its own header, toolbar, sidebar and overlays go, so
+                               # the camera frame is the whole picture, like the render's
 CAPTION_SCALE = 1.0            # captions follow the window's height; trim them here
 RESTORE_VIEW_AT_END = True     # put the viewport's look back when it is done
 RETURN_TO_START_SCENE = True   # go back to the scene and tab you started in
+LEAVE_IN_DEMO = None           # None: stay in the demo scene when Blender was started with
+                               # --enable-event-simulate (a recording run, which the launcher
+                               # ends), and give the user's screen back otherwise
+SAVE_BLEND = ""                # scene 5: a path to save the finished flower to as a .blend, as the
+                               # bloom begins (COPYTHAT_SAVE_BLEND says the same); "" saves nothing
 STOP = False                   # True: only stop a run that is still going
 
 # ===========================================================================
@@ -50,6 +84,11 @@ MARK = "copythat_promo"               # tag on scenes this script made
 RETIRED = "copythat_promo_old"        # tag on the ones a later run renamed
 TICK = 1.0 / 60.0                     # timer step: tweens run at about 60 Hz
 FLOWER_FRAMES = 150                   # frames the flower's bloom is keyed over
+FAST = 5                              # the number of the flower fast scene
+DIALOG_SECONDS = 1.5                  # how long a Ring or Spread dialog is up before it is confirmed
+SIDEBAR_WIDER = 160                   # pixels, in a 1080 high window, the sidebar is dragged wider by
+RECORD_FPS = 30                       # the recording's frame rate, as the timeline says it
+FLASH_FRAMES = 2                      # the sync flash is white for this many frames of the recording
 
 ORANGE = "#E8833A"       # the cube
 TEAL = "#2FB5A6"         # the rider, and the one accent colour of the captions
@@ -59,30 +98,46 @@ STRAIGHT = "#FF5C5C"     # the straight path through the wall
 # ===========================================================================
 # Flower code
 #
-# bundle.py replaces the line between the markers with the source of
-# PROMO/flower/flower.py. Without it, scene 4 is left out.
+# bundle.py replaces the lines between the markers with the source of
+# PROMO/flower/flower.py, and with the source of the tail of the files that
+# build the bare and the fast flower (PROMO/checks/bare_tail.py: the studio,
+# the camera's move, the part names), which carries on in the same module, as
+# in make_flower_fast.py. Without the first, scenes 4 and 5 are left out;
+# without the second, scene 5 is.
 # ===========================================================================
 
 # >>> FLOWER BEGIN (bundle.py fills this in)
 FLOWER_SOURCE = None
 # <<< FLOWER END
 
+# >>> FAST BEGIN (bundle.py fills this in)
+FAST_SOURCE = None
+# <<< FAST END
+
 FLOWER = None   # the flower module, once FLOWER_SOURCE has been compiled
+FAST_NEEDS = ("make_bare", "make_fast", "build_studio", "key_camera", "key_glow",
+              "add_bloom", "configure_render")
 
 
-def attach_flower(source, name="copythat_flower"):
-    """Compile the flower's source into a module of its own.
+def attach_flower(source, tail=None, name="copythat_flower"):
+    """Compile the flower's source into a module of its own, and the tail of
+    the fast flower's file after it, into the same one.
 
     A module, not pasted into this file's namespace, so that nothing in it can
-    shadow a name used here. Its lines are kept for tracebacks.
+    shadow a name used here. Its lines are kept for tracebacks. The tail is
+    one file with the flower, as make_flower_fast.py has it: it uses the
+    flower's names without importing them.
     """
     global FLOWER
     import linecache
     import types
     module = types.ModuleType(name)
     module.__file__ = name + ".py"
-    linecache.cache[name] = (len(source), None, source.splitlines(True), name)
-    exec(compile(source, name, "exec", dont_inherit=True), module.__dict__)
+    for text, label in ((source, name), (tail, name + "_tail")):
+        if not text:
+            continue
+        linecache.cache[label] = (len(text), None, text.splitlines(True), label)
+        exec(compile(text, label, "exec", dont_inherit=True), module.__dict__)
     for needed in ("build_flower", "flower_steps"):
         if not callable(getattr(module, needed, None)):
             raise ImportError("the flower code has no " + needed)
@@ -90,13 +145,39 @@ def attach_flower(source, name="copythat_flower"):
     return module
 
 
-if FLOWER_SOURCE:
+def have_fast_flower():
+    """Whether scene 5 can be built: the flower, and the tail that makes it fast."""
+    return FLOWER is not None and all(callable(getattr(FLOWER, n, None)) for n in FAST_NEEDS)
+
+
+def attach_neighbours():
+    """Run from the repository without being bundled: the flower is where it
+    lives, in PROMO/flower and PROMO/checks next to this folder."""
     try:
-        attach_flower(FLOWER_SOURCE)
-    except Exception:
-        traceback.print_exc()
-        print("CopyThat promo: the flower code would not load, scene 4 is left out.")
-        FLOWER = None
+        here = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        return
+    texts = []
+    for path in (os.path.join(here, "..", "flower", "flower.py"),
+                 os.path.join(here, "..", "checks", "bare_tail.py")):
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                texts.append(handle.read())
+        else:
+            texts.append(None)
+    if texts[0]:
+        attach_flower(*texts)
+
+
+try:
+    if FLOWER_SOURCE:
+        attach_flower(FLOWER_SOURCE, FAST_SOURCE)
+    else:
+        attach_neighbours()
+except Exception:
+    traceback.print_exc()
+    print("CopyThat promo: the flower code would not load, scenes 4 and 5 are left out.")
+    FLOWER = None
 
 
 # ===========================================================================
@@ -151,6 +232,45 @@ def box_points(centre, half):
 def short_error(exc):
     text = "{:s}: {:s}".format(type(exc).__name__, str(exc)) if str(exc) else type(exc).__name__
     return text if len(text) < 140 else text[:137] + "..."
+
+
+# ---------------------------------------------------------------------------
+# simulated input: only when Blender was started with --enable-event-simulate
+
+EVENTS = None       # whether Window.event_simulate works here; found out once
+
+
+def events_available(window=None):
+    """True when the window can be given simulated mouse and key events.
+
+    Blender refuses them (RuntimeError) unless it was started with
+    --enable-event-simulate, and there is no window at all in a headless run.
+    A person running this script by hand has neither, and gets the same
+    demo without the dialogs and without the sidebar being dragged.
+    """
+    global EVENTS
+    if EVENTS is None:
+        EVENTS = False
+        if not bpy.app.background:
+            try:
+                window = window or bpy.context.window_manager.windows[0]
+                # A move to where the pointer is already: it proves nothing but
+                # that the call is allowed.
+                window.event_simulate(type="MOUSEMOVE", value="NOTHING",
+                                      x=window.width // 2, y=window.height // 2)
+                EVENTS = True
+            except Exception:
+                EVENTS = False
+    return EVENTS
+
+
+def mouse_move(window, x, y):
+    window.event_simulate(type="MOUSEMOVE", value="NOTHING", x=int(x), y=int(y))
+
+
+def key_tap(window, key):
+    window.event_simulate(type=key, value="PRESS")
+    window.event_simulate(type=key, value="RELEASE")
 
 
 # ===========================================================================
@@ -310,6 +430,10 @@ def scroll_panel(up=True):
 
 def op_panel_top():
     return ("call", scroll_panel)
+
+
+def op_panel_bottom():
+    return ("call", lambda: scroll_panel(up=False))
 
 
 def op_select(scene, objects, active=None):
@@ -967,6 +1091,485 @@ def steps_4(parts):
     yield ("wait", 1.0)
 
 
+# --- scene 5: the fast flower, FLOWER_FAST.md rigged from scratch --------------
+#
+# The flower of the file the guide sends (one outer petal, one inner petal, the
+# core, one leaf of three segments), rigged with the guide's own steps, in its
+# order, in beats a viewer can follow. Ring and Spread are pressed as a person
+# presses them: the dialog opens with the beat's values filled in, stays a
+# moment, and is confirmed with Return. test_headless.py checks that the flower
+# that comes out is the one flower_steps makes.
+
+LEAF_POSE = (28.0, -145.0, 172.0)     # Rotation X of Leaf 1, 2 and 3: what FLOWER_FAST.md types
+HOLD = 1.6                            # seconds a change stays on screen before the next one
+DIALOG_ROOM = 120.0                   # pixels the flower gives way to the dialog beside the sidebar
+
+# The eight lower thirds of the storyboard, one per beat.
+FAST_BEATS = (
+    ("new_move", "Select the parts. New Move."),
+    ("make_chain", "Make Chain: the leaf's joints hang from one another."),
+    ("pose_record", "Pose it once. Record."),
+    ("ring_outer", "Ring: one petal becomes a ring of eight."),
+    ("ring_inner_leaf", "Ring the inner petals and the leaf."),
+    ("spread", "Spread: the timing, in one go."),
+    ("build", "Build: one slider plays all 21 parts."),
+    ("animate", "Animate: keyed over 150 frames."),
+)
+SLIDER_CAPTION = "This is Blender. This is the whole rig."
+
+# Where the view looks from in each beat, (azimuth, elevation): it drifts a
+# little round the flower, and the beats with a dialog keep the flower clear
+# of the corner the dialog opens in.
+FAST_ORBIT = ((-44.0, 16.0), (-41.0, 17.0), (-37.0, 19.0), (-32.0, 22.0),
+              (-27.0, 25.0), (-31.0, 24.0), (-38.0, 20.0), (-42.0, 18.0))
+FAST_DIALOG_BEATS = (3, 4, 5)
+
+
+def fast_fit_points(parts):
+    """The flower's silhouette, shut and open and all the way round: what every
+    view of it keeps in frame, so that the picture does not change size as the
+    petals open. A body of revolution about the Z axis is what it is (a ring of
+    petals on a round pedestal), so a ring of points at the widest reach of
+    each band of height says it all in about a hundred points, which keeps
+    working out a view quick."""
+    flower = FLOWER
+    # Where every part really stands, not where it stood before it was given
+    # its hinge frame.
+    parts["scene"].view_layers[0].update()
+    turns = [Matrix.Rotation(math.radians(360.0 * k / flower.OUTER_COUNT), 4, "Z")
+             for k in range(flower.OUTER_COUNT)]
+    still = [Matrix.Identity(4)]
+    seen = []
+
+    def add(obj, around, pose=None):
+        place = obj.matrix_world if pose is None else pose
+        world = [place @ v.co for v in obj.data.vertices][::3]
+        for turn in around:
+            seen.extend(turn @ p for p in world)
+
+    add(parts["pedestal"], still)
+    add(parts["stem"], still)
+    for obj, degrees in ((parts["outer"][0], flower.OUTER_OPEN), (parts["inner"][0], flower.INNER_OPEN)):
+        add(obj, turns)
+        add(obj, turns, obj.matrix_world @ Matrix.Rotation(math.radians(degrees), 4, "X"))
+    core = parts["core"]
+    add(core, still)
+    add(core, still, Matrix.Translation((0.0, 0.0, flower.CORE_RISE)) @ core.matrix_world)
+    low, high = min(p.z for p in seen), max(p.z for p in seen)
+    bands, spokes = 8, 12
+    reach = [0.0] * bands
+    for p in seen:
+        band = min(bands - 1, int((p.z - low) / (high - low) * bands))
+        reach[band] = max(reach[band], math.hypot(p.x, p.y))
+    points = []
+    for band, radius in enumerate(reach):
+        for z in (low + (high - low) * band / bands, low + (high - low) * (band + 1) / bands):
+            points.extend(Vector((radius * math.cos(math.tau * k / spokes),
+                                  radius * math.sin(math.tau * k / spokes), z))
+                          for k in range(spokes))
+    return points
+
+
+def build_5(scene):
+    """The fast flower as FLOWER_FAST.md's file has it, and for the same
+    reasons: the flower, shut; every part but the ones that are modelled once
+    taken out (the other seven outer petals, five inner ones, the second leaf:
+    Ring makes them); the hinges given a frame in which opening is one number;
+    the studio, with the lights and the glow, out of the viewport; the camera's
+    move keyed over the bloom. It is what make_flower_fast.py's
+    build_bare_scene(fast=True) does, in a scene that is already made."""
+    flower = FLOWER
+    flower.configure_render(scene)
+    parts = flower.build_flower(scene)
+    flower.make_bare(parts)
+    flower.make_fast(parts)
+    studio, light = flower.build_studio(scene)
+    flower.key_camera(scene, parts)
+    flower.key_glow(parts, light)
+    flower.add_bloom(scene)
+    scene.camera = parts["camera"]
+    scene.frame_set(1)
+    layer = scene.view_layers[0].layer_collection.children.get("Studio")
+    if layer is not None:
+        layer.hide_viewport = True
+    parts = dict(parts, scene=scene, studio=studio, light=light)
+    parts["fit"] = fast_fit_points(parts)
+    return parts
+
+
+def fast_view(parts, beat=0, seconds=0.0):
+    """The view of a beat: a 3/4 view of the flower, from a little further round
+    in each, the same size throughout."""
+    azimuth, elevation = FAST_ORBIT[min(beat, len(FAST_ORBIT) - 1)]
+    spec = {"frame": parts["fit"], "azimuth": azimuth, "elevation": elevation,
+            "bottom": 0.07, "seconds": seconds}
+    if beat in FAST_DIALOG_BEATS:
+        spec["reserve_right"] = DIALOG_ROOM
+    return spec
+
+
+def view_5(parts):
+    return fast_view(parts, 0)
+
+
+def studio_on(parts):
+    """The studio's lights lit, for the bloom, and its backdrop left out. The
+    lights are in the collection that is hidden in the viewport, and a light
+    that is hidden does not light a Material Preview: with the whole collection
+    hidden the bloom would be black. The curved backdrop is what stays out, as
+    it is in the Solid view, so that the flower is lit and stands in the dark."""
+    layer = parts["scene"].view_layers[0].layer_collection.children.get("Studio")
+    if layer is not None:
+        layer.hide_viewport = False
+    for obj in parts["studio"].objects:
+        if obj.type == "MESH":
+            obj.hide_viewport = True
+
+
+BLOOM_LOOK = (
+    ("shading.type", "MATERIAL"),
+    ("shading.use_scene_lights", True),
+    ("shading.use_scene_world", True),
+    ("overlay.show_floor", False),
+    ("overlay.show_axis_x", False),
+    ("overlay.show_axis_y", False),
+    ("overlay.show_axis_z", False),
+    ("overlay.show_relationship_lines", False),
+    ("overlay.show_extras", False),
+    ("overlay.show_bones", False),
+)
+FAST_LOOK = (
+    ("shading.show_cavity", True),
+    ("shading.show_shadows", True),
+    ("overlay.show_relationship_lines", False),
+    # Ring and Spread leave their "Adjust Last Operation" panel in the corner
+    # of the view, over the toolbar's side, for every beat after them.
+    ("show_region_hud", False),
+)
+
+
+def press_dialog(scene, label, operator, props, finished, quick=False):
+    """A button that opens a dialog, pressed as a person presses it: the
+    pointer goes to the corner beside the sidebar, the dialog opens with the
+    values of the beat filled in, stays DIALOG_SECONDS, and Return confirms it.
+
+    Where there is no simulated input (a person running the script by hand,
+    the tests, `quick`), the operator is called straight away with the same
+    values and no dialog is shown. `finished` says whether it has happened
+    yet; if the Return did not do it, the dialog is closed and the operator
+    called straight, so the rest of the beat is never left waiting for a
+    dialog nobody can answer.
+    """
+    group, name = operator.split(".")
+
+    def call(mode=None):
+        run = getattr(getattr(bpy.ops, group), name)
+        return run(mode, **props) if mode else run(**props)
+
+    def straight():
+        need(call(), label, scene)
+
+    if quick or not events_available():
+        yield ("call", straight)
+        return
+    state = {"open": False}
+
+    def open_it():
+        try:
+            result = call("INVOKE_DEFAULT")
+        except RuntimeError:
+            result = {"CANCELLED"}
+        state["open"] = result == {"RUNNING_MODAL"}
+        if result == {"CANCELLED"}:
+            # Refused: the add-on says why, in its own words, as need() reports it.
+            straight()
+        # Anything else that is not a dialog (FINISHED: Blender ran it without
+        # one, as it does with no window) has been done already.
+
+    def confirm():
+        if state["open"]:
+            key_tap(bpy.context.window, "RET")
+
+    def verify():
+        if state["open"] and not finished():
+            key_tap(bpy.context.window, "ESC")
+            straight()
+
+    yield ("park", "dialog")
+    yield ("wait", 0.3)
+    yield ("call", open_it)
+    yield ("wait", DIALOG_SECONDS)
+    yield ("call", confirm)
+    yield ("wait", 0.5)
+    yield ("call", verify)
+    yield ("park", "calm")
+
+
+def steps_5(parts, quick=False, upto=None):
+    """FLOWER_FAST.md, step by step, as eight beats and the bloom.
+
+    With `quick` the same steps are made with no dialogs and no views, for the
+    rig of the slider recording, which plays them all at once; `upto` stops
+    after the beat of that name.
+    """
+    flower = FLOWER
+    scene = parts["scene"]
+    outer, inner, core = parts["outer"][0], parts["inner"][0], parts["core"]
+    chain = parts["leaves"][0]
+    camera = parts["camera"]
+    six = [outer, inner, core] + chain
+
+    def move():
+        return the_move(scene)
+
+    def sections(riders=None, timing=None, follows=None):
+        def run():
+            open_sections(scene, riders=riders, timing=timing, chain=follows)
+        return ("call", run)
+
+    def click(objects, gap=0.28):
+        """Click parts one after another, each added to those before, as Ctrl+click
+        does in the Outliner: the one clicked last is the active one."""
+        picked = []
+        for obj in objects:
+            picked.append(obj)
+            yield op_select(scene, list(picked), obj)
+            yield ("wait", gap)
+
+    def new_move():
+        need(bpy.ops.rigmoves.new_move(), "New Move", scene)
+
+    def make_chain():
+        need(bpy.ops.rigmoves.make_chain(index=0), "Make Chain", scene)
+
+    def record_after():
+        bpy.context.view_layer.update()
+        need(bpy.ops.rigmoves.record(index=0, which="AFTER"), "Record After", scene)
+
+    def turn_x(obj):
+        """A setter that types a number, in degrees, into Rotation X."""
+        def put(degrees):
+            obj.rotation_euler.x = math.radians(degrees)
+        return put
+
+    def core_rise():
+        """Location Z up by CORE_RISE and Rotation Z round by CORE_TURN, together."""
+        low = core.location.z
+        high = flower.CORE_BASE + flower.CORE_RISE
+
+        def put(e):
+            core.location.z = high if e >= 1.0 else low + (high - low) * e
+            core.rotation_euler.z = math.radians(flower.CORE_TURN) * e
+        return put
+
+    def delay_setter(obj):
+        def put(value):
+            move().parts[obj.name].start = value
+        return put
+
+    def ease():
+        move().ease = flower.EASE
+
+    def build():
+        need(bpy.ops.rigmoves.build(), "Build Sliders", scene)
+        check_built(scene)
+
+    def pick_rig():
+        """The rig selected, as a click on it in the Outliner would: its handle
+        lights up in the viewport, and what Animate keys shows in the timeline."""
+        rig = scene.rigmoves_rig
+        pick(scene, [rig], rig)
+
+    def frames_setter(value):
+        move().play_frames = int(round(value))
+
+    def animate():
+        scene.frame_start = 1
+        scene.frame_set(1)
+        need(bpy.ops.rigmoves.animate(index=0), "Animate", scene)
+        # Animate stretches the scene to hold the bloom, but never shortens it,
+        # and playback would run on past the last key.
+        scene.frame_end = 1 + FLOWER_FRAMES
+        scene.frame_set(1)
+
+    def play():
+        # Not when there is no window to play in: the headless runner.
+        if bpy.app.background:
+            return
+        try:
+            bpy.ops.screen.animation_play()
+        except RuntimeError:
+            pass
+
+    def ring(label, obj, count, lead_step, hold=HOLD):
+        props = dict(index=0, use="FILL", count=count, center="ORIGIN", axis="Z",
+                     linked=True, lead_step=lead_step)
+        made = len(move().parts)
+        yield op_select(scene, [obj], obj)
+        yield ("wait", 0.4)
+        yield from press_dialog(scene, label, "rigmoves.ring", props,
+                                lambda: len(move().parts) > made, quick)
+        yield ("wait", hold)
+
+    # --- the beats
+
+    def new_move_beat():
+        yield from click(six)
+        yield ("wait", 0.6)
+        yield ("call", new_move)
+        yield ("wait", HOLD + 0.4)
+
+    def make_chain_beat():
+        yield from click([chain[2], chain[1], chain[0]])
+        yield ("wait", 0.5)
+        yield ("call", make_chain)
+        yield ("wait", HOLD + 0.6)
+
+    def pose_beat():
+        yield op_select(scene, [outer], outer)
+        yield ("wait", 0.3)
+        yield ("tween_value", turn_x(outer), 0.0, flower.OUTER_OPEN, 1.5)
+        yield ("wait", 0.3)
+        yield op_select(scene, [inner], inner)
+        yield ("wait", 0.3)
+        yield ("tween_value", turn_x(inner), 0.0, flower.INNER_OPEN, 1.3)
+        yield ("wait", 0.3)
+        yield op_select(scene, [core], core)
+        yield ("wait", 0.3)
+        yield ("tween_value", core_rise(), 0.0, 1.0, 1.5)
+        yield ("wait", 0.3)
+        # A segment is turned about its own hinge, in the frame of the one
+        # before it: typed as Rotation X, a joint turns the long way round
+        # (172) as readily as the short, which a glide between two world poses
+        # does not.
+        for seg, degrees, seconds in zip(chain, LEAF_POSE, (1.2, 1.3, 1.3)):
+            yield op_select(scene, [seg], seg)
+            yield ("wait", 0.25)
+            yield ("tween_value", turn_x(seg), 0.0, degrees, seconds)
+            yield ("wait", 0.25)
+        yield ("wait", 0.3)
+        yield ("call", record_after)
+        yield ("wait", HOLD + 0.5)
+
+    def ring_outer_beat():
+        yield sections(follows=False)
+        yield from ring("Ring", outer, flower.OUTER_COUNT, flower.OUTER_LEAD_PER_STEP)
+
+    def ring_inner_leaf_beat():
+        yield from ring("Ring", inner, flower.INNER_COUNT, flower.INNER_LEAD_PER_STEP)
+        yield from ring("Ring", chain[0], 2, 0, hold=0.7)
+        if not quick:
+            # Thirteen riders are more rows than the sidebar is tall, and the
+            # report under them would stay cut off at the bottom: the sidebar
+            # is scrolled down to read it, as a person turns the wheel, and
+            # back up for the next beat.
+            yield op_panel_bottom()
+            yield ("wait", HOLD)
+            yield op_panel_top()
+            yield ("wait", 0.3)
+
+    def spread_beat():
+        yield from click([chain[2], chain[1], chain[0]], gap=0.25)
+        yield sections(riders=False, timing=True, follows=False)
+        yield ("wait", 0.5)
+        props = dict(index=0, what="DELAY", order="CHAIN", only_selected=True, by="STEP",
+                     start=0.10, step=0.15, both_ways=False)
+        data = rig_data(scene)
+        yield from press_dialog(scene, "Spread", "rigmoves.spread", props,
+                                lambda: data.report.startswith("Spread the Delays"), quick)
+        yield ("wait", HOLD)
+        # Two numbers typed: the inner petals' Delay and the core's.
+        for obj, delay in ((inner, flower.INNER_DELAY), (core, flower.CORE_DELAY)):
+            yield op_select(scene, [obj], obj)
+            yield ("wait", 0.35)
+            yield ("tween_value", delay_setter(obj), 0.0, delay, 0.7)
+            yield ("wait", 0.5)
+
+    def build_beat():
+        yield ("call", ease)
+        yield ("wait", HOLD)
+        yield ("call", build)
+        yield op_panel_top()
+        yield ("call", pick_rig)
+        yield ("wait", HOLD + 0.2)
+        if not quick:
+            yield ("tween_value", play_setter(scene), 0.0, 100.0, 3.0)
+            yield ("wait", 0.5)
+            yield ("tween_value", play_setter(scene), 100.0, 0.0, 3.0)
+            yield ("wait", 0.7)
+
+    def animate_beat():
+        yield ("tween_value", frames_setter, float(move().play_frames), float(FLOWER_FRAMES), 0.9)
+        yield ("wait", 0.5)
+        yield ("call", animate)
+        yield ("wait", HOLD + 0.6)
+
+    beats = (new_move_beat, make_chain_beat, pose_beat, ring_outer_beat,
+             ring_inner_leaf_beat, spread_beat, build_beat, animate_beat)
+
+    def bloom():
+        """The camera's view in Material Preview with the studio's light, the 3D
+        view filling the window, still on frame 1; then the whole bloom plays
+        in real time, and the last frame is held."""
+        yield op_select(scene, [])
+        yield ("call", lambda: studio_on(parts))
+        yield ("look", BLOOM_LOOK)
+        # The flower is finished and lit, and the window still has its ordinary
+        # layout: the last moment to write it down as a file to adjust.
+        yield ("save", camera)
+        if MAXIMISE_FOR_BLOOM:
+            yield ("maximise", True, BLOOM_CLEAN)
+            yield ("wait", 0.6)
+        if BLOOM_CLEAN:
+            yield ("clean",)
+            yield ("wait", 0.4)
+        yield ("view", {"camera": camera})
+        # Frame 1 through the promo camera, held still: the shaders compile
+        # while it is, and the render starts on exactly this picture.
+        yield ("wait", 3.0)
+        yield ("bloom", "start")
+        yield ("call", play)
+        yield from play_out(scene)
+        yield ("bloom", "end")
+        yield ("wait", 1.5)
+
+    scene.frame_start = 1
+    scene.frame_current = 1
+    try:
+        scene.sync_mode = "FRAME_DROP"     # real time, even if the viewport is slow
+    except Exception:
+        pass
+    for number, (name, caption) in enumerate(FAST_BEATS):
+        if not quick:
+            yield ("beat", name, caption)
+            yield ("caption", None, caption)
+            yield ("glide", fast_view(parts, number, seconds=1.4 if number else 0.0))
+        yield from beats[number]()
+        if upto == name:
+            return
+    yield ("beat_end",)
+    if quick:
+        return
+    yield ("wait", 0.3)
+    yield from bloom()
+
+
+def slider_steps(parts):
+    """Storyboard shot 4: the rig is there already, and the Play slider is dragged
+    from 0 to 100% over about three seconds, eased, and held."""
+    scene = parts["scene"]
+    yield ("beat", "slider", SLIDER_CAPTION)
+    yield ("caption", None, SLIDER_CAPTION)
+    yield ("tween_value", play_setter(scene), 0.0, 100.0, 3.0)
+    yield ("wait", 1.0)
+    yield ("beat_end",)
+
+
+def rig_5(parts):
+    """The rig of scene 5, made at once and not shown: the beats up to Build."""
+    return steps_5(parts, quick=True, upto="build")
+
+
 SCENE_DEFS = {
     1: {"title": "One cube", "chip": "1 · One cube", "build": build_1,
         "steps": steps_1, "view": view_1, "color": "MATERIAL"},
@@ -976,6 +1579,9 @@ SCENE_DEFS = {
         "steps": steps_3, "view": view_3, "color": "MATERIAL"},
     4: {"title": "Mechanical flower", "chip": "4 · Rig something real",
         "build": build_4, "steps": steps_4, "view": view_4, "color": "OBJECT"},
+    5: {"title": "Flower fast", "chip": "5 · Flower fast", "build": build_5,
+        "steps": steps_5, "view": view_5, "color": "OBJECT", "look": FAST_LOOK,
+        "promo": True},
 }
 
 
@@ -987,6 +1593,8 @@ def scenes_to_play():
             notes.append("Scene {!s} does not exist.".format(number))
         elif number == 4 and FLOWER is None:
             notes.append("Scene 4 is left out: this copy has no flower code in it.")
+        elif number == FAST and not have_fast_flower():
+            notes.append("Scene 5 is left out: this copy has no code for the fast flower in it.")
         elif number not in numbers:
             numbers.append(number)
     return numbers, notes
@@ -1070,6 +1678,7 @@ class Player:
         self.again = False          # the screen was swapped: find the viewport anew
         self.length = 0.0           # seconds of everything played, as designed
         self.captions = []          # (seconds in, chip, line), for the record
+        self.background = []        # glides of the view, going on while the steps carry on
 
     def run(self, generator):
         self.gen = generator
@@ -1109,6 +1718,15 @@ class Player:
             moved = self.stage.view(action[1])
             if moved is not None:
                 self.timed(moved[0], now, moved[1])
+        elif kind == "glide":
+            # The view set off towards a place while the next steps carry on,
+            # so that a beat does not begin with a pause for the camera.
+            moved = self.stage.view(action[1])
+            if moved is not None:
+                if self.instant or moved[0] <= 0.0:
+                    moved[1](1.0)
+                else:
+                    self.background.append(Timed(moved[0] / self.speed, now, moved[1]))
         elif kind in self.extras:
             self.extras[kind](action, now)
         else:
@@ -1135,6 +1753,14 @@ class Player:
 
     def step(self, now):
         """Advance to `now`. Returns False once the generator has finished."""
+        if self.background:
+            going = []
+            for item in self.background:
+                u = (now - item.started) / item.seconds
+                item.apply(smooth(u) if u < 1.0 else 1.0)
+                if u < 1.0:
+                    going.append(item)
+            self.background = going
         while True:
             current = self.current
             if current is not None:
@@ -1204,6 +1830,31 @@ def set_path(root, path, value):
     setattr(root, last, value)
 
 
+def view_snapshot(space):
+    """Where a 3D viewport looks: its camera and zoom, and whether it is in
+    camera view, as plain values."""
+    rv3d = space.region_3d
+    return {"view_location": rv3d.view_location.copy(),
+            "view_rotation": rv3d.view_rotation.copy(),
+            "view_distance": rv3d.view_distance,
+            "lens": space.lens,
+            "view_camera_zoom": rv3d.view_camera_zoom,
+            "view_camera_offset": tuple(rv3d.view_camera_offset),
+            "view_perspective": rv3d.view_perspective}
+
+
+def put_view(space, snapshot):
+    """The viewport looks as the snapshot says. The perspective goes last: in
+    camera view the rest is the camera's, and would be set to nothing."""
+    rv3d = space.region_3d
+    for name, value in snapshot.items():
+        if name == "lens":
+            space.lens = value
+        elif name != "view_perspective":
+            setattr(rv3d, name, value)
+    rv3d.view_perspective = snapshot["view_perspective"]
+
+
 class Stage:
     """Everything that touches the window. Finds the 3D viewport afresh on
     every call, because the user can change the layout under a long run."""
@@ -1215,13 +1866,15 @@ class Stage:
         self.state = "workspace"
         self.since = None
         self.full_by_us = False     # the whole run in the full view (FULL_VIEWPORT)
-        self.bloom_by_us = False    # the maximised view for scene 4's bloom
+        self.bloom_by_us = False    # the maximised view for the bloom of scenes 4 and 5
+        self.bloom_hide = False     # ... and whether that took the headers away as well
         self.on_change = None       # called when the window's screen has been swapped
         self.start_scene = window.scene.name
         self.start_workspace = window.workspace.name if window.workspace else None
         self.saved_view = None      # the viewport's camera and zoom, as they were
         self.category_before = None
         self.category_ok = False
+        self.sidebar_wanted = True  # keep() puts the sidebar back if it is closed
         self.complained = set()
 
     # --- finding things
@@ -1355,15 +2008,22 @@ class Stage:
             self.complain("full", "could not fill the window with the viewport: " + short_error(exc))
             return False
 
-    def maximise(self):
-        """Ctrl+Space: the 3D view fills the window, headers kept."""
-        if not self.is_full() and self.toggle_full(hide=False):
+    def maximise(self, hide=False):
+        """Ctrl+Space: the 3D view fills the window, headers kept; with `hide`
+        it is Ctrl+Alt+Space, and the menus go too."""
+        if hide:
+            # With the menus gone there is no sidebar to keep open: opening
+            # one in the full view would bring the headers back with it.
+            self.sidebar_wanted = False
+        if not self.is_full() and self.toggle_full(hide=hide):
             self.bloom_by_us = True
+            self.bloom_hide = hide
 
     def unmaximise(self):
         if self.bloom_by_us and self.is_full():
-            self.toggle_full(hide=False)
+            self.toggle_full(hide=self.bloom_hide)
         self.bloom_by_us = False
+        self.sidebar_wanted = True
 
     def restore_full(self):
         """Put the window back as it was, if this run changed it. The same kind
@@ -1371,20 +2031,29 @@ class Stage:
         down."""
         if self.is_full():
             if self.bloom_by_us:
-                self.toggle_full(hide=False)
+                self.toggle_full(hide=self.bloom_hide)
             elif self.full_by_us:
                 self.toggle_full(hide=True)
         self.full_by_us = self.bloom_by_us = False
+        self.sidebar_wanted = True
 
     # --- the look of the viewport
 
-    def look(self, color_type):
+    def look(self, color_type, more=()):
+        found = self.find()
+        if found is None:
+            return
+        self.save_view(found[1].spaces.active)
+        self.set_look(LOOK + (("shading.color_type", color_type),) + tuple(more))
+
+    def set_look(self, settings):
+        """Set viewport settings, (path, value) pairs, remembering what each
+        was, so that restore_look can give the user's back. One that this
+        Blender does not have is said once and left."""
         found = self.find()
         if found is None:
             return
         space = found[1].spaces.active
-        self.save_view(space)
-        settings = LOOK + (("shading.color_type", color_type),)
         for path, value in settings:
             try:
                 self.remember(space, path)
@@ -1401,15 +2070,7 @@ class Stage:
     def save_view(self, space):
         """Where the viewport looked before the first scene, once."""
         if self.saved_view is None:
-            rv3d = space.region_3d
-            self.saved_view = {
-                "view_location": rv3d.view_location.copy(),
-                "view_rotation": rv3d.view_rotation.copy(),
-                "view_distance": rv3d.view_distance,
-                "lens": space.lens,
-                "view_camera_zoom": rv3d.view_camera_zoom,
-                "view_camera_offset": tuple(rv3d.view_camera_offset),
-                "view_perspective": rv3d.view_perspective}
+            self.saved_view = view_snapshot(space)
 
     def restore_look(self):
         """Give the viewport back: its settings, its sidebar tab, and where it
@@ -1417,23 +2078,29 @@ class Stage:
         found = self.find()
         if found is None:
             return
-        area = found[1]
+        window, area, region = found
         space = area.spaces.active
+        # In the area's own context: showing a region again, the operator
+        # panel's for one, needs an area to lay out, and a timer has none.
+        # Hiding one is the exception in a background run (the tests): in a
+        # context Blender starts the region sliding away, and with no window
+        # being drawn the slide never ends, so the region stays shown. There
+        # the flag is set as it is.
         for path, value in self.saved.items():
             try:
-                set_path(space, path, value)
+                if bpy.app.background and value is False:
+                    context = nullcontext()
+                else:
+                    context = bpy.context.temp_override(
+                        window=window, screen=window.screen, area=area, region=region)
+                with context:
+                    set_path(space, path, value)
             except Exception:
                 pass
         self.saved = {}
         if self.saved_view is not None:
-            rv3d = space.region_3d
             try:
-                for name, value in self.saved_view.items():
-                    if name == "lens":
-                        space.lens = value
-                    elif name != "view_perspective":
-                        setattr(rv3d, name, value)
-                rv3d.view_perspective = self.saved_view["view_perspective"]
+                put_view(space, self.saved_view)
             except Exception as exc:
                 self.complain("view", "could not put the view back ({:s}).".format(
                     short_error(exc)))
@@ -1445,12 +2112,37 @@ class Stage:
             except Exception:
                 pass
 
+    def save_copy(self, path, scene, camera):
+        """Write the scene, as it will stand at the end of the bloom, to `path`.
+
+        A copy: the session itself stays unsaved. In the window's ordinary
+        layout, because the bloom is about to fill the window with the picture
+        alone, and a file that opened like that would be hard to adjust: the
+        last frame, through the camera, in Material Preview, as the film ends,
+        with the sidebar and the headers still there. Frame and view are put
+        back as they were before anything is drawn."""
+        found = self.find()
+        if found is None:
+            raise RuntimeError("there is no 3D viewport to save the layout of")
+        window, area, region = found
+        space = area.spaces.active
+        frame, before = scene.frame_current, view_snapshot(space)
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        try:
+            scene.frame_set(scene.frame_end)
+            self.view_now({"camera": camera})
+            with bpy.context.temp_override(window=window, screen=window.screen, area=area, region=region):
+                bpy.ops.wm.save_as_mainfile(filepath=path, copy=True, check_existing=False)
+        finally:
+            scene.frame_set(frame)
+            put_view(space, before)
+
     def keep(self, found):
         """The sidebar open, on the CopyThat tab. The tab can only be chosen
         once Blender has drawn the sidebar, so this is tried until it takes."""
         _window, area, _region = found
         space = area.spaces.active
-        if not space.show_region_ui:
+        if self.sidebar_wanted and not space.show_region_ui:
             self.remember(space, "show_region_ui")
             space.show_region_ui = True
         if not self.category_ok:
@@ -1463,6 +2155,104 @@ class Stage:
                     self.category_ok = ui.active_panel_category == "CopyThat"
                 except Exception:
                     pass
+
+    # --- simulated input (only where events_available)
+
+    def pixel(self):
+        """How big the interface is, against a 1080 high window's: the unit the
+        distances of the simulated pointer are in. The recording is 1440 high
+        with the interface scaled up to match, so a 160 pixel drag there is
+        213 of its pixels."""
+        window = self.window()
+        return max(0.5, window.height / 1080.0) if window is not None and window.height else 1.0
+
+    def dismiss_splash(self):
+        """Blender's welcome screen is up over a factory start, over the middle
+        of the window, until the pointer leaves it or a key is pressed."""
+        found = self.find()
+        if found is None:
+            return
+        window, area, _region = found
+        mouse_move(window, area.x + 120 * self.pixel(), area.y + 120 * self.pixel())
+        key_tap(window, "ESC")
+
+    def park(self, where):
+        """Put the simulated pointer somewhere, over the 3D view. A dialog
+        opens round the pointer, a little below and to its left, so "dialog" is
+        a spot up in the corner beside the sidebar, where the dialog does not
+        cover the panel that is changing; "calm" is the middle of the view's
+        lower half, with nothing under it to light up."""
+        found = self.find()
+        if found is None:
+            return None
+        window, area, _region = found
+        ui = next((r for r in area.regions if r.type == "UI"), None)
+        pixel = self.pixel()
+        edge = ui.x if ui is not None and ui.width > 1 else area.x + area.width
+        if where == "dialog":
+            spot = (edge - 210 * pixel, area.y + area.height - 150 * pixel)
+        else:
+            spot = (area.x + 0.35 * area.width, area.y + 0.3 * area.height)
+        mouse_move(window, *spot)
+        return spot
+
+    def sidebar_drag(self, by):
+        """A drag of the sidebar's left edge `by` pixels (of a 1080 high window)
+        to the left, as the apply(e) of a timed action: the pointer goes to the
+        edge, presses, moves along with the pace of the action, and lets go.
+        None if there is no sidebar to take hold of.
+
+        The press is near the top of the sidebar, where its panel is: with
+        Region Overlap the part of the region below the last panel lets clicks
+        through to the 3D view, edge included, and the drag would be a box
+        select.
+        """
+        found = self.find()
+        if found is None:
+            return None
+        window, area, _region = found
+        ui = next((r for r in area.regions if r.type == "UI"), None)
+        if ui is None or ui.width <= 1:
+            return None
+        pixel = self.pixel()
+        by = int(round(by * pixel))
+        x, y = int(ui.x), int(ui.y + ui.height - 45 * pixel)
+        state = {"moved": False, "pressed": False, "sent": None, "done": False}
+
+        def apply(e):
+            if state["done"]:
+                return
+            if not state["moved"]:
+                state["moved"] = True
+                mouse_move(window, x, y)
+            elif e >= 0.15 and not state["pressed"]:
+                state["pressed"] = True
+                window.event_simulate(type="LEFTMOUSE", value="PRESS", x=x, y=y)
+            if state["pressed"]:
+                dx = int(round(by * clamp01((e - 0.2) / 0.75)))
+                if dx != state["sent"]:
+                    state["sent"] = dx
+                    mouse_move(window, x - dx, y)
+            if e >= 1.0:
+                state["done"] = True
+                window.event_simulate(type="LEFTMOUSE", value="RELEASE", x=x - by, y=y)
+
+        return apply
+
+    def clean(self):
+        """The 3D view with nothing round the picture: no header, tool header,
+        toolbar, sidebar, operator panel, gizmos or overlays, so a camera view
+        that fills it is the camera's frame and nothing else."""
+        self.sidebar_wanted = False
+        settings = (("show_region_hud", False), ("show_gizmo", False),
+                    ("overlay.show_overlays", False))
+        if not (self.bloom_by_us and self.bloom_hide):
+            # In the full view with the menus gone, Blender has put the headers,
+            # toolbar and sidebar away already, and switching any of them off
+            # again brings the tool header back: it is only the rest to do.
+            settings = (("show_region_header", False), ("show_region_tool_header", False),
+                        ("show_region_toolbar", False), ("show_region_ui", False)) + settings
+        self.set_look(settings)
 
     def metrics(self, area):
         """Pixels of the viewport that nothing covers: the sidebar and header
@@ -1537,10 +2327,12 @@ class Stage:
                 pass
         elif "frame" in spec:
             metrics = self.metrics(area)
+            pixel = metrics["window_height"] / 1080.0
             target = frame_view(
                 spec["frame"], spec.get("azimuth", 30.0), spec.get("elevation", 22.0),
                 spec.get("lens", space.lens), metrics["width"] / max(1.0, metrics["height"]),
-                margins(metrics)) + (None,)
+                margins(metrics, spec.get("bottom"),
+                        spec.get("reserve_right", 0.0) * pixel)) + (None,)
         else:
             target = (Vector(spec["location"]), Quaternion(spec["rotation"]),
                       float(spec["distance"]), spec.get("lens", space.lens), None)
@@ -1610,11 +2402,15 @@ def camera_fit(res_x, res_y, width, height):
     return fit, 50.0 * (2.0 * math.sqrt(fit) - math.sqrt(2.0))
 
 
-def margins(metrics):
-    """Fractions of the viewport to keep clear: left, right, top, bottom."""
+def margins(metrics, bottom=None, reserve_right=0.0):
+    """Fractions of the viewport to keep clear: left, right, top, bottom. The
+    bottom is where the captions' lower third goes, unless it is given (a scene
+    with no captions); `reserve_right` is pixels more at the right, for a
+    dialog that is about to open beside the sidebar."""
     width, height = max(1.0, metrics["width"]), max(1.0, metrics["height"])
-    return (metrics.get("left", 0) / width + 0.03, 1.0 - metrics["visible"] / width + 0.03,
-            metrics["top"] / height + 0.07, 0.17)
+    return (metrics.get("left", 0) / width + 0.03,
+            1.0 - metrics["visible"] / width + 0.03 + reserve_right / width,
+            metrics["top"] / height + 0.07, 0.17 if bottom is None else bottom)
 
 
 def view_rotation(azimuth, elevation):
@@ -1774,6 +2570,11 @@ def draw_overlay(painter, view, metrics, scale, now):
     drawn in the pixels the sidebar and header leave free. Sizes are for a
     1080p picture, read on a phone: bigger than the panel's own text.
     """
+    if view.get("flash"):
+        # The sync flash: the whole of the region white, and nothing else.
+        painter.rect(0.0, 0.0, float(metrics["width"]), float(metrics["height"]), 0.0,
+                     (1.0, 1.0, 1.0, 1.0))
+        return
     pad = 30.0 * scale
     left = float(metrics.get("left", 0))
     safe = metrics["visible"] - left            # the width between toolbar and sidebar
@@ -1882,8 +2683,9 @@ class ShowError(Exception):
     """Something to tell the user plainly, not a bug."""
 
 
-def check_addon():
-    """None if CopyThat is ready to be driven, else what to tell the user."""
+def check_addon(numbers=()):
+    """None if CopyThat is ready to be driven, else what to tell the user.
+    Scene 5 uses Ring, Spread and Make Chain, which came with 0.18."""
     try:
         for name in ("new_move", "record", "build", "ride_along", "curve_path",
                      "edit_curve", "show_paths", "animate"):
@@ -1894,6 +2696,14 @@ def check_addon():
         return ("CopyThat is not switched on, or is older than 0.15.0. Open Edit > "
                 "Preferences > Add-ons, tick CopyThat (0.15.0 or newer), then run this "
                 "script again. Keep the pointer still until you have read this box.")
+    if FAST in numbers:
+        try:
+            for name in ("ring", "spread", "make_chain"):
+                getattr(bpy.ops.rigmoves, name).get_rna_type()
+        except Exception:
+            return ("This CopyThat is older than 0.18.1, and scene 5 rigs the flower with Ring, "
+                    "Spread and Make Chain. Install 0.18.1 or newer, restart Blender, then run "
+                    "this script again. Keep the pointer still until you have read this box.")
     return None
 
 
@@ -1909,6 +2719,102 @@ def tell(text):
         pass
 
 
+def promo_mode():
+    """"slider" when COPYTHAT_PROMO_MODE says so (storyboard shot 4: the rig is
+    built at once and only the Play slider is dragged), else "main"."""
+    return "slider" if os.environ.get("COPYTHAT_PROMO_MODE", "").strip().lower() == "slider" else "main"
+
+
+def timeline_path():
+    """Where the timeline JSON is written: COPYTHAT_TIMELINE if it is set,
+    otherwise next to the .blend, otherwise next to this file, otherwise in the
+    temporary folder."""
+    chosen = os.environ.get("COPYTHAT_TIMELINE", "").strip()
+    if chosen:
+        return chosen
+    folder = os.path.dirname(bpy.data.filepath) if bpy.data.filepath else ""
+    if not folder:
+        try:
+            folder = os.path.dirname(os.path.abspath(__file__))
+        except NameError:
+            folder = ""
+    if not folder or not os.path.isdir(folder) or not os.access(folder, os.W_OK):
+        folder = tempfile.gettempdir()
+    return os.path.join(folder, "copythat_promo_timeline.json")
+
+
+def blend_path():
+    """Where the finished flower is saved as a .blend: COPYTHAT_SAVE_BLEND if
+    it is set, otherwise SAVE_BLEND; "" when neither is, and nothing is saved."""
+    return os.environ.get("COPYTHAT_SAVE_BLEND", "").strip() or SAVE_BLEND.strip()
+
+
+class Timeline:
+    """What the edit needs to know about a recording, written as JSON while it
+    is made: when the countdown ended (t0, in epoch seconds), and for every beat
+    its name, its caption and when it was on screen, in seconds after t0; when
+    the bloom started to play and stopped; and whether the run got to the end.
+    It is written afresh at every beat, so a run that stops half way leaves
+    what it got through."""
+
+    def __init__(self, path, mode):
+        self.path = path
+        self.mode = mode
+        self.beat = None
+        self.told = False
+        self.data = {"t0_epoch": None, "fps": RECORD_FPS, "mode": mode, "beats": [],
+                     "bloom_start": None, "bloom_end": None, "bloom_frame_rate": None,
+                     "flash_seconds": FLASH_FRAMES / float(RECORD_FPS), "finished": False}
+
+    def start(self, epoch):
+        self.data["t0_epoch"] = epoch
+        self.write()
+
+    def begin(self, name, caption, t):
+        self.end(t)
+        self.beat = {"name": name, "caption": caption, "start": round(t, 3), "end": None}
+        self.data["beats"].append(self.beat)
+        self.write()
+
+    def end(self, t):
+        if self.beat is not None:
+            self.beat["end"] = round(t, 3)
+            self.beat = None
+            self.write()
+
+    def bloom(self, what, t, rate=None):
+        self.data["bloom_" + what] = round(t, 3)
+        if rate is not None:
+            self.data["bloom_frame_rate"] = rate
+        self.write()
+
+    def finish(self, t):
+        self.end(t)
+        self.data["finished"] = True
+        self.write()
+
+    def write(self):
+        """Whole, then moved over the old one, so that nobody who is reading it
+        meets half a file."""
+        try:
+            folder = os.path.dirname(self.path)
+            if folder:
+                os.makedirs(folder, exist_ok=True)
+            part = self.path + ".part"
+            with open(part, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(self.data, handle, indent=2)
+                handle.write("\n")
+            os.replace(part, self.path)
+            if not self.told:
+                self.told = True
+                print("CopyThat promo: the timeline is written to", self.path)
+        except OSError as exc:
+            if not self.told:
+                self.told = True
+                print("CopyThat promo: the timeline could not be written to", self.path,
+                      "({:s})".format(short_error(exc)))
+
+
 class Show:
     def __init__(self, numbers=None, instant=False, clock=time.perf_counter, notes=None):
         if numbers is None:
@@ -1922,6 +2828,13 @@ class Show:
         self.scenes = {}            # number -> the Scene made for it
         self.parts = {}             # number -> what its builder returned
         self.lengths = {}           # number -> seconds the scene plays for
+        self.number = None          # the scene that is playing
+        self.mode = "main"          # or "slider": see promo_mode
+        self.timeline = None
+        self.t0_clock = 0.0         # the clock, and the length of everything played, at t0
+        self.t0_length = 0.0
+        self.flash_until = None     # the sync flash is on until then, by the clock
+        self.flash_handles = []     # (space class, region type, handle) of the flash's drawing
         self.count_until = 0.0
         self.error = ""
         self.dead = False
@@ -1943,6 +2856,9 @@ class Show:
 
     def master(self):
         for number in self.numbers:
+            if SCENE_DEFS[number].get("promo"):
+                yield from self.promo(number)
+                continue
             yield ("enter", number)
             if number == self.numbers[0] and COUNTDOWN > 0:
                 yield ("countdown", COUNTDOWN)
@@ -1958,9 +2874,40 @@ class Show:
             yield ("mark", "end", number)
             yield ("wait", 1.0)
 
+    def promo(self, number):
+        """A scene made to be recorded, from its first frame to its last. What
+        comes before the countdown ends is cut away by the edit: the welcome
+        screen is sent away, the sidebar is dragged wider, the first view is
+        taken, and the countdown counts. Then t0: the window flashes white
+        for two frames of the recording, which the edit finds to line the
+        recording up with the timeline, and the beats begin."""
+        spec = SCENE_DEFS[number]
+        yield ("enter", number)
+        parts = self.parts[number]
+        if events_available():
+            yield ("splash", 2.5)
+            for _ in range(40):
+                if self.stage.category_ok:
+                    break
+                yield ("wait", 0.1)
+            yield ("sidebar", SIDEBAR_WIDER)
+            yield ("wait", 0.6)
+            yield ("park", "calm")
+        yield ("view", dict(spec["view"](parts), seconds=0.0))
+        if COUNTDOWN > 0:
+            yield ("countdown", COUNTDOWN)
+        yield ("go", number)
+        yield ("mark", "start", number)
+        steps = slider_steps(parts) if self.mode == "slider" else spec["steps"](parts)
+        yield from readable(steps)
+        yield ("mark", "end", number)
+        yield ("finish",)
+        yield ("wait", 1.0)
+
     def enter(self, action, now):
         number = action[1]
         spec = SCENE_DEFS[number]
+        self.number = number
         # Names are unique, and the rig's name is the first line of the panel:
         # the one before gives it up, so this scene's is plain "CopyThat Rig".
         for earlier, made in self.scenes.items():
@@ -1968,17 +2915,109 @@ class Show:
                 made.rigmoves_rig.name = "CopyThat Rig (scene {:d})".format(earlier)
         scene = make_scene(number, spec["title"])
         self.stage.show(scene)
-        self.stage.look(spec["color"])
+        self.stage.look(spec["color"], spec.get("look", ()))
         self.scenes[number] = scene
         self.parts[number] = spec["build"](scene)
         found = self.stage.find()
         if found is not None:
             self.stage.keep(found)
             self.space_ptr = found[1].spaces.active.as_pointer()
+        if spec.get("promo") and self.mode == "slider":
+            # Storyboard shot 4 shows the finished rig, not the steps: they are
+            # made at once, here, before the countdown.
+            quick = Player(self.stage, instant=True)
+            quick.run(rig_5(self.parts[number]))
+            quick.run_instant()
         self.stage.view_now(spec["view"](self.parts[number]))
         self.player.chip = spec["chip"]
         self.player.line = ""
         self.player.changed = self.player.bar_changed = now
+
+    # --- the extras of a recording: only scene 5 asks for them
+
+    def since_t0(self, now):
+        """Seconds after t0: by the clock when it is live, by the length of
+        everything played when it is all at once, which has no clock."""
+        if self.player.instant:
+            return self.player.length - self.t0_length
+        return now - self.t0_clock
+
+    def splash(self, action, now):
+        """Send the welcome screen away: a few tries over `seconds`, as it may
+        not be up yet at the first."""
+        state = {"tries": -1}
+
+        def apply(e):
+            tries = int(e * 6.0)
+            if tries != state["tries"]:
+                state["tries"] = tries
+                self.stage.dismiss_splash()
+        self.player.timed(float(action[1]), now, apply)
+
+    def sidebar(self, action, now):
+        """Drag the sidebar wider, over the best part of two seconds, if the
+        drag can be made."""
+        apply = self.stage.sidebar_drag(float(action[1]))
+        if apply is not None:
+            self.player.timed(1.6, now, apply)
+
+    def park(self, action, now):
+        self.stage.park(action[1])
+
+    def save(self, action, now):
+        """("save", camera): the finished flower written as a .blend, if a path
+        was asked for. A file that cannot be written is said, and the show goes
+        on: the film does not wait for it."""
+        path = blend_path()
+        if not path:
+            return
+        try:
+            self.stage.save_copy(path, self.scenes[self.number], action[1])
+            print("CopyThat promo: the finished flower is saved to", path)
+        except Exception as exc:
+            traceback.print_exc()
+            print("CopyThat promo: the flower could not be saved to", path, "({:s})".format(short_error(exc)))
+
+    def look(self, action, now):
+        self.stage.set_look(action[1])
+
+    def clean(self, action, now):
+        self.stage.clean()
+
+    def go(self, action, now):
+        """t0. The countdown is over: this is time 0 of the timeline, and the
+        window flashes white, in every area, for FLASH_FRAMES frames of the
+        recording."""
+        self.t0_clock = now
+        self.t0_length = self.player.length
+        self.timeline = Timeline(timeline_path(), self.mode)
+        self.timeline.start(time.time())
+        seconds = FLASH_FRAMES / float(RECORD_FPS)
+        self.flash_until = now + seconds
+        self.redraw_all()
+        self.player.timed(seconds, now, None)
+
+    def beat(self, action, now):
+        _kind, name, caption = action
+        if self.timeline is not None:
+            self.timeline.begin(name, caption, self.since_t0(now))
+
+    def beat_end(self, action, now):
+        if self.timeline is not None:
+            self.timeline.end(self.since_t0(now))
+
+    def bloom(self, action, now):
+        """("bloom", "start") as the viewport begins to play at frame 1, and
+        ("bloom", "end") when the last frame has been reached."""
+        if self.timeline is None:
+            return
+        scene = self.scenes[self.number]
+        rate = scene.render.fps / (scene.render.fps_base or 1.0)
+        self.timeline.bloom(action[1], self.since_t0(now), rate if action[1] == "start" else None)
+
+    def finish_timeline(self, action, now):
+        if self.timeline is not None:
+            self.timeline.finish(self.since_t0(now))
 
     def mark(self, action, now):
         _kind, what, number = action
@@ -1988,10 +3027,11 @@ class Show:
             self.lengths[number] += self.player.length
 
     def maximise(self, action, now):
-        """("maximise", True): the 3D view fills the window; False: it is given back."""
+        """("maximise", True): the 3D view fills the window, headers kept, or with
+        a third item True, the menus gone too; False: it is given back."""
         if action[1]:
             if MAXIMISE_FOR_BLOOM:
-                self.stage.maximise()
+                self.stage.maximise(hide=len(action) > 2 and bool(action[2]))
         else:
             self.stage.unmaximise()
 
@@ -2004,12 +3044,18 @@ class Show:
 
     def begin(self):
         """Everything except the timer and the drawing, so a test can walk it."""
-        problem = check_addon()
+        problem = check_addon(self.numbers)
         if problem:
             raise ShowError(problem)
+        # No window of its own at the start of a script a launcher runs: then
+        # the one there is.
         window = bpy.context.window
+        if window is None and len(bpy.context.window_manager.windows):
+            window = bpy.context.window_manager.windows[0]
         if window is None:
             raise ShowError("Run this from Blender's Scripting tab, with a window open.")
+        self.mode = promo_mode()
+        events_available(window)
         if not self.numbers:
             raise ShowError("There is nothing to play. " + " ".join(self.notes))
         old = earlier_runs_exist()
@@ -2019,7 +3065,11 @@ class Show:
         self.stage = Stage(window)
         self.player = Player(self.stage, instant=self.instant, speed=SPEED)
         self.player.extras = {"enter": self.enter, "mark": self.mark, "countdown": self.countdown,
-                              "maximise": self.maximise}
+                              "maximise": self.maximise, "splash": self.splash,
+                              "sidebar": self.sidebar, "park": self.park, "save": self.save,
+                              "look": self.look, "clean": self.clean, "go": self.go,
+                              "beat": self.beat, "beat_end": self.beat_end, "bloom": self.bloom,
+                              "finish": self.finish_timeline}
         self.stage.on_change = lambda: setattr(self.player, "again", True)
         self.player.run(self.master())
 
@@ -2047,6 +3097,8 @@ class Show:
         # Always: with CAPTIONS off it still draws the countdown and any error.
         self.handle = bpy.types.SpaceView3D.draw_handler_add(
             self.draw, (), "WINDOW", "POST_PIXEL")
+        if any(SCENE_DEFS[n].get("promo") for n in self.numbers):
+            self.flash_handles = self.flash_handlers()
         bpy.app.driver_namespace[STATE_KEY] = self
         bpy.app.handlers.load_pre.append(self.guard)
         bpy.app.timers.register(self.callback, first_interval=0.3, persistent=False)
@@ -2110,6 +3162,11 @@ class Show:
                     self.last_keep = now
                 more = self.player.step(now)
             self.redraw(None)        # found again: the step may have swapped the screen
+            if self.flash_until is not None:
+                # Every area, while it is on and once more when it is over.
+                self.redraw_all()
+                if not self.flashing(now):
+                    self.flash_until = None
             if more:
                 return TICK
             self.finish()
@@ -2126,12 +3183,75 @@ class Show:
             for region in area.regions:
                 region.tag_redraw()
 
+    def redraw_all(self):
+        """Every area of the window, and every region of each, for the flash."""
+        window = self.stage.window() if self.stage is not None else None
+        if window is None or window.screen is None:
+            return
+        for area in window.screen.areas:
+            area.tag_redraw()
+            for region in area.regions:
+                region.tag_redraw()
+
+    def flash_handlers(self):
+        """The drawing of the sync flash, in the regions the 3D view's own
+        handler does not reach: every other kind of area, and every region of
+        the 3D view but its middle. Blender's top bar and status bar are
+        global areas with no space type to hang a handler on; they stay dark.
+        Each handler is tried, and the ones this Blender will not take are
+        left out."""
+        done = []
+        regions = ("WINDOW", "HEADER", "CHANNELS", "UI", "TOOLS", "TOOL_PROPS", "ASSET_SHELF",
+                   "ASSET_SHELF_HEADER", "PREVIEW", "HUD", "NAVIGATION_BAR", "EXECUTE",
+                   "FOOTER", "TOOL_HEADER")
+        for name in dir(bpy.types):
+            if not name.startswith("Space") or name == "Space":
+                continue
+            space = getattr(bpy.types, name)
+            if not hasattr(space, "draw_handler_add"):
+                continue
+            for region in regions:
+                if name == "SpaceView3D" and region == "WINDOW":
+                    continue
+                try:
+                    handle = space.draw_handler_add(self.paint_flash, (), region, "POST_PIXEL")
+                except Exception:
+                    continue
+                done.append((space, region, handle))
+        return done
+
+    def paint_flash(self):
+        """White over the whole of the region being drawn, while the flash is on."""
+        region = bpy.context.region
+        if region is None or not self.flashing():
+            return
+        painter = None
+        try:
+            painter = self.painter_class()
+            painter.rect(0, 0, region.width, region.height, 0.0, (1.0, 1.0, 1.0, 1.0))
+        except Exception:
+            pass
+        finally:
+            if painter is not None:
+                painter.finish()
+
+    def captions_on(self):
+        """The chip and the lower third are drawn: CAPTIONS, except in a scene
+        that has its own say about it."""
+        if self.number == FAST:
+            return CAPTIONS and FLOWER_FAST_CAPTIONS
+        return CAPTIONS
+
+    def flashing(self, now=None):
+        return self.flash_until is not None and (self.clock() if now is None else now) < self.flash_until
+
     def view_state(self, now):
         left = self.count_until - now
-        return {"chip": self.player.chip if CAPTIONS else "",
-                "line": self.player.line if CAPTIONS else "",
+        shown = self.captions_on()
+        return {"chip": self.player.chip if shown else "",
+                "line": self.player.line if shown else "",
                 "changed": self.player.changed, "bar_changed": self.player.bar_changed,
-                "error": self.error,
+                "error": self.error, "flash": self.flashing(now),
                 "count": int(math.ceil(left)) if left > 0 else 0,
                 "note": " ".join(self.notes)}
 
@@ -2201,7 +3321,8 @@ class Show:
                     active = bpy.context.object
                     if active is not None and active.mode != "OBJECT":
                         bpy.ops.object.mode_set(mode="OBJECT")
-                self.stage.restore_full()
+                if not self.leaves_in_demo():
+                    self.stage.restore_full()
             except Exception:
                 traceback.print_exc()
             # Late: the full view has to be left before the tab can change,
@@ -2228,6 +3349,8 @@ class Show:
         if self.left or self.stage is None:
             return None
         self.left = True
+        if self.leaves_in_demo():
+            return None
         try:
             if RESTORE_VIEW_AT_END:
                 self.stage.restore_look()
@@ -2239,6 +3362,14 @@ class Show:
         self.redraw(None)
         return None
 
+    def leaves_in_demo(self):
+        """A recording run is ended by the program that started Blender, and
+        the last picture is the demo's, so the screen is not given back: it
+        would show in the last frames. By hand it is, as before."""
+        if LEAVE_IN_DEMO is not None:
+            return bool(LEAVE_IN_DEMO)
+        return events_available() and any(SCENE_DEFS[n].get("promo") for n in self.numbers)
+
     def remove_handle(self):
         if self.handle is not None:
             try:
@@ -2246,6 +3377,12 @@ class Show:
             except Exception:
                 pass
             self.handle = None
+        for space, region, handle in self.flash_handles:
+            try:
+                space.draw_handler_remove(handle, region)
+            except Exception:
+                pass
+        self.flash_handles = []
         self.error = ""
         return None
 

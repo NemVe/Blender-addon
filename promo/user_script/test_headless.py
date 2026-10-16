@@ -16,29 +16,38 @@ dist file are run as well. Only the drawing itself needs a real screen, and
 even that is run against a recording painter.
 """
 
+import contextlib
 import importlib.util
+import json
 import math
 import os
 import runpy
 import sys
 import tempfile
+import time
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROMO = os.path.dirname(HERE)
 FLOWER_PATH = os.path.join(PROMO, "flower", "flower.py")
+# The tail of make_flower_fast.py: the studio, the camera's move, the part
+# names. Scene 5 builds the fast flower with it.
+TAIL_PATH = os.path.join(PROMO, "checks", "bare_tail.py")
 DIST = os.path.join(HERE, "dist", "copythat_promo.py")
 # This repo's add-on (promo/ -> the repo root), unless one is named.
 ADDON = os.environ.get("COPYTHAT_ADDON", os.path.dirname(PROMO))
 
 sys.path.insert(0, ADDON)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(PROMO, "flower"))
 
 import bpy  # noqa: E402
 from mathutils import Matrix, Vector  # noqa: E402
 
 import bundle  # noqa: E402
 import rigmoves  # noqa: E402
+import run_headless  # noqa: E402
 
 TOLERANCE = 1e-3
 
@@ -99,6 +108,7 @@ def read(path):
 
 
 HAVE_FLOWER = os.path.isfile(FLOWER_PATH)
+HAVE_FAST = HAVE_FLOWER and os.path.isfile(TAIL_PATH)
 promo = None
 
 
@@ -106,7 +116,8 @@ def setUpModule():
     global promo
     rigmoves.register()
     promo = load(os.path.join(HERE, "copythat_promo.py"), "copythat_promo_source")
-    promo.attach_flower(read(FLOWER_PATH) if HAVE_FLOWER else STAND_IN)
+    promo.attach_flower(read(FLOWER_PATH) if HAVE_FLOWER else STAND_IN,
+                        read(TAIL_PATH) if HAVE_FAST else None)
     promo.FULL_VIEWPORT = False
 
 
@@ -147,6 +158,38 @@ def play(move, percent):
     bpy.context.view_layer.update()
 
 
+@contextlib.contextmanager
+def console():
+    """What the process prints on its console while the block runs: Blender's
+    reports are there as "Info: ...", "Warning: ..." and "Error: ...", and a
+    Python error as its traceback. The one item of the list it yields, once the
+    block is over, is the text."""
+    def flush():
+        sys.stdout.flush()
+        sys.stderr.flush()
+        try:
+            import ctypes
+            ctypes.CDLL("ucrtbase" if os.name == "nt" else None).fflush(None)
+        except Exception:
+            pass
+    flush()
+    saved = os.dup(1), os.dup(2)
+    said = []
+    with tempfile.TemporaryFile(mode="w+b") as tmp:
+        os.dup2(tmp.fileno(), 1)
+        os.dup2(tmp.fileno(), 2)
+        try:
+            yield said
+        finally:
+            flush()
+            os.dup2(saved[0], 1)
+            os.dup2(saved[1], 2)
+            os.close(saved[0])
+            os.close(saved[1])
+            tmp.seek(0)
+            said.append(tmp.read().decode("utf-8", "replace"))
+
+
 def window():
     return bpy.context.window
 
@@ -176,6 +219,18 @@ class Case(unittest.TestCase):
         promo.FULL_VIEWPORT = False
         promo.SPEED = 1.0
         promo.COUNTDOWN = 5
+        # Scene 5 writes its timeline where it is told, not into the repo or
+        # the temporary folder; and runs in its main mode unless a test says.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.timeline_path = os.path.join(folder.name, "timeline.json")
+        for name, value in (("COPYTHAT_TIMELINE", self.timeline_path), ("COPYTHAT_PROMO_MODE", None),
+                            ("COPYTHAT_SAVE_BLEND", None)):
+            self.addCleanup(os.environ.pop, name, None)
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
     def run_scenes(self, numbers, watch=None):
         show = promo.Show(numbers, instant=True)
@@ -1556,6 +1611,1040 @@ class FakePainter:
         return 0.7 * pixels
 
 
+# ---------------------------------------------------------------------------
+# scene 5: the fast flower, FLOWER_FAST.md rigged from scratch
+
+FAST_FRAMES = (1, 38, 75, 112, 151)
+FAST_LIMIT = 1e-3
+# The eight lower thirds of the storyboard, one per beat.
+STORYBOARD = ("Select the parts. New Move.",
+              "Make Chain: the leaf's joints hang from one another.",
+              "Pose it once. Record.",
+              "Ring: one petal becomes a ring of eight.",
+              "Ring the inner petals and the leaf.",
+              "Spread: the timing, in one go.",
+              "Build: one slider plays all 21 parts.",
+              "Animate: keyed over 150 frames.")
+FAST_BEATS = ["new_move", "make_chain", "pose_record", "ring_outer", "ring_inner_leaf", "spread",
+              "build", "animate"]
+
+
+def fast_names():
+    """The part of the full flower (the one flower_steps rigs) that each part
+    of the fast file stands for: the ring copies are the other petals."""
+    names = {"Core": "Core", "Stem": "Stem", "Pedestal": "Pedestal", "Outer Leader": "Petal 1",
+             "Inner Leader": "Inner 1", "Leaf 1": "Leaf A1", "Leaf 2": "Leaf A2", "Leaf 3": "Leaf A3"}
+    for k in range(2, 9):
+        names["Outer Leader {:d}".format(k)] = "Petal {:d}".format(k)
+    for k in range(2, 7):
+        names["Inner Leader {:d}".format(k)] = "Inner {:d}".format(k)
+    return names
+
+
+def mesh_frames(scene, frames=FAST_FRAMES):
+    """{frame: {object name: world points of its evaluated mesh}} for every
+    mesh of the scene but the studio's backdrop."""
+    out = {}
+    for frame in frames:
+        scene.frame_set(frame)
+        out[frame] = {o.name: [tuple(p) for p in world_points(o)]
+                      for o in scene.objects if o.type == "MESH" and o.name != "Cyclorama"}
+    return out
+
+
+def worst(a, b):
+    return max(math.dist(p, q) for p, q in zip(a, b))
+
+
+@unittest.skipUnless(HAVE_FAST, "needs the real flower.py and bare_tail.py")
+class TestFlowerFast(Case):
+
+    def run_it(self, watch=None):
+        show = self.run_scenes([5], watch)
+        return show, show.parts[5]
+
+    # --- what the beats are
+
+    def test_the_beats_are_the_storyboards_eight_lower_thirds_in_order(self):
+        self.assertEqual([c for _n, c in promo.FAST_BEATS], list(STORYBOARD))
+        self.assertEqual([n for n, _c in promo.FAST_BEATS], FAST_BEATS)
+        seen = []
+
+        def watch(action, show):
+            if action[0] == "beat":
+                seen.append(action[1:])
+        self.run_it(watch)
+        self.assertEqual(seen, [(n, c) for n, c in zip(FAST_BEATS, STORYBOARD)])
+
+    def test_the_captions_are_recorded_but_not_drawn(self):
+        show, _parts = self.run_it()
+        lines = [line for _t, _chip, line in show.player.captions]
+        self.assertEqual(lines, list(STORYBOARD))
+        self.assertFalse(promo.FLOWER_FAST_CAPTIONS)
+        show.player.chip, show.player.line = "5 · Flower fast", "Make Chain"
+        state = show.view_state(show.clock())
+        self.assertEqual((state["chip"], state["line"]), ("", ""))
+        # Scenes 1 to 4 draw theirs as before, and the switch is still the old one.
+        show.number = 4
+        self.assertEqual(show.view_state(show.clock())["line"], "Make Chain")
+        promo.FLOWER_FAST_CAPTIONS = True
+        try:
+            show.number = 5
+            self.assertEqual(show.view_state(show.clock())["line"], "Make Chain")
+        finally:
+            promo.FLOWER_FAST_CAPTIONS = False
+
+    # --- the flower it starts from
+
+    @staticmethod
+    def capture(scene):
+        """What a scene of the fast flower is made of, as plain data."""
+        scene.view_layers[0].update()
+        flower = promo.FLOWER
+        objects = {}
+        for obj in scene.objects:
+            entry = {"type": obj.type, "matrix": [tuple(round(x, 6) for x in row) for row in obj.matrix_world],
+                     "parent": obj.parent.name if obj.parent else None, "color": tuple(round(c, 5) for c in obj.color)}
+            if obj.type == "MESH":
+                entry["points"] = [tuple(round(c, 6) for c in v.co) for v in obj.data.vertices][::5]
+                entry["materials"] = [m.name for m in obj.data.materials]
+            if obj.type == "LIGHT":
+                entry["energy"] = round(obj.data.energy, 4)
+            objects[obj.name] = entry
+        keys = sorted((fc.data_path, fc.array_index, tuple((round(k.co[0], 3), round(k.co[1], 5))
+                                                           for k in fc.keyframe_points))
+                      for fc in flower.iter_fcurves(scene.camera.animation_data.action))
+        glow = [(round(k.co[0], 3), round(k.co[1], 4)) for k in next(iter(
+            flower.iter_fcurves(scene.camera.data.animation_data.action))).keyframe_points]
+        studio = scene.view_layers[0].layer_collection.children["Studio"].hide_viewport
+        return {"objects": objects, "camera": keys, "focus": glow, "studio_hidden": studio,
+                "engine": scene.render.engine, "range": (scene.frame_start, scene.frame_end),
+                "resolution": (scene.render.resolution_x, scene.render.resolution_y, scene.render.fps)}
+
+    def test_it_starts_from_exactly_what_make_flower_fast_builds(self):
+        seen = {}
+
+        def watch(action, show):
+            if action[0] == "beat" and action[1] == "new_move":
+                seen["ours"] = self.capture(show.scenes[5])
+        self.run_it(watch)
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        scene, _parts = promo.FLOWER.build_bare_scene(make_current=False, fast=True)
+        theirs = self.capture(scene)
+        ours = seen["ours"]
+        self.assertEqual(sorted(ours["objects"]), sorted(theirs["objects"]))
+        for name, entry in theirs["objects"].items():
+            self.assertEqual(ours["objects"][name], entry, name)
+        for key in ("camera", "focus", "studio_hidden", "engine", "range", "resolution"):
+            self.assertEqual(ours[key], theirs[key], key)
+        # What the guide names, and nothing else of the flower.
+        flower = sorted(n for n, e in ours["objects"].items() if e["type"] == "MESH" and n != "Cyclorama")
+        self.assertEqual(flower, ["Core", "Inner Leader", "Leaf 1", "Leaf 2", "Leaf 3", "Outer Leader",
+                                  "Pedestal", "Stem"])
+        self.assertTrue(ours["studio_hidden"], "the studio is out of the viewport, as in the file")
+        self.assertIsNone(ours["objects"]["Promo Camera"]["parent"])
+
+    def test_the_view_is_a_framed_three_quarter_view_of_the_whole_flower(self):
+        show, parts = self.run_it()
+        fit = parts["fit"]
+        self.assertGreater(len(fit), 50)
+        self.assertLess(len(fit), 400)       # worked out in a few thousandths of a second
+        # Wider than the pedestal, taller than the shut bud: nothing of it is left out.
+        self.assertGreaterEqual(max(math.hypot(p.x, p.y) for p in fit), 1.45)
+        self.assertGreaterEqual(max(p.z for p in fit), 2.3)
+        self.assertLessEqual(min(p.z for p in fit), 0.01)
+        spec = promo.view_5(parts)
+        self.assertIs(spec["frame"], fit)
+        self.assertLess(spec["azimuth"], 0.0)       # from the front left, where the light falls
+        self.assertGreater(spec["elevation"], 10.0)
+        # And the beats move round it a little, and keep the dialogs' corner clear.
+        orbit = [promo.fast_view(parts, n) for n in range(len(promo.FAST_BEATS))]
+        self.assertEqual(len({(s["azimuth"], s["elevation"]) for s in orbit}), len(orbit))
+        self.assertEqual([n for n, s in enumerate(orbit) if s.get("reserve_right")], [3, 4, 5])
+
+    # --- what it does to it
+
+    def test_every_build_succeeds_and_nothing_is_cramped(self):
+        show, _parts = self.run_it()
+        data = show.scenes[5].rigmoves_rig.rigmoves
+        move = self.the_move(show, 5)
+        self.assertTrue(move.built)
+        self.assertEqual(len(move.parts), 21)
+        self.assertRegex(data.report, r"plays over frames 1 to 151")
+        self.check_drivers(show, 5)
+        drivers = [c for c in show.scenes[5].rigmoves_rig.animation_data.drivers
+                   if "constraints[" in c.data_path]
+        self.assertEqual(len(drivers), 21)
+
+    def test_the_build_beat_says_what_the_guide_says(self):
+        seen = {}
+
+        def watch(action, show):
+            if action[0] == "beat" and action[1] == "animate":
+                seen["report"] = show.scenes[5].rigmoves_rig.rigmoves.report
+        self.run_it(watch)
+        self.assertEqual(seen["report"], "21 part(s) on 1 slider(s). 6 object(s) were given a bone and "
+                                         "bound. 15 object(s) now ride along. 2 part(s) hung from the part "
+                                         "they follow.")
+
+    def test_the_numbers_are_the_guides(self):
+        seen = {}
+
+        def watch(action, show):
+            if action[0] != "beat":
+                return
+            objects = bpy.data.objects
+            if action[1] == "ring_outer":
+                # The pose beat has just been played: what was typed is there.
+                seen["pose"] = {
+                    "outer": math.degrees(objects["Outer Leader"].rotation_euler.x),
+                    "inner": math.degrees(objects["Inner Leader"].rotation_euler.x),
+                    "core_z": objects["Core"].location.z,
+                    "core_turn": math.degrees(objects["Core"].rotation_euler.z),
+                    "leaf": [math.degrees(objects["Leaf {:d}".format(n)].rotation_euler.x) for n in (1, 2, 3)]}
+                move = show.scenes[5].rigmoves_rig.rigmoves.moves[0]
+                seen["after"] = move.parts["Outer Leader"].has_after
+                seen["chain"] = {p.name: p.follows for p in move.parts if p.follows}
+        show, _parts = self.run_it(watch)
+        pose = seen["pose"]
+        # Blender keeps an angle as a 32-bit radian: 75 degrees comes back as
+        # 74.9999987, so four places is as close as a typed number can be read.
+        self.assertAlmostEqual(pose["outer"], 75.0, places=4)
+        self.assertAlmostEqual(pose["inner"], 45.0, places=4)
+        self.assertAlmostEqual(pose["core_z"], 1.47, places=5)
+        self.assertAlmostEqual(pose["core_turn"], 60.0, places=4)
+        for got, want in zip(pose["leaf"], (28.0, -145.0, 172.0)):
+            self.assertAlmostEqual(got, want, places=4)
+        self.assertTrue(seen["after"])
+        self.assertEqual(seen["chain"], {"Leaf 2": "Leaf 1", "Leaf 3": "Leaf 2"})
+        move = self.the_move(show, 5)
+        parts = move.parts
+        self.assertEqual([parts["Outer Leader {:d}".format(k)].lead for k in range(2, 9)],
+                         [9, 18, 27, 36, 27, 18, 9])
+        self.assertEqual([parts["Inner Leader {:d}".format(k)].lead for k in range(2, 7)],
+                         [14, 28, 42, 28, 14])
+        self.assertEqual(parts["Leaf 1 2"].lead, 0)
+        self.assertEqual({n: parts[n].leader for n in ("Leaf 1 2", "Leaf 2 2", "Leaf 3 2")},
+                         {"Leaf 1 2": "Leaf 1", "Leaf 2 2": "Leaf 2", "Leaf 3 2": "Leaf 3"})
+        for name, delay in (("Outer Leader", 0.0), ("Inner Leader", 0.34), ("Core", 0.40),
+                            ("Leaf 1", 0.10), ("Leaf 2", 0.25), ("Leaf 3", 0.40)):
+            self.assertAlmostEqual(parts[name].start, delay, places=6, msg=name)
+        self.assertEqual(move.ease, "SMOOTH")
+        self.assertEqual(move.play_frames, 150)
+        scene = show.scenes[5]
+        self.assertEqual((scene.frame_start, scene.frame_end), (1, 151))
+
+    def test_the_sections_of_the_panel_follow_the_beats(self):
+        seen = {}
+
+        def watch(action, show):
+            if action[0] == "beat":
+                move = show.scenes[5].rigmoves_rig.rigmoves.moves if show.scenes[5].rigmoves_rig else []
+                if len(move):
+                    m = move[0]
+                    seen[action[1]] = (m.show_riders, m.show_chain, m.show_timing)
+        self.run_it(watch)
+        # (Riding along, Follows, Timing), as each beat begins.
+        self.assertEqual(seen["make_chain"], (True, True, False))
+        self.assertEqual(seen["ring_inner_leaf"], (True, False, False))
+        self.assertEqual(seen["build"], (False, False, True))
+
+    def test_it_ends_in_the_same_flower_as_flower_steps_frame_by_frame(self):
+        show, _parts = self.run_it()
+        ours = mesh_frames(show.scenes[5])
+        # The reference: the full flower, rigged by flower_steps. Spread gives
+        # the three segments of a leaf 0.10, 0.25 and 0.40 where the long way
+        # types 0.20 for the middle one (the guide says so), so the reference
+        # has what Spread gives.
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        scene = bpy.context.scene
+        flower = promo.FLOWER
+        parts = flower.build_flower(scene)
+        names = fast_names()
+        kept = flower.LEAF_DELAYS
+        flower.LEAF_DELAYS = (0.10, 0.25, 0.40)
+        try:
+            run_headless.run(flower.flower_steps(parts, 150), scene=scene)
+        finally:
+            flower.LEAF_DELAYS = kept
+        theirs = mesh_frames(scene)
+        for frame in FAST_FRAMES:
+            for ours_name, their_name in names.items():
+                self.assertLess(worst(ours[frame][ours_name], theirs[frame][their_name]), FAST_LIMIT,
+                                (frame, ours_name))
+        # The second leaf is the first, turned half way round the stem.
+        turn = Matrix.Rotation(math.pi, 3, "Z")
+        for frame in FAST_FRAMES:
+            for number in (1, 2, 3):
+                first = ours[frame]["Leaf {:d}".format(number)]
+                second = ours[frame]["Leaf {:d} 2".format(number)]
+                self.assertLess(max((turn @ Vector(p) - Vector(q)).length for p, q in zip(first, second)),
+                                FAST_LIMIT, (frame, number))
+
+    def test_the_wave_runs_round_and_the_flower_is_open_at_the_end(self):
+        show, _parts = self.run_it()
+        scene = show.scenes[5]
+        scene.frame_set(1)
+        shut = {o.name: centre(o) for o in scene.objects if o.name.startswith(("Outer Leader", "Inner Leader"))}
+        scene.frame_set(38)
+        # A third of the way: the petals farthest from the front are on their way, the leader is not.
+        moved = {n: (centre(bpy.data.objects[n]) - c).length for n, c in shut.items()}
+        self.assertGreater(moved["Outer Leader 5"], 0.1)
+        self.assertLess(moved["Outer Leader"], 0.02)
+        scene.frame_set(151)
+        for name, c in shut.items():
+            self.assertGreater((centre(bpy.data.objects[name]) - c).length, 0.1, name)
+
+    # --- how it looks, and what the edit is told
+
+    def test_the_look_of_the_beats(self):
+        seen = {}
+
+        def watch(action, show):
+            if action[0] == "beat" and action[1] == "new_move":
+                space = viewport()[1]
+                seen["look"] = (space.shading.type, space.shading.light, space.shading.color_type,
+                                space.shading.show_cavity, space.shading.show_shadows,
+                                space.overlay.show_relationship_lines, space.show_region_ui,
+                                space.show_region_hud)
+        self.run_it(watch)
+        # The last: Ring and Spread would leave their redo panel in the corner of the view.
+        self.assertEqual(seen["look"], ("SOLID", "STUDIO", "OBJECT", True, True, False, True, False))
+
+    def test_the_bloom_is_the_camera_in_material_preview_with_the_studios_light(self):
+        show, parts = self.run_it()
+        scene = show.scenes[5]
+        area, space = viewport()
+        self.assertEqual(space.region_3d.view_perspective, "CAMERA")
+        self.assertIs(scene.camera, parts["camera"])
+        self.assertEqual(space.shading.type, "MATERIAL")
+        self.assertTrue(space.shading.use_scene_lights)
+        self.assertTrue(space.shading.use_scene_world)
+        # No grid, no axes, no relationship lines: nothing but the picture.
+        self.assertFalse(space.overlay.show_floor)
+        self.assertFalse(any((space.overlay.show_axis_x, space.overlay.show_axis_y, space.overlay.show_axis_z)))
+        self.assertFalse(space.overlay.show_relationship_lines)
+        self.assertFalse(space.overlay.show_overlays)
+        self.assertFalse(space.show_gizmo)
+        # The lights light it, which a hidden collection's lights do not; the backdrop stays out.
+        studio = scene.view_layers[0].layer_collection.children["Studio"]
+        self.assertFalse(studio.hide_viewport)
+        self.assertTrue(parts["studio"].objects)
+        for obj in parts["studio"].objects:
+            self.assertEqual(obj.hide_viewport, obj.type == "MESH", obj.name)
+        self.assertEqual(scene.frame_current, scene.frame_end)
+        self.assertEqual(scene.frame_end, 151)
+
+    def test_nothing_is_selected_for_the_bloom_and_the_rig_is_for_the_slider(self):
+        picked = {}
+
+        def watch(action, show):
+            if 5 not in show.scenes:
+                return
+            layer = show.scenes[5].view_layers[0]
+            chosen = [o.name for o in layer.objects if o.select_get(view_layer=layer)]
+            if action[0] == "beat" and action[1] == "animate":
+                picked["animate"] = chosen
+            if action[0] == "look":
+                picked["bloom"] = chosen
+        self.run_it(watch)
+        self.assertEqual(picked["animate"], ["CopyThat Rig"])
+        self.assertEqual(picked["bloom"], [])
+
+    def test_a_dialog_is_not_asked_for_where_there_is_no_simulated_input(self):
+        # Headless: the guide's operators are called with the values of the beat, no dialog.
+        self.assertFalse(promo.events_available())
+        reports = []
+
+        def watch(action, shown):
+            # Every action, not only the beats: the inner petals' Ring and the
+            # leaf's are one beat, and the second report covers the first.
+            rig = shown.scenes[5].rigmoves_rig if 5 in shown.scenes else None
+            if rig is not None and (not reports or reports[-1] != rig.rigmoves.report):
+                reports.append(rig.rigmoves.report)
+        self.run_scenes([5], watch)
+        said = " ".join(reports)
+        self.assertIn("7 copies of 'Outer Leader' round the world origin ride along", said)
+        self.assertIn("Leads step by 9, out from it both ways round", said)
+        self.assertIn("5 copies of 'Inner Leader' round the world origin ride along", said)
+        self.assertIn("1 copy of 'Leaf 1' (3 joints each) round the world origin rides along", said)
+        self.assertIn("Spread the Delays of 3 parts in steps of 0.15 from 0.1, down the chain.", said)
+
+    def test_the_add_on_reports_no_warning_and_nothing_fails_in_either_mode(self):
+        # What a person sees on the console: every report of the add-on, and a
+        # Python error if there were one. A refusal would stop the show with
+        # need(); a warning that still lets the operator finish would not, so
+        # this reads the console.
+        for mode in ("main", "slider"):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            if mode == "slider":
+                os.environ["COPYTHAT_PROMO_MODE"] = "slider"
+            with console() as text:
+                show = self.run_scenes([5])
+            said = text[0]
+            # The capture works: what the guide's steps report is in it.
+            self.assertIn("Info: Chain: Leaf 1 > Leaf 2 > Leaf 3", said, mode)
+            self.assertIn("Info: 21 part(s) on 1 slider(s).", said, mode)
+            problems = [line for line in said.splitlines()
+                        if line.startswith(("Warning:", "Error:")) and "addon-module" not in line]
+            self.assertEqual(problems, [], mode)
+            self.assertNotIn("Traceback", said, mode)
+            self.assertEqual(show.error, "", mode)
+
+    def test_the_sidebar_is_scrolled_down_once_to_read_the_last_report_and_back_up(self):
+        seen = []
+        beat = [None]
+
+        def watch(action, show):
+            if action[0] == "beat":
+                beat[0] = action[1]
+            elif action[0] == "call":
+                name = action[1].__qualname__
+                if "op_panel_bottom" in name:
+                    seen.append((beat[0], "down"))
+                elif name == "scroll_panel":
+                    seen.append((beat[0], "top"))
+        self.run_it(watch)
+        # Thirteen riders are taller than the sidebar: after the third Ring it goes
+        # down, and is back at its top before the beat is over.
+        self.assertEqual([item for item in seen if item[1] == "down"], [("ring_inner_leaf", "down")])
+        after = seen[seen.index(("ring_inner_leaf", "down")) + 1:]
+        self.assertEqual(after[0], ("ring_inner_leaf", "top"))
+
+    def test_the_timeline_is_written_with_every_beat_in_order(self):
+        before = time.time()
+        show, _parts = self.run_it()
+        after = time.time()
+        with open(self.timeline_path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data["fps"], 30)
+        self.assertEqual(data["mode"], "main")
+        self.assertTrue(data["finished"])
+        self.assertTrue(before <= data["t0_epoch"] <= after)
+        beats = data["beats"]
+        self.assertEqual([b["name"] for b in beats], FAST_BEATS)
+        self.assertEqual([b["caption"] for b in beats], list(STORYBOARD))
+        last = 0.0
+        for beat in beats:
+            self.assertGreaterEqual(beat["start"], last - 1e-9)
+            self.assertGreater(beat["end"], beat["start"])
+            last = beat["end"]
+        # Time 0 is the end of the countdown, and the flash: the first beat is not at 0.
+        self.assertGreater(beats[0]["start"], 0.0)
+        self.assertLess(beats[0]["start"], 0.5)
+        self.assertAlmostEqual(data["flash_seconds"], 2.0 / 30.0, places=6)
+        # The bloom starts at frame 1 once the last beat is over, and is one scene's seconds long.
+        self.assertGreater(data["bloom_start"], beats[-1]["end"])
+        self.assertAlmostEqual(data["bloom_end"] - data["bloom_start"], 150.0 / 30.0, delta=0.01)
+        self.assertEqual(data["bloom_frame_rate"], 30.0)
+        # A beat is read for a while: the whole thing is a minute or so of beats, not seconds.
+        seconds = sum(b["end"] - b["start"] for b in beats)
+        self.assertGreater(seconds, 40.0)
+        self.assertLess(seconds, 75.0)
+
+    # --- the finished flower as a file to adjust
+
+    def test_nothing_is_saved_unless_a_path_is_given_and_the_environment_comes_first(self):
+        self.assertEqual(promo.SAVE_BLEND, "")
+        self.assertEqual(promo.blend_path(), "")
+        promo.SAVE_BLEND = "from the setting.blend"
+        try:
+            self.assertEqual(promo.blend_path(), "from the setting.blend")
+            os.environ["COPYTHAT_SAVE_BLEND"] = " from the environment.blend "
+            self.assertEqual(promo.blend_path(), "from the environment.blend")
+        finally:
+            promo.SAVE_BLEND = ""
+        os.environ.pop("COPYTHAT_SAVE_BLEND")
+        with console() as text:
+            self.run_it()
+        self.assertNotIn("saved to", text[0])
+        self.assertNotIn("could not be saved", text[0])
+        self.assertEqual(bpy.data.filepath, "")
+
+    def test_the_finished_flower_is_saved_as_the_film_ends_in_the_ordinary_layout(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "inside", "demo.blend")     # the folder is made
+            os.environ["COPYTHAT_SAVE_BLEND"] = path
+            show, _parts = self.run_it()
+            self.assertEqual(show.error, "")
+            self.assertTrue(os.path.isfile(path))
+            self.assertEqual(os.listdir(os.path.dirname(path)), ["demo.blend"])     # no half file
+            # A copy: the session is still the unsaved one, and the film ends as it did.
+            self.assertEqual(bpy.data.filepath, "")
+            scene = show.scenes[5]
+            self.assertEqual(scene.frame_current, scene.frame_end)
+            area, space = viewport()
+            self.assertEqual(space.region_3d.view_perspective, "CAMERA")
+            self.assertEqual(space.shading.type, "MATERIAL")
+            live = {}
+            for frame in (1, 151):
+                scene.frame_set(frame)
+                live[frame] = {o.name: [tuple(p) for p in world_points(o)] for o in scene.objects
+                               if o.type == "MESH" and o.name != "Cyclorama"}
+            bpy.ops.wm.open_mainfile(filepath=path)
+            scene = bpy.data.scenes["CopyThat Promo 5 - Flower fast"]
+            self.assertIs(window().scene, scene)
+            # As the film ends: the last frame, the studio lit, nothing picked...
+            self.assertEqual((scene.frame_start, scene.frame_current, scene.frame_end), (1, 151, 151))
+            layer = scene.view_layers[0]
+            self.assertFalse(layer.layer_collection.children["Studio"].hide_viewport)
+            self.assertEqual([o.name for o in layer.objects if o.select_get(view_layer=layer)], [])
+            # ...rigged and animated, and playing the same flower as it was.
+            move = scene.rigmoves_rig.rigmoves.moves[0]
+            self.assertTrue(move.built)
+            self.assertEqual(len(move.parts), 21)
+            ours = [c for c in scene.rigmoves_rig.animation_data.drivers if "constraints[" in c.data_path]
+            self.assertEqual(len(ours), 21)
+            for curve in ours:
+                self.assertTrue(curve.driver.is_valid, curve.driver.expression)
+                self.assertTrue(curve.driver.is_simple_expression, curve.driver.expression)
+            for frame in (1, 151):
+                scene.frame_set(frame)
+                for obj in scene.objects:
+                    if obj.type == "MESH" and obj.name != "Cyclorama":
+                        self.assertLess(worst(world_points(obj), live[frame][obj.name]), FAST_LIMIT,
+                                        (frame, obj.name))
+            # ...in the window's ordinary layout, through the camera, not the bloom's bare view.
+            area, space = viewport()
+            self.assertFalse(window().screen.show_fullscreen)
+            self.assertFalse(window().screen.is_temporary)
+            self.assertEqual(space.region_3d.view_perspective, "CAMERA")
+            self.assertEqual(space.shading.type, "MATERIAL")
+            self.assertTrue(space.shading.use_scene_lights)
+            self.assertTrue(space.show_region_ui)
+            self.assertTrue(space.show_region_header)
+            self.assertTrue(space.show_region_toolbar)
+            self.assertTrue(space.overlay.show_overlays)
+            self.assertTrue(space.show_gizmo)
+
+    def test_the_frame_and_the_view_are_put_back_after_the_copy_is_written(self):
+        # The bloom goes on from frame 1 and from the view of the last beat.
+        states = {}
+
+        def watch(action, show):
+            if action[0] in ("save", "maximise") and action[0] not in states:
+                space = viewport()[1]
+                rv3d = space.region_3d
+                states[action[0]] = (show.scenes[5].frame_current, rv3d.view_perspective,
+                                     tuple(round(v, 5) for v in rv3d.view_location),
+                                     round(rv3d.view_distance, 5), round(space.lens, 5))
+        with tempfile.TemporaryDirectory() as folder:
+            os.environ["COPYTHAT_SAVE_BLEND"] = os.path.join(folder, "demo.blend")
+            self.run_it(watch)
+        # Just before the copy, and just before the 3D view is made large: the same.
+        self.assertEqual(states["save"], states["maximise"])
+        self.assertEqual(states["save"][:2], (1, "PERSP"))
+
+    def test_a_file_that_cannot_be_written_is_said_and_the_show_goes_on(self):
+        with tempfile.TemporaryDirectory() as folder:
+            blocker = os.path.join(folder, "a file")
+            with open(blocker, "w") as handle:
+                handle.write("not a folder")
+            os.environ["COPYTHAT_SAVE_BLEND"] = os.path.join(blocker, "inside", "demo.blend")
+            with console() as text:
+                show, _parts = self.run_it()
+            self.assertIn("could not be saved", text[0])
+            self.assertEqual(show.error, "")
+            scene = show.scenes[5]
+            self.assertEqual(scene.frame_current, scene.frame_end)
+            self.assertEqual(viewport()[1].region_3d.view_perspective, "CAMERA")
+            with open(self.timeline_path, encoding="utf-8") as handle:
+                self.assertTrue(json.load(handle)["finished"])
+
+    def test_the_slider_recording_saves_nothing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            os.environ["COPYTHAT_SAVE_BLEND"] = os.path.join(folder, "demo.blend")
+            os.environ["COPYTHAT_PROMO_MODE"] = "slider"
+            self.run_scenes([5])
+            self.assertEqual(os.listdir(folder), [])
+
+    def test_the_timeline_goes_where_it_is_told_or_beside_the_blend(self):
+        os.environ.pop("COPYTHAT_TIMELINE")
+        self.assertEqual(os.path.basename(promo.timeline_path()), "copythat_promo_timeline.json")
+        self.assertTrue(os.path.isdir(os.path.dirname(promo.timeline_path())))
+        os.environ["COPYTHAT_TIMELINE"] = self.timeline_path
+        self.assertEqual(promo.timeline_path(), self.timeline_path)
+        with tempfile.TemporaryDirectory() as folder:
+            blend = os.path.join(folder, "demo.blend")
+            bpy.ops.wm.save_as_mainfile(filepath=blend)
+            os.environ.pop("COPYTHAT_TIMELINE")
+            self.assertEqual(os.path.dirname(promo.timeline_path()), folder)
+
+    # --- the slider recording, storyboard shot 4
+
+    def test_slider_mode_builds_the_rig_at_once_and_drags_only_the_slider(self):
+        os.environ["COPYTHAT_PROMO_MODE"] = "slider"
+        show = self.run_scenes([5])
+        move = self.the_move(show, 5)
+        self.assertEqual(show.mode, "slider")
+        self.assertTrue(move.built)
+        self.assertEqual(len(move.parts), 21)
+        self.assertRegex(move.id_data.rigmoves.report, r"^21 part\(s\) on 1 slider\(s\)\.")
+        self.check_drivers(show, 5)
+        self.assertAlmostEqual(move.play, 100.0, places=3)
+        # No Animate: the slider is free to be dragged, and the scene is as the file has it.
+        self.assertEqual(show.scenes[5].frame_end, 210)
+        with open(self.timeline_path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data["mode"], "slider")
+        self.assertEqual([b["name"] for b in data["beats"]], ["slider"])
+        beat = data["beats"][0]
+        self.assertEqual(beat["caption"], "This is Blender. This is the whole rig.")
+        # Three seconds of eased drag and a second held.
+        self.assertAlmostEqual(beat["end"] - beat["start"], 4.0, delta=0.05)
+        self.assertIsNone(data["bloom_start"])
+        self.assertTrue(data["finished"])
+        # Only the slider's beat was captioned: the steps were not shown.
+        self.assertEqual([line for _t, _c, line in show.player.captions],
+                         ["This is Blender. This is the whole rig."])
+
+    def test_slider_mode_plays_the_same_flower_as_the_main_mode(self):
+        os.environ["COPYTHAT_PROMO_MODE"] = "slider"
+        show = self.run_scenes([5])
+        scene, move = show.scenes[5], self.the_move(show, 5)
+        slider = {}
+        for percent in (0.0, 50.0, 100.0):
+            move.play = percent
+            bpy.context.view_layer.update()
+            slider[percent] = {o.name: [tuple(p) for p in world_points(o)] for o in scene.objects
+                               if o.type == "MESH" and o.name != "Cyclorama"}
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        os.environ.pop("COPYTHAT_PROMO_MODE")
+        main = self.run_scenes([5])
+        # Animate keys the slider over frames 1 to 151: half way is frame 76.
+        frames = mesh_frames(main.scenes[5], (1, 76, 151))
+        for percent, frame in ((0.0, 1), (50.0, 76), (100.0, 151)):
+            self.assertEqual(sorted(slider[percent]), sorted(frames[frame]))
+            for name, points in slider[percent].items():
+                self.assertLess(worst(points, frames[frame][name]), FAST_LIMIT, (percent, name))
+
+    # --- the show around it
+
+    def test_a_second_take_is_clean_and_the_users_scene_is_left_alone(self):
+        mine = bpy.data.scenes.new("Mine")
+        mesh = bpy.data.meshes.new("Mine mesh")
+        mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        obj = bpy.data.objects.new("Outer Leader", mesh)       # even a name the flower uses
+        mine.collection.objects.link(obj)
+        first = self.run_scenes([5])
+        second = self.run_scenes([5])
+        self.assertEqual(obj.name, "Outer Leader")
+        self.assertEqual(list(mine.collection.objects), [obj])
+        self.assertEqual(second.parts[5]["outer"][0].name, "Outer Leader.001")
+        names = sorted(s.name for s in bpy.data.scenes if s.name.startswith("CopyThat Promo"))
+        self.assertEqual(names, ["CopyThat Promo 5 - Flower fast", "CopyThat Promo 5 - Flower fast (old)"])
+        self.assertEqual(first.parts[5]["core"].name, "Core (old)")
+        self.assertTrue(self.the_move(second, 5).built)
+
+    def test_scene_five_is_left_out_with_a_message_without_the_fast_flower_code(self):
+        saved = promo.FLOWER
+        try:
+            promo.attach_flower(read(FLOWER_PATH))              # the flower, not the tail
+            self.assertFalse(promo.have_fast_flower())
+            promo.SCENES = [5]
+            numbers, notes = promo.scenes_to_play()
+        finally:
+            promo.attach_flower(read(FLOWER_PATH), read(TAIL_PATH))
+        self.assertIsNotNone(saved)
+        self.assertEqual(numbers, [])
+        self.assertTrue(any("Scene 5 is left out" in n for n in notes))
+        self.assertTrue(promo.have_fast_flower())
+
+    def test_scene_five_needs_the_version_with_ring_spread_and_make_chain(self):
+        self.assertIsNone(promo.check_addon([5]))
+        self.assertIsNone(promo.check_addon([1, 2]))
+        real = promo.bpy
+
+        class Bare:
+            """bpy.ops.rigmoves as an older CopyThat has it: no Ring, Spread or Make Chain."""
+            def __getattr__(self, name):
+                if name in ("ring", "spread", "make_chain"):
+                    raise AttributeError(name)
+                return getattr(real.ops.rigmoves, name)
+
+        promo.bpy = types.SimpleNamespace(ops=types.SimpleNamespace(rigmoves=Bare()), types=real.types)
+        try:
+            self.assertIsNone(promo.check_addon([1]))
+            self.assertIn("older than 0.18.1", promo.check_addon([5]))
+        finally:
+            promo.bpy = real
+
+    def test_by_hand_the_users_screen_is_given_back_and_in_a_recording_it_is_not(self):
+        show = promo.Show([5])
+        self.assertFalse(show.leaves_in_demo())                      # no simulated input here
+        try:
+            promo.EVENTS = True
+            self.assertTrue(show.leaves_in_demo())
+            self.assertFalse(promo.Show([1]).leaves_in_demo())       # only the recording's scene stays
+            promo.LEAVE_IN_DEMO = False
+            self.assertFalse(show.leaves_in_demo())
+            promo.EVENTS, promo.LEAVE_IN_DEMO = False, True
+            self.assertTrue(show.leaves_in_demo())
+        finally:
+            promo.EVENTS, promo.LEAVE_IN_DEMO = None, None
+        self.assertFalse(promo.events_available())                   # and headless it stays False
+
+    def test_by_hand_leaving_puts_back_what_the_clean_bloom_took_away(self):
+        area, space = viewport()
+        space.shading.type = "WIREFRAME"
+        space.show_region_ui = False
+        space.show_gizmo = True
+        space.overlay.show_overlays = True
+        space.overlay.show_floor = True
+        before = {"type": space.shading.type, "ui": space.show_region_ui, "gizmo": space.show_gizmo,
+                  "overlays": space.overlay.show_overlays, "floor": space.overlay.show_floor,
+                  "hud": space.show_region_hud, "header": space.show_region_header,
+                  "tool": space.show_region_tool_header, "toolbar": space.show_region_toolbar,
+                  "cavity": space.shading.show_cavity, "color": space.shading.color_type,
+                  "lights": space.shading.use_scene_lights, "scene": window().scene.name}
+        clock = FakeClock()
+        show = promo.Show([5], clock=clock)
+        show.begin()
+        for _ in range(100000):
+            clock.now += 1.0 / 30.0
+            if show.tick() is None:
+                break
+        self.assertEqual(show.error, "")
+        self.assertEqual(viewport()[1].shading.type, "MATERIAL")
+        for callback in (show.leave_callback, show.remove_callback):
+            if bpy.app.timers.is_registered(callback):
+                bpy.app.timers.unregister(callback)
+        show.leave()
+        area, space = viewport()
+        after = {"type": space.shading.type, "ui": space.show_region_ui, "gizmo": space.show_gizmo,
+                 "overlays": space.overlay.show_overlays, "floor": space.overlay.show_floor,
+                 "hud": space.show_region_hud, "header": space.show_region_header,
+                 "tool": space.show_region_tool_header, "toolbar": space.show_region_toolbar,
+                 "cavity": space.shading.show_cavity, "color": space.shading.color_type,
+                 "lights": space.shading.use_scene_lights, "scene": window().scene.name}
+        self.assertEqual(after, before)
+        self.assertFalse(window().screen.show_fullscreen)
+
+
+@unittest.skipUnless(HAVE_FAST, "needs the real flower.py and bare_tail.py")
+class TestFlowerFastLive(Case):
+    """Scene 5 on timer ticks, with a clock the test winds."""
+
+    def walk(self, step=1.0 / 30.0, sample=None):
+        clock = FakeClock()
+        show = promo.Show([5], clock=clock)
+        show.begin()
+        ticks = 0
+        while True:
+            clock.now += step
+            ticks += 1
+            self.assertLess(ticks, 100000, "the show never ended")
+            if show.tick() is None:
+                break
+            if sample is not None:
+                sample(show, clock)
+        return show, ticks, clock
+
+    def test_it_runs_to_the_end_live_and_the_timeline_is_in_seconds_of_the_clock(self):
+        show, ticks, _clock = self.walk()
+        self.assertEqual(show.error, "")
+        self.assertTrue(show.dead)
+        with open(self.timeline_path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertTrue(data["finished"])
+        self.assertEqual([b["name"] for b in data["beats"]], FAST_BEATS)
+        # Ticks of a thirtieth of a second: the timeline is in clock seconds, and every beat is as long as it was meant to be.
+        run = data["bloom_end"] + 1.5 + 1.0
+        self.assertAlmostEqual(ticks / 30.0, promo.COUNTDOWN + run + 0.6 + 1.2, delta=4.0)
+        for beat in data["beats"]:
+            self.assertGreater(beat["end"] - beat["start"], 2.0)
+
+    def test_the_countdown_comes_first_then_one_flash_of_two_frames_then_the_beats(self):
+        seen = []
+
+        def sample(show, clock):
+            state = show.view_state(clock())
+            beat = show.timeline.data["beats"][-1]["name"] if show.timeline and show.timeline.data["beats"] else None
+            seen.append((state["count"], state["flash"], beat))
+        self.walk(sample=sample)
+        counts = [c for c, _f, _b in seen if c]
+        self.assertEqual(sorted(set(counts), reverse=True), [5, 4, 3, 2, 1])
+        flashes = [i for i, (_c, f, _b) in enumerate(seen) if f]
+        # One run of white ticks, two or three at 30 ticks a second, after the countdown and before the first beat.
+        self.assertTrue(1 <= len(flashes) <= 3, flashes)
+        self.assertEqual(flashes, list(range(flashes[0], flashes[-1] + 1)))
+        last_count = max(i for i, (c, _f, _b) in enumerate(seen) if c)
+        first_beat = min(i for i, (_c, _f, b) in enumerate(seen) if b)
+        self.assertLess(last_count, flashes[0])
+        self.assertLess(flashes[-1], first_beat + 1)
+
+    def test_uneven_ticks_end_in_the_same_place(self):
+        import random
+        rng = random.Random(11)
+        clock = FakeClock()
+        show = promo.Show([5], clock=clock)
+        show.begin()
+        for _ in range(100000):
+            clock.now += rng.choice((1 / 60.0, 1 / 30.0, 0.1, 0.33))
+            if show.tick() is None:
+                break
+        self.assertTrue(show.dead)
+        self.assertEqual(show.error, "")
+        scene = show.scenes[5]
+        move = scene.rigmoves_rig.rigmoves.moves[0]
+        self.assertTrue(move.built)
+        self.assertEqual(scene.frame_current, scene.frame_end)
+        with open(self.timeline_path, encoding="utf-8") as handle:
+            self.assertTrue(json.load(handle)["finished"])
+
+    def test_the_view_glides_with_the_beat_and_does_not_hold_it_up(self):
+        glides = []
+        seen = {}
+
+        def sample(show, clock):
+            if show.player.background:
+                glides.append(len(show.player.background))
+            beats = show.timeline.data["beats"] if show.timeline else []
+            if beats and "first" not in seen:
+                seen["first"] = clock.now
+        show, _ticks, _clock = self.walk(sample=sample)
+        self.assertTrue(glides, "the view never glided in the background")
+        self.assertEqual(show.player.background, [])
+
+    def test_the_flash_is_painted_white_in_every_region(self):
+        show = promo.Show([5], clock=FakeClock())
+        handlers = show.flash_handlers()
+        try:
+            self.assertGreater(len(handlers), 10)
+            regions = {region for _space, region, _handle in handlers}
+            for needed in ("HEADER", "UI", "TOOLS", "NAVIGATION_BAR", "WINDOW"):
+                self.assertIn(needed, regions)
+            spaces = {space.__name__ for space, _region, _handle in handlers}
+            for needed in ("SpaceView3D", "SpaceOutliner", "SpaceProperties", "SpaceDopeSheetEditor"):
+                self.assertIn(needed, spaces)
+            # The 3D view's middle is painted by its own handler, with the captions.
+            self.assertNotIn(("SpaceView3D", "WINDOW"), {(s.__name__, r) for s, r, _h in handlers})
+        finally:
+            show.flash_handles = handlers
+            show.remove_handle()
+        self.assertEqual(show.flash_handles, [])
+        painter = FakePainter()
+        promo.draw_overlay(painter, {"flash": True, "line": "Record After", "chip": "5 · x", "count": 3},
+                           {"width": 1574, "height": 954, "visible": 1250, "top": 60}, 1.0, 100.0)
+        self.assertEqual(painter.rects, [(0.0, 0.0, 1574.0, 954.0)])
+        self.assertEqual(painter.colors, [(1.0, 1.0, 1.0, 1.0)])
+        self.assertEqual(painter.texts, [])
+
+
+class FakeWindow:
+    """A window that only writes down the events it is given."""
+
+    def __init__(self):
+        self.events = []
+
+    def event_simulate(self, **kwargs):
+        self.events.append(kwargs)
+
+
+class FakeRegion:
+    def __init__(self, kind, x, y, width, height):
+        self.type, self.x, self.y, self.width, self.height = kind, x, y, width, height
+
+
+class TestSimulatedInput(Case):
+    """The pieces that need Blender started with --enable-event-simulate, run
+    against a window that records what it is told."""
+
+    def stage_with(self, window, ui_width=280):
+        stage = promo.Stage(bpy.context.window)
+        area = types.SimpleNamespace(
+            regions=[FakeRegion("WINDOW", 2, 100, 1574, 954), FakeRegion("UI", 1574 - ui_width, 100, ui_width, 902)],
+            x=2, y=100, width=1574, height=954)
+        stage.find = lambda: (window, area, area.regions[0])
+        stage.pixel = lambda: 1.0
+        return stage, area
+
+    def test_the_sidebar_is_taken_at_its_edge_near_the_top_and_dragged_left_160(self):
+        window = FakeWindow()
+        stage, area = self.stage_with(window)
+        apply = stage.sidebar_drag(160)
+        for step in range(0, 101, 4):
+            apply(promo.smooth(step / 100.0))
+        apply(1.0)
+        events = window.events
+        edge_x, y = 1294, 100 + 902 - 45
+        self.assertEqual((events[0]["type"], events[0]["x"], events[0]["y"]), ("MOUSEMOVE", edge_x, y))
+        presses = [i for i, e in enumerate(events) if e["type"] == "LEFTMOUSE" and e["value"] == "PRESS"]
+        releases = [i for i, e in enumerate(events) if e["type"] == "LEFTMOUSE" and e["value"] == "RELEASE"]
+        self.assertEqual((len(presses), len(releases)), (1, 1))
+        self.assertGreater(presses[0], 0)
+        self.assertEqual(releases[0], len(events) - 1)
+        self.assertEqual((events[presses[0]]["x"], events[presses[0]]["y"]), (edge_x, y))
+        moves = [e["x"] for e in events[presses[0] + 1:releases[0]] if e["type"] == "MOUSEMOVE"]
+        self.assertTrue(len(moves) > 5)
+        self.assertEqual(moves, sorted(moves, reverse=True))
+        self.assertEqual(set(e["y"] for e in events), {y})
+        self.assertEqual(moves[-1], edge_x - 160)
+        self.assertEqual(events[releases[0]]["x"], edge_x - 160)
+        # Once let go it says nothing more, however often it is asked.
+        count = len(events)
+        apply(1.0)
+        self.assertEqual(len(events), count)
+
+    def test_the_drag_is_in_the_pixels_of_a_window_the_size_of_the_recording(self):
+        window = FakeWindow()
+        stage, _area = self.stage_with(window)
+        stage.pixel = lambda: 1440.0 / 1080.0
+        apply = stage.sidebar_drag(160)
+        apply(0.0)
+        apply(0.5)
+        apply(1.0)
+        self.assertEqual(window.events[-1]["x"], 1294 - round(160 * 1440.0 / 1080.0))
+
+    def test_without_a_sidebar_there_is_nothing_to_drag(self):
+        window = FakeWindow()
+        stage, area = self.stage_with(window, ui_width=1)
+        self.assertIsNone(stage.sidebar_drag(160))
+        self.assertEqual(window.events, [])
+
+    def test_the_pointer_is_parked_where_a_dialog_will_not_cover_the_panel(self):
+        window = FakeWindow()
+        stage, area = self.stage_with(window)
+        x, y = stage.park("dialog")
+        ui = area.regions[1]
+        # A dialog opens about 126 to its left and 186 to its right of the pointer, and 46 below its top.
+        self.assertLess(x + 190, ui.x)
+        self.assertGreater(y, area.y + area.height * 0.7)
+        self.assertEqual(window.events[-1], {"type": "MOUSEMOVE", "value": "NOTHING", "x": int(x), "y": int(y)})
+        x, y = stage.park("calm")
+        self.assertLess(x, ui.x)
+        self.assertLess(y, area.y + area.height * 0.5)
+
+    def test_the_splash_is_sent_away_with_a_move_and_the_escape_key(self):
+        window = FakeWindow()
+        stage, _area = self.stage_with(window)
+        stage.dismiss_splash()
+        self.assertEqual([e["type"] for e in window.events], ["MOUSEMOVE", "ESC", "ESC"])
+        self.assertEqual([e["value"] for e in window.events][1:], ["PRESS", "RELEASE"])
+
+
+class TestPressDialog(Case):
+    """A button that opens a dialog, with the dialog played by a stand-in."""
+
+    def setUp(self):
+        super().setUp()
+        self.real = promo.bpy, promo.events_available, promo.key_tap
+        self.calls, self.taps, self.done = [], [], [False]
+        test = self
+
+        def ring(*mode, **props):
+            test.calls.append((mode, props))
+            if mode == ("INVOKE_DEFAULT",):
+                return test.invoke
+            test.done[0] = True
+            return {"FINISHED"}
+        self.invoke = {"RUNNING_MODAL"}
+        promo.bpy = types.SimpleNamespace(ops=types.SimpleNamespace(rigmoves=types.SimpleNamespace(ring=ring)),
+                                          context=bpy.context, types=bpy.types, app=bpy.app)
+
+        def tap(window, key):
+            test.taps.append(key)
+            if key == "RET" and test.confirms:
+                test.done[0] = True
+        promo.key_tap = tap
+        self.confirms = True
+        promo.events_available = lambda *_a: True
+        self.addCleanup(self.restore)
+
+    def restore(self):
+        promo.bpy, promo.events_available, promo.key_tap = self.real
+
+    def play(self, quick=False):
+        scene = bpy.context.scene
+        props = dict(index=0, count=8)
+        kinds = []
+        for action in promo.press_dialog(scene, "Ring", "rigmoves.ring", props, lambda: self.done[0], quick):
+            kinds.append(action[0] if action[0] != "wait" else ("wait", action[1]))
+            if action[0] == "call":
+                action[1]()
+        return kinds
+
+    def test_the_dialog_is_opened_held_for_a_second_and_a_half_and_confirmed_with_return(self):
+        kinds = self.play()
+        self.assertEqual(kinds, ["park", ("wait", 0.3), "call", ("wait", promo.DIALOG_SECONDS), "call",
+                                 ("wait", 0.5), "call", "park"])
+        self.assertEqual(promo.DIALOG_SECONDS, 1.5)
+        self.assertEqual(self.calls, [(("INVOKE_DEFAULT",), dict(index=0, count=8))])
+        self.assertEqual(self.taps, ["RET"])
+
+    def test_a_dialog_that_ignores_return_is_closed_and_the_operator_called_straight(self):
+        self.confirms = False
+        self.play()
+        self.assertEqual(self.taps, ["RET", "ESC"])
+        self.assertEqual(self.calls, [(("INVOKE_DEFAULT",), dict(index=0, count=8)), ((), dict(index=0, count=8))])
+        self.assertTrue(self.done[0])
+
+    def test_blender_running_it_with_no_dialog_is_taken_as_done(self):
+        self.invoke = {"FINISHED"}          # as in a headless Blender: nothing to confirm
+        self.done[0] = True
+        self.play()
+        self.assertEqual(self.taps, [])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_a_refusal_is_reported_in_the_add_ons_words(self):
+        self.invoke = {"CANCELLED"}
+        promo.bpy.ops.rigmoves.ring = lambda *mode, **props: {"CANCELLED"}
+        with self.assertRaises(RuntimeError) as caught:
+            self.play()
+        self.assertIn("Ring did not work", str(caught.exception))
+
+    def test_without_simulated_input_or_when_quick_it_is_called_straight_with_no_pause(self):
+        promo.events_available = lambda *_a: False
+        self.assertEqual(self.play(), ["call"])
+        self.assertEqual(self.calls, [((), dict(index=0, count=8))])
+        self.calls.clear()
+        promo.events_available = lambda *_a: True
+        self.assertEqual(self.play(quick=True), ["call"])
+        self.assertEqual(self.calls, [((), dict(index=0, count=8))])
+        self.assertEqual(self.taps, [])
+
+
+class TestTimeline(Case):
+
+    def test_it_is_written_whole_at_every_change_and_says_when_it_is_finished(self):
+        timeline = promo.Timeline(self.timeline_path, "main")
+        timeline.start(1234.5)
+        with open(self.timeline_path, encoding="utf-8") as handle:
+            first = json.load(handle)
+        self.assertEqual((first["t0_epoch"], first["fps"], first["beats"], first["finished"]),
+                         (1234.5, 30, [], False))
+        timeline.begin("a", "Say a", 0.1)
+        with open(self.timeline_path, encoding="utf-8") as handle:
+            half = json.load(handle)
+        self.assertEqual(half["beats"], [{"name": "a", "caption": "Say a", "start": 0.1, "end": None}])
+        timeline.begin("b", "Say b", 2.0)         # the next one begins: the one before ends there
+        timeline.bloom("start", 3.0, 30.0)
+        timeline.bloom("end", 8.0)
+        timeline.finish(9.0)
+        with open(self.timeline_path, encoding="utf-8") as handle:
+            done = json.load(handle)
+        self.assertEqual([(b["name"], b["start"], b["end"]) for b in done["beats"]], [("a", 0.1, 2.0), ("b", 2.0, 9.0)])
+        self.assertEqual((done["bloom_start"], done["bloom_end"], done["bloom_frame_rate"], done["finished"]),
+                         (3.0, 8.0, 30.0, True))
+        self.assertFalse(os.path.exists(self.timeline_path + ".part"))
+
+    def test_a_folder_that_cannot_be_written_is_said_and_does_not_stop_the_show(self):
+        timeline = promo.Timeline(os.path.join(self.timeline_path, "inside", "a file"), "main")
+        with open(self.timeline_path, "w") as handle:       # a file where its folder would be
+            handle.write("not a folder")
+        timeline.start(1.0)
+        timeline.finish(2.0)
+        self.assertTrue(timeline.told)
+
+    def test_the_mode_is_slider_only_when_asked_for_in_so_many_words(self):
+        for value, mode in (("slider", "slider"), (" Slider ", "slider"), ("main", "main"), ("", "main"),
+                            ("fast", "main")):
+            os.environ["COPYTHAT_PROMO_MODE"] = value
+            self.assertEqual(promo.promo_mode(), mode, value)
+        os.environ.pop("COPYTHAT_PROMO_MODE")
+        self.assertEqual(promo.promo_mode(), "main")
+
+
 class TestBundle(Case):
 
     def test_the_bundle_compiles_imports_cleanly_and_plays(self):
@@ -1571,27 +2660,37 @@ class TestBundle(Case):
         self.assertEqual(before.keys(), bpy.app.driver_namespace.keys())
         self.assertIn(">>> FLOWER BEGIN", source)
         self.assertIn("<<< FLOWER END", source)
+        self.assertIn(">>> FAST BEGIN", source)
+        self.assertIn("<<< FAST END", source)
         if HAVE_FLOWER:
             self.assertIsNotNone(scope["FLOWER_SOURCE"])
             self.assertIsNotNone(scope["FLOWER"])
-            self.assertEqual(scope["scenes_to_play"]()[0], [1, 2, 3, 4])
+        # The promo is the default: the flower, fast, alone.
+        self.assertEqual(scope["SCENES"], [5])
+        if HAVE_FAST:
+            self.assertEqual(scope["scenes_to_play"]()[0], [5])
         # The bundled file plays a scene as well as the source does.
         scope["FULL_VIEWPORT"] = False
-        show = scope["Show"]([1, 2, 3, 4] if HAVE_FLOWER else [1, 2, 3], instant=True)
+        every = [1, 2, 3] + ([4] if HAVE_FLOWER else []) + ([5] if HAVE_FAST else [])
+        show = scope["Show"](every, instant=True)
         show.run_instant()
         for number in show.scenes:
             data = show.scenes[number].rigmoves_rig.rigmoves
             self.assertTrue(all(m.built for m in data.moves), number)
 
     def test_the_flower_is_inlined_as_lines_that_match_the_file(self):
-        if not HAVE_FLOWER:
-            self.skipTest("needs the real flower.py")
+        if not HAVE_FAST:
+            self.skipTest("needs the real flower.py and bare_tail.py")
         ok, _messages = bundle.bundle(FLOWER_PATH, DIST)
         self.assertTrue(ok)
         scope = runpy.run_path(DIST, run_name="copythat_promo_dist")
         self.assertEqual(scope["FLOWER_SOURCE"], read(FLOWER_PATH).rstrip("\n"))
+        # And the tail of make_flower_fast.py, which goes on in the flower's module.
+        self.assertEqual(scope["FAST_SOURCE"], read(TAIL_PATH).rstrip("\n"))
+        self.assertTrue(scope["have_fast_flower"]())
+        self.assertTrue(callable(scope["FLOWER"].build_bare_scene))
 
-    def test_without_flower_scene_four_is_left_out_with_a_message(self):
+    def test_without_flower_scenes_four_and_five_are_left_out_with_a_message(self):
         with tempfile.TemporaryDirectory() as folder:
             out = os.path.join(folder, "dist", "copythat_promo.py")
             ok, messages = bundle.bundle(os.path.join(folder, "nothing.py"), out)
@@ -1600,9 +2699,51 @@ class TestBundle(Case):
             scope = runpy.run_path(out, run_name="copythat_promo_dist")
             self.assertIsNone(scope["FLOWER_SOURCE"])
             self.assertIsNone(scope["FLOWER"])
+            scope["scenes_to_play"].__globals__["SCENES"] = [1, 2, 3, 4, 5]
             numbers, notes = scope["scenes_to_play"]()
             self.assertEqual(numbers, [1, 2, 3])
             self.assertTrue(any("Scene 4 is left out" in n for n in notes))
+            self.assertTrue(any("Scene 5 is left out" in n for n in notes))
+
+    @unittest.skipUnless(HAVE_FAST, "needs the real flower.py and bare_tail.py")
+    def test_without_the_tail_scene_five_alone_is_left_out(self):
+        with tempfile.TemporaryDirectory() as folder:
+            out = os.path.join(folder, "dist", "copythat_promo.py")
+            ok, messages = bundle.bundle(FLOWER_PATH, out, os.path.join(folder, "nothing.py"))
+            self.assertTrue(ok)
+            self.assertTrue(any("Scene 5 is LEFT OUT" in m for m in messages), messages)
+            scope = runpy.run_path(out, run_name="copythat_promo_dist")
+            self.assertIsNotNone(scope["FLOWER"])
+            self.assertIsNone(scope["FAST_SOURCE"])
+            self.assertFalse(scope["have_fast_flower"]())
+            scope["scenes_to_play"].__globals__["SCENES"] = [4, 5]
+            numbers, notes = scope["scenes_to_play"]()
+            self.assertEqual(numbers, [4])
+            self.assertTrue(any("Scene 5 is left out" in n for n in notes))
+            self.assertFalse(any("Scene 4 is left out" in n for n in notes))
+
+    @unittest.skipUnless(HAVE_FAST, "needs the real flower.py and bare_tail.py")
+    def test_a_tail_that_does_not_compile_or_misses_a_function_is_left_out(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bad = os.path.join(folder, "tail.py")
+            with open(bad, "w", encoding="utf-8") as handle:
+                handle.write("def make_bare(parts:\n    pass\n")
+            ok, messages = bundle.bundle(FLOWER_PATH, os.path.join(folder, "a.py"), bad)
+            self.assertTrue(ok)
+            self.assertTrue(any("does not compile" in m and "Scene 5 is LEFT OUT" in m for m in messages))
+            with open(bad, "w", encoding="utf-8") as handle:
+                handle.write("def make_bare(parts):\n    return parts\n")
+            ok, messages = bundle.bundle(FLOWER_PATH, os.path.join(folder, "b.py"), bad)
+            self.assertTrue(any("make_fast" in m and "Scene 5 is LEFT OUT" in m for m in messages), messages)
+            self.assertIsNone(runpy.run_path(os.path.join(folder, "b.py"), run_name="x")["FAST_SOURCE"])
+
+    @unittest.skipUnless(HAVE_FAST, "needs the real flower.py and bare_tail.py")
+    def test_run_unbundled_from_the_repository_it_finds_the_flower_beside_it(self):
+        scope = runpy.run_path(os.path.join(HERE, "copythat_promo.py"), run_name="copythat_promo_repo")
+        self.assertIsNone(scope["FLOWER_SOURCE"])
+        self.assertIsNotNone(scope["FLOWER"])
+        self.assertTrue(scope["have_fast_flower"]())
+        self.assertEqual(scope["scenes_to_play"]()[0], [5])
 
     def test_a_flower_that_does_not_compile_is_left_out_too(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -1622,12 +2763,12 @@ class TestBundle(Case):
             self.assertTrue(any("flower_steps" in m and "LEFT OUT" in m for m in messages))
 
     def test_the_dist_file_is_ascii_safe_where_it_inlines(self):
-        if not HAVE_FLOWER:
-            self.skipTest("needs the real flower.py")
+        if not HAVE_FAST:
+            self.skipTest("needs the real flower.py and bare_tail.py")
         bundle.bundle(FLOWER_PATH, DIST)
         source = read(DIST)
-        inlined = source[source.index(">>> FLOWER BEGIN"):source.index("<<< FLOWER END")]
-        inlined.encode("ascii")
+        for begin, end in ((">>> FLOWER BEGIN", "<<< FLOWER END"), (">>> FAST BEGIN", "<<< FAST END")):
+            source[source.index(begin):source.index(end)].encode("ascii")
         # The 256-character limit applies to drivers, not to this file; but
         # lines long enough to choke a text editor would be a mistake.
         self.assertLess(max(len(line) for line in source.split("\n")), 400)
