@@ -1,4 +1,4 @@
-# CopyThat - v0.19.0
+# CopyThat - v0.19.1
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -20,7 +20,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 CopyThat is a Blender extension, and it needs Blender 4.5 or newer: Blender
 will not install it on an older one. First, if an older RigMoves or CopyThat
 is listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
-the two cannot be on at once. Then drag `CopyThat-0.19.0.zip` into Blender,
+the two cannot be on at once. Then drag `CopyThat-0.19.1.zip` into Blender,
 or use Edit > Preferences > **Get Extensions** > the drop-down at the top
 right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
 **CopyThat**. Files made with older versions keep working.
@@ -114,7 +114,9 @@ If an origin is moved anyway - Set Origin, or Apply Scale or Rotation, on a part
 that is already built - nothing moves on screen, and CopyThat sees that the mesh
 did not move: it puts the object back on the frame its move was recorded in, the
 mesh moved the other way, and says so in the report. That is not a drag, so it is
-never recorded as one. To change where a part turns, use Pivot.
+never recorded as one. A part that was dragged as well, before the next button was
+pressed, keeps the drag, which is recorded as the pose it is, and the report says
+so. To change where a part turns, use Pivot.
 
 ### Moving the finished model
 
@@ -126,6 +128,10 @@ where it now stands, so nothing jumps back and nothing has to be recorded
 again. The rig can be animated too: it is caught up at the frame it is at. Only
 the parts moved *without* the rig, one at a time, are read as a pose to record.
 A curve for a part's path that is left behind is carried along with the rest.
+Moving the rig alone carries the parts that are not built yet with the model, so
+Build puts them back in their place in it; select them with the rig to move them
+all. Ctrl+A and Set Origin on the rig are not a move: nothing moves on screen, and
+CopyThat follows the Root bone, which they leave where it is.
 
 ### Renaming, and copying a finished model
 
@@ -133,9 +139,9 @@ A part is its object, whatever the object is called. Rename it (F2) and the part
 takes the new name, and so does everything that named the old one - a rider's
 leader, a Follows - at once. Copy a finished model - select the rig and its parts
 and press Shift+D (or Alt+D) - and the copy is a model of its own: its parts are
-its own objects, and it plays a path of its own, so building the copy never
-changes the original, or the other way round. Duplicate the rig on its own and you
-have a rig whose parts are the original's: duplicate them together.
+its own objects, its path curves too, and it plays a path of its own, so building
+the copy never changes the original, or the other way round. Duplicate the rig on
+its own and you have a rig whose parts are the original's: duplicate them together.
 
 ### Starting the next thing
 
@@ -602,11 +608,14 @@ It also refuses when nothing follows the part, when the part rides along, and
 when the part has not been turned.
 
 Curl puts every part below the root where its bend says, replacing whatever
-bend it had. A part whose object has been deleted is left out if it is at the
-end of the chain, and the report says so; if parts hang from it, Curl is turned
-down, saying which, and nothing is moved. Copies of the finger ride along with it once a Build has copied
-the new path onto them, so after **Record After** press **Build**; the report
-says so when there are copies.
+bend it had. A part whose object has been deleted leaves its move at the button
+press, and the report says so; the parts that followed it follow nothing, and stay
+where they stand. One that riders copy or hang from stays, as "Name (deleted)": it
+is left out of the bend if it is at the end of the chain, and the report says so;
+if parts hang from it, Curl is turned down, saying which, and nothing is moved.
+Copies of the finger ride along with it once a Build has copied the new path onto
+them, so after **Record After** press **Build**; the report says so when there are
+copies.
 
 ### Several moves under one control
 
@@ -734,8 +743,9 @@ when Paths is pressed again.
   drag. Parts with keys of their own on their location, rotation or scale: **Lift
   Those Keyframes** takes them off (Build does too), only the keys the part itself
   plays. And parts moved by an NLA strip or a driver of their own. Those two are
-  your work, so nothing lifts them: the box says to mute or remove the strip in the
-  NLA editor, or to remove the driver in the Drivers editor, and then to Build.
+  your work, so nothing lifts them: the box says to mute the strip's track, or
+  delete the strip, in the NLA editor, or to remove the driver in the Drivers
+  editor, and then to Build.
   Build names them as well, and is a warning, not a success, until they are gone.
 - **The report** at the foot of the panel says what the last button did, and what to
   do next. It shows nine lines. A longer one ends with "…" and a last line, "(the
@@ -1200,10 +1210,11 @@ and one lifted 1 m:
   third of three picked from a ring before the second. The ring is a circle fitted
   to the parts now - the hub the Leads are measured from left out of it.
 - **A ring made again after its copies were deleted never bound the new copies.**
-  The deleted copies' parts stay in the move, and a new copy that took the name of
-  one was taken for it: not bound, put back where the old one stood, and the report
-  said it rode along. Copies are numbered past every name in use, in the objects and
-  in the parts of every rig, and a ring that cannot be finished takes itself back.
+  The deleted copies' parts stayed in the move (they are taken out of it at the next
+  button now), and a new copy that took the name of one was taken for it: not bound,
+  put back where the old one stood, and the report said it rode along. Copies are
+  numbered past every name in use, in the objects and in the parts of every rig, and
+  a ring that cannot be finished takes itself back.
 - **Make Chain could not be done again from the other end.** The old links, which
   closed a loop with the new ones, were the reason it was refused. It replaces the
   links among the chosen parts, and says which.
@@ -1376,11 +1387,13 @@ and one lifted 1 m:
   rotation or scale, was not named anywhere, and played the wrong move by up to
   two units. The box at the top of the panel, and Build, now name those parts and
   say what to do: "'Gear' is moved by an NLA strip of its own, which fights the rig:
-  mute or remove it in the NLA editor, then Build", or "... by a driver on its
-  transform: remove it in the Drivers editor, then Build". They are your work, so
-  Lift Those Keyframes does not touch them, and Build is a warning, not a success,
-  until they are gone. A muted strip, a muted track and a muted driver play nothing,
-  and are not named.
+  in the NLA editor, mute its track (the checkbox on the track) or delete the strip,
+  then Build", or "... by a driver on its transform: remove it in the Drivers
+  editor, then Build". They are your work, so Lift Those Keyframes does not touch
+  them, and Build is a warning, not a success, until they are gone. A muted track and
+  a muted driver play nothing, and are not named. A muted strip is not played either,
+  but Blender still sets everything it works to its default on every frame, so it is
+  named like any other.
 - **A duplicate left on top of the part was blamed on the centre and the Count.**
   Shift+D, then a right-click, leaves a copy exactly on the part. Ring looked at the
   places round the ring but not the part's own, so Fill the gaps refused with "1
@@ -1431,6 +1444,142 @@ and one lifted 1 m:
   "is a mirror image of 'Petal' (not the same on both sides), so it is not a copy -
   it can ride along with Ride Along, which mirrors by itself".
 
+- **Deleting a part could close Blender.** About half a second after X, a timer lets
+  go of the deleted part's object. It removed the object from the very list it was
+  looping over, and a loop over a list that loses a member goes on to read the one it
+  has just lost: usually nothing showed, sometimes Blender crashed, and the rigs after
+  the one that lost an object were skipped. The rigs are collected first and the
+  objects let go of after.
+- **A new object that took a deleted part's name was taken for that part.** Two cubes
+  are a move, built; delete one and add a cube, and Blender names it after the deleted
+  one. The panel said it was already in the rig, New Move and Add To This Group
+  refused it ("already in Move 1"), and Build moved it onto the deleted cube's Before,
+  unbound. A part whose object has been deleted and let go of is marked gone and
+  stands for nothing from then on, whatever has its name.
+- **A deleted part stayed in its move for good.** Ring said "'Hand' has no Before
+  recorded yet" of a hand that was deleted, the reports counted it, and what followed
+  it was left hung from nothing. The next button takes the part out of its move - its
+  constraints, drivers and curves, and at the next Build its bone. What followed it
+  follows nothing and stays where it stands, and the report says so: "'Cube.001' was
+  deleted, so it was taken out of 'Move 1'." A deleted part that riders copy, or that
+  riders hang from (the middle joint of a copied finger), stays for them, as "Petal
+  (deleted)", since its bone plays their path; it goes when its last rider does. A
+  follower hung from a leader that was deleted does not jump when the leader is freed.
+- **A big scene slowed Blender, and a deleted part made it crawl.** In a file with a
+  rig of fifty parts and a thousand other meshes in sixty collections, every update
+  ran a check that looked through the collections of the whole file for every part,
+  and the panel took three times as long as in 0.18.3. With one part deleted and not
+  yet let go of, each update took about 150 ms and the panel about a second. The check
+  asks an object how many users it has instead, and the scan for a renamed object asks
+  its cheap questions first: an update takes under a millisecond, and the panel what
+  it did in 0.18.3, with a part deleted too.
+- **A copy of a whole model made with Alt+D was not independent of the original.**
+  Alt+D links the Armature as well as the meshes, so building the copy, ringing its
+  lid or setting a pivot edited the original's bones - the original lid ended up
+  0.89 m off - and removing the copy's move took away the original's bones, its vertex
+  group and its constraints. A rig that shares its Armature takes a copy of it for
+  itself the first time a button is pressed on it, its pose, constraints and drivers
+  with it; Remove makes a shared mesh the object's own before it takes the group off.
+- **A copy of a whole model shared the original's path curves and path line.** They
+  are objects of their own, and not selected with "the rig and its parts", so the
+  copy's Build pinned the original's curve to its own ends, removing the copy deleted
+  the original's curve (its path went straight at its next Build), and the copy's
+  Build deleted the original's path line. The copy gets curves of its own, and lets go
+  of a path line it shares.
+- **Remove hung a part back on the wrong parent, or on none.** A lid modelled hanging
+  from a body goes back to hanging from it, but the body was kept by name: Remove on a
+  Shift+D copy of the chest hung the copy's lid on the original body, so moving that
+  moved the copy's lid, and after the body was renamed it hung it on nothing and said
+  "The rig is back to how it was". The body is kept by pointer, which follows a rename
+  and, in a copied model, points at the copy's own. If it is gone, Remove says so:
+  "'Lid' hung from 'Body', which is gone, so it was left standing free."
+- **Build emptied an NLA strip that played the part's own keys.** A part whose
+  animation had been stashed or pushed down, so that its action is also in a strip of
+  its own NLA, had "3 stray keyframe track(s)" lifted - out of the strip too, which
+  Build is never meant to touch. The part now takes a copy of the action to lift the
+  keys from first, whether the strip is muted or not.
+- **"Mute the NLA strip" did not make a part play its move.** A muted strip is not
+  played, but Blender still sets everything it works to its default on every frame, so
+  the coin sat at the origin at every frame - and the part was no longer named, so
+  nothing said it was still wrong. A muted strip on a track that plays is named like
+  any other, and the advice says what works: "in the NLA editor, mute its track (the
+  checkbox on the track) or delete the strip, then Build".
+- **After New Rig, every New Move started another rig.** Blender gives an operator the
+  choices it was last used with, and New Rig is New Move with one choice made; it is
+  not remembered now.
+- **Ring blamed a deleted part on a missing Before.** It said "has no Before recorded
+  yet" of a part below the one chosen that was deleted, or that was no mesh. Each has
+  its own sentence: "'Hand' was deleted, so the chain cannot be ringed", "'Hand' is
+  not a mesh, so it cannot be ringed", and the old one for a part that has none.
+
+- **Set Origin, or Apply Scale, on a built part and then dragging it broke the move.**
+  Give a built lid a new origin, or apply its scale, and drag it to a new After before
+  pressing any button: Record said "moved by hand, read as a pose" and the next Build
+  left the lid up to a metre off at rest, because the new origin and the drag were
+  taken together for one big drag - an origin change is never meant to be recorded as
+  one. A forearm in a chain was nearly half a metre off. A part with no bone yet -
+  after New Move, or added with Add To This Group - moved by a whole part at its first
+  Build, and the report said it had worked. A part now fits three of its vertices,
+  picked to stand far apart, onto where they are now: what the mesh did is the drag,
+  and only the frame is put back. The drag is kept and recorded as the pose it is.
+- **A mesh edited after it was built was taken for a drag by Set Origin.** Nudge a
+  vertex, or subdivide a built lid, in Edit Mode, give it a new origin and Build: the
+  lid stood 0.82 m off at rest, "1 put back on its Before". A part kept the vertices
+  it is told by from the day it was built. They are taken again whenever the part
+  stands on its Before and they no longer fit - at the next button, and as soon as
+  Edit Mode is left, also when the whole model has been moved since and no button has
+  caught up with it yet.
+- **Ctrl+A or Set Origin on the rig made the next button move the model.** Nothing
+  moves on screen - Blender shifts the bones the other way - but the rig's new matrix
+  was read as the whole model having moved, and everything it remembered was carried
+  by it: the lid 1.2 to 1.5 m off at the next Build, Record, eye, Add To This Group or
+  Lift, a robot arm's forearm five. (0.18.3 did not do this to the rig alone.) The rig
+  now tells where the model stands by its Root bone, which Apply and Set Origin leave
+  where it is (and, for Apply Scale on a rig that was itself scaled, by the bone's
+  length as well); a file saved by 0.19.0 is caught up once the old way and then kept
+  the new one.
+- **A refused re-frame blamed the wrong thing, and blocked the cure.** Set Origin on a
+  built forearm and a stray Auto Key on its hand: Lift Those Keyframes, Build and
+  Record were all refused with a message about the forearm's origin that never
+  mentioned the key. The refusal now names what stops it - "it has a child with keys
+  or drivers of its own ('Hand')" - and for keys says to press Lift Those Keyframes,
+  which takes the keys off first and puts the forearm back after.
+- **Ctrl+A Scale on a built chain sheared the follower.** Two unevenly scaled boxes,
+  chained and built, both scaled by Apply: Build said nothing had moved, but a forearm
+  dragged 50 degrees and recorded turned 8 degrees on screen and came out sheared, and
+  Curl 0.8 gave 83 degrees for the 81 it was asked for. Putting the parts back on
+  their frames left each child hung by an inverse that no longer cancelled its
+  parent's scale. Children are hung again the way Build hangs a follower.
+- **A rig with keys on its own location lost its place at the next Build.** A car
+  driving off with its model, keys at three frames, a coin added at frame 20: Build
+  moved the rig onto the middle of its bones, the keys put it back on the next frame,
+  and the whole model stood half a metre off at every frame - after Set Pivot, Ride
+  Along, Mirror and the rest as well. A rig that moves itself (keys, a driver, an NLA
+  strip) is left where it is.
+- **A model carried a few hundred metres read as dragged.** Select everything and
+  carry it 300 m with a turn: Set Pivot, Ride Along and Ring refused with "has been
+  moved and not recorded", and Record wrote "moved by hand, read as a pose" for a lid
+  nobody touched. A rig keyed along a 214 m path was refused even back near the
+  origin. Blender keeps seven digits of a matrix, so what is carried far out is
+  rounded, and that stays when the rig comes home. How much two places may differ now
+  grows with the distance from the origin, and the rig remembers the farthest it was
+  carried.
+- **A rig animated from scale 0 ruined what the move remembered.** A button pressed on
+  the frame where it is nothing squeezed every Before and After to a point, and the
+  next Build at scale 1 left the lid nearly five metres off. A rig with no size is
+  left alone, and Record and Build ask for a frame where it has one.
+- **A rig switched off in the viewport was half changed by Build, Remove and Ring.**
+  With Show in Viewports off (the screen icon) they stopped at "Cannot edit hidden
+  object" half way: a first Build had taken the lid off its parent, Remove had left
+  the bones and the handle's constraint, Ring left eight unbound copies. They now say
+  it first, and change nothing: "Show 'CopyThat Rig' in the viewport first (the screen
+  icon in the Outliner)".
+- **Ring's copies were put in the wrong place under a stretched parent.** Ring(4) on a
+  lid, the rig hung from an Empty scaled (1, 2, 1), turned and moved: after Build two
+  of the petals stood 0.9 m off. A model stretched as a whole is sheared, and a shear
+  is not a place a bone can stand; the riders' seats are worked out in the rig's own
+  space now, for mirrored riders too.
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -1479,6 +1628,12 @@ and one lifted 1 m:
   back on its frame only if what Blender shows is the same before and after. With
   a constraint on it, or a modifier that measures from its frame, it is not: undo
   the change, or take the part out of its move and add it again.
+- Set Origin on a built part, then an edit of its mesh before any CopyThat button,
+  can be read as a drag, and Build puts the part back. Press any CopyThat button
+  between the two (the eye will do).
+- Apply Scale on a rig that is scaled unevenly is still read as a move of the model.
+- On a frame where the rig is scaled to nothing, Record, Build, Set Pivot and Ring
+  are refused. Go to a frame where it has a size.
 - A rider copies its leader from where it stood when it joined. To move one,
   take it out and add it again. A rider cannot lead others, and only objects
   can lead - a bone of a hand-built rig is not offered.

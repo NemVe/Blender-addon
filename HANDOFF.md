@@ -110,6 +110,7 @@ Features, in the order the user asked for them:
 | 0.18.2 | **Runs on Blender 4.5 LTS, 5.0 and 5.2; needs 4.5 or newer.** 4.4 has no Replace mode on the Action constraint, so every Build failed there. On 4.5 and 5.0 a healed copy was not redrawn (the mesh is tagged after a group is removed). On 4.4 and 4.5 every action curve was read twice (curves are read from the channelbags only). Guard test: the manifest and `bl_info` name one Blender and one version | `own_binding`, `own_transform_curves`, `rig_own_curves`, `action_curve`, `drop_empty_action`, `bl_info["blender"]`, `blender_manifest.toml`, `TestManifest` |
 | 0.18.3 | **The Riding along list reads at the sidebar's usual width** (found in a real 5.2.1 window, sidebar at its default 280 px). The Spread... button of the Riding along and Timing headers sits in a right-aligned sub-row: it took half the header, and the count was cut ("Riding alon…"). A rider's name is cut from the front to the room its row has, measured with `blf` in the panel's font, so Ring's copy numbers show: it was `short(name, 13)`, which Blender then cut at the end as well, seven rows of "…ter Lead…". Tests draw the panel for a sidebar of a given width (`Sidebar`, `drawn_panel`, and the logging layout now notes labels and alignments) | `fitted`, `_draw_move`, `TestNamesBesideControls` |
 | 0.19.0 | The review of 0.18.3, 17 confirmed findings: a part is its object (`part_object`, renames, whole-model copies with their own Action), the rig's seat (`catch_up`: a moved model is carried), re-framed parts put back (fingerprints), one object in one move, copies join a move free, children named; Ring's shared-mesh settle and rollback, shared actions (own slot, own copy), keyed children, NLA/driver parts named, stacked duplicates, Spread's step re-sized live, SKIP_SAVE on Ring's Lead step and Spread's toggles, reports | see the batch commits and the guide's bug list |
+| 0.19.1 | The review of 0.19.0, 22 confirmed items in two batches. Who is who: a deleted part is let go of and taken out of its move at the next button (kept as "Name (deleted)" while riders copy it or hang from it), and a new object given its name is not it; the deletion timer no longer removes objects from the list it loops over; a big scene stays quick (users, not collections); a copy of a whole model, Alt+D too, owns its Armature and its path curves; the object a part hung from is kept by pointer; Build no longer empties an NLA strip that plays the part's own action, and a muted strip on a track that plays is named (the advice is the track); New Rig is not remembered; Ring says what is wrong with a deleted part or a non-mesh. Where things stand: a part is told from a drag by a rigid fit of three far-apart vertices (so a drag on top of Set Origin or Apply is kept, and parts not built yet are looked at), the marks are kept current as the mesh is edited, the model's seat is its Root bone (Ctrl+A and Set Origin on the rig move nothing), `same_place` allows for the rounding far from the origin, a rig scaled to nothing is left alone and Record and Build refuse it, a rig that moves itself is not seated, a rig switched off in the viewport is refused before anything changes, re-framed children are hung again as Build hangs a follower, a refused re-frame names its blocker, and riders' seats are worked out in the rig's own space | `let_go_of_deleted`, `take_out_gone`, `own_armature`, `own_curves`, `home_of`, `clip_strips`, `spread_vertices`, `was_reframed`, `retake_marks`, `marks_handler`, `seat_of`, `same_place`, `has_no_size`, `unavailable`; see the batch commits and the guide's bug list |
 
 ## The model underneath (read before changing any maths)
 
@@ -166,6 +167,11 @@ Features, in the order the user asked for them:
   - The rider plays a copy of the leader's channels, conjugated by an
     orthogonal map for Mirror (`rider_turn`, `rider_reflection`).
   - The seat of a mirrored rider sits on the mirrored pivot.
+  - Since 0.19.1 `leader_frame`, `rider_reflection`, `rider_turn`, `bind_riders` and
+    `rider_spot` work in the rig's own space (`into @ before`, `bone.matrix_local`): a
+    rig that hangs from something stretched stands in a sheared world, `standing()` of a
+    shear is not a frame, and the seats of riders already there were worked out again at
+    every Build from carried matrices. `rider_spot` maps its answer back to the world.
 - **Pivots:** a part's bone stands on its pivot. Changing the pivot re-keys
   the location with `loc' = loc − d + R·S·d` (`shift_pivot`), so the
   recorded poses don't change; only the way between them does.
@@ -232,36 +238,96 @@ Features, in the order the user asked for them:
   and dead "RigMoves" Armature modifiers. `bind_object` calls it, and
   `heal_bindings` runs at the end of every Build, after every bone exists - a
   stale group only starts to pull when a bone of its name is made.
-- **Moving the whole model (0.19):** every Before and After is a world matrix, true
-  for as long as the rig stood where it did when it was taken, so the rig's data
-  keeps `seat` (the rig's `matrix_world` then, 16 floats) and `seated`.
-  `catch_up(rig, data)` is run first by every operator that reads or writes those
-  matrices - `ready(self, rig, data)` for the ones that may refuse, `move_at(context,
-  index, self)` for the ones that go through a move - and never from drawing, where
-  nothing may be written. `shift = rig.matrix_world @ seat^-1`; unless it is the
-  identity, `carry_stored` puts it on every OBJECT part's `before` and `after` (a bone
-  part keeps rig-space data) and on a part's path curve if that stayed behind (told by
-  its start still being on the old pivot-at-Before), then `seat` is the rig as it is.
-  `seat_rig` and `ensure_rig` set `seat` themselves: they move the rig on purpose with
-  nothing else going anywhere. Not `seated` (a new rig, a file from before): it is
-  only noted. An animated rig is caught up at the current frame. Remove, Use Selected
-  and the `x` on a rider catch up too but never refuse. Loose parts are carried like
-  bound ones: nothing says whether a loose object was moved with the rig.
-- **A part framed differently (0.19):** Set Origin, or Apply Scale or Rotation, on a
-  bound part changes its transform and its mesh by the same amount, and `hand_moved`
-  read that as a drag. Each part keeps `rest_marks` (the world places at Before of
-  vertices 0, n//3 and 2n//3) and `rest_count`, taken by `take_before` whenever a
-  Before is taken (New Move, Add To This Group ... Ride Along, bind) and at the next
-  Build for a part from an older file that is on its Before; `carry_stored` carries
-  them with the rest. `was_reframed(part, obj)`: same count, same three places. Then
-  `take_back_reframed`, run by `catch_up` after the rig's shift, stands the object on
-  its Before again with Ring's `reframe` (new mesh, old kept) and keeps it only if
-  `look_of` is the same before and after (else `put_back`, and `catch_up` returns the
-  refusal). `unrecorded` skips such a part, so `x` on a rider is never held up by it.
-  What `catch_up` did is said through `HEARD` and the `mentioning` decorators on the
-  operators' `execute` (and `invoke` of the two dialogs): the outermost operator
-  appends it to the rig's report when it is done, so no report written after it
-  loses it. Blender counts the arguments of what it registers, hence two decorators.
+- **Moving the whole model (0.19, 0.19.1):** every Before and After is a world matrix,
+  true for as long as the model stood where it did when it was taken, so the rig's data
+  keeps `seat` and `seated`. The seat is `seat_of(rig)`, the Root bone's rest in the
+  world, its length the size of its axes (`rig.matrix_world @ bone.matrix_local @
+  Matrix.Scale(bone.length, 4)`; the object's own matrix for a rig with no "Root"), not
+  the armature object (the length is what makes Apply Scale on a scaled rig move nothing
+  too): Apply and Set Origin on the rig change the object and the bones by the same
+  amount the other way and the children stay, so the object's matrix changed and the
+  model did not move. `store_seat(rig, data)` keeps it and sets `seat_on_root`;
+  `ensure_rig` and `seat_rig`, which make and move Root, call it after. A rig that is
+  not `seated` (a new rig, a file from before) has its seat only noted. A seat without
+  `seat_on_root` is a 0.19.0 one (the object's matrix): `catch_up` measures against that
+  once and then stores the new way. `catch_up(rig, data, reframe=True)`: `now =
+  seat_of(rig)`; nothing at all while `is_singular(rig.matrix_world)` (a rig scaled to
+  nothing: it returns "" and waits; `is_singular` is the axis lengths, not the
+  determinant, so a rig at a thousandth is small, not nothing), and a singular stored
+  seat is taken afresh; `shift = now @ seat^-1`; unless `same_place(shift, identity,
+  near)` it is carried by `carry_stored` (onto every OBJECT part's `before`, `after` and
+  `rest_marks` - a bone part keeps rig-space data - and onto a part's path curve if that
+  stayed behind, told by its start still being on the old pivot-at-Before), the seat
+  stored and `data.far` raised. Then `retake_marks`, then `take_back_reframed` (not when
+  `reframe` is off: Lift Those Keyframes takes the keys off first and calls it itself).
+  `catch_up` is run first by every operator that reads or writes those matrices -
+  `ready(operator, rig, data, reframe=True)` for the ones that may refuse,
+  `move_at(context, index, self)` for the ones that go through a move - and never from
+  drawing, where nothing may be written. `ready` first asks `unavailable(context, rig)`
+  (switched off in the viewport, or not in the view layer): a sentence, before anything
+  is changed; `cannot_edit(operator, context, rig)` is the same for the operators that
+  edit the rig without `ready` (Remove, Remove of a combined control, Take Out, Stop
+  Riding Along). `has_no_size(operator, rig, data)` refuses Record and Build on a frame
+  where the rig is scaled to nothing. An animated rig is caught up at the current frame.
+  Remove, Use Selected and the `x` on a rider catch up but never refuse. Loose parts are
+  carried like bound ones: nothing says whether a loose object was moved with the rig.
+  `seat_rig` leaves a rig that moves itself (`has_own_motion`: keys on its transform, a
+  driver, an NLA strip) where it is - its keys put the object back on the next frame,
+  and the bones, shifted the other way, would stay shifted. A rig on a parent that moves
+  is seated as before.
+- **Rounding (0.19.1):** Blender's matrices keep single precision. `same_place(one,
+  other, near, far)` is the one test of "the same place": turn and scale entries to
+  1e-5, position to `1e-5 * (1 + near) + 2e-6 * far`, `near` the distance of the two
+  from the world's origin and `far` the rig's `far` - the farthest the seat has been
+  carried, because the rounding of a trip out stays in the stored matrices when the rig
+  is home. `hand_moved` and `catch_up` both use it.
+- **A part framed differently (0.19, 0.19.1):** Set Origin, or Apply Scale or Rotation,
+  on a part changes its transform and its mesh by the same amount. Each part keeps
+  `rest_marks` (the world places at Before of three of its vertices, `rest_which` their
+  numbers, picked by `spread_vertices` to be far apart: one far from the middle, the one
+  farthest from it, the one farthest from the line through the two) and `rest_count`;
+  `take_before` / `note_rest` take them whenever a Before is taken (New Move, Add To
+  This Group ... Ride Along, bind); `carry_stored` carries them with the rest.
+  `rest_which` minus one is a part from 0.19.0, read the old way (`marked_vertices`,
+  same vertex count). `was_reframed(part, obj)` fits the marks onto where those vertices
+  are now (`rigid_fit` of two `triangle_frame`s, no SVD) and returns the drag as a
+  matrix - the identity when the part was not moved - or None: when the mesh changed
+  shape or size (the fit misses by more than `1e-5 * reach + 1e-6 * far`), or when the
+  object's frame is the one that drag would have left it in (`frame_gap`), which is a
+  part that was only dragged or not moved. `take_back_reframed` looks at every object
+  part with a Before, bound or loose, riders too, and stands each re-framed one on `drag
+  @ Before` with Ring's `reframe` (new mesh, old kept): that is exactly a part dragged
+  by `drag`, which the rest of the add-on reads as a pose if bound and as where it was
+  put if loose. It keeps it only if `look_of` is the same before and after (else
+  `put_back`), and returns the refusal naming `reframe_blocker`'s reason (a child with
+  keys that Lift can take off is told to Lift Those Keyframes). `unrecorded` skips a
+  part only if its drag is the identity. `reframe` hangs each child of the object by
+  object again as Build hangs a follower (`matrix_parent_inverse =
+  matrix.inverted_safe()`, then the world matrix) and keeps the old inverse in its
+  record, which `put_back` restores: Apply left the child an inverse that did not cancel
+  a non-uniform scale, and the child came out sheared. What `catch_up` did is said
+  through `HEARD` and the `mentioning` decorators on the operators' `execute` (and
+  `invoke` of the two dialogs): the outermost operator appends it to the rig's report
+  when it is done, so no report written after it loses it. Blender counts the arguments
+  of what it registers, hence two decorators.
+- **The marks are kept current (0.19.1):** `retake_marks(data, meshes=None)` takes new
+  marks for every object part that stands exactly on its Before (`hand_moved` says so)
+  and whose marks no longer fit (`marks_fit`: readable, and where they were); `catch_up`
+  runs it before `take_back_reframed`, and `marks_handler` (a second persistent
+  depsgraph handler, registered and taken down like `follow_renames_handler`) runs it
+  for the parts whose object uses a Mesh that is among `depsgraph.updates` (the ids
+  there are evaluated: `.original`). It acts only for a Mesh, waits for Edit Mode to be
+  left, writes only when a mark moved, never raises. A model moved as a whole that no
+  button has caught up yet: `moved_since(rig, data)` is how far, and `retake_marks`,
+  `marks_fit` and `hand_moved` take it as `shift` (a part stands on its Before if it
+  stands where the move carries that to; marks are taken at the Before it still holds
+  and are carried with it later). One case cannot be told and is not mended: a mark
+  edited while the part is already off its frame (Set Origin, then, before any button,
+  an edit of one of the three vertices, or a whole-mesh edit) looks like a drag.
+  Headless `frame_set` does not call the handler at all (4.5.14, 5.0.1, 5.2.1), and
+  driving the slider lists an Armature and Objects, never a Mesh (not checked: animation
+  that changes a Mesh itself, shape keys say, might list it in a real window; the
+  handler's work per part is then three vertex reads).
 - **Which object a part is (0.19):** a part points at its object (`part.object`) as well
   as naming it. `part_object(part)` is the one lookup, used wherever a part's object is
   wanted (never `bpy.data.objects.get(part.name)`): the pointer, unless the object is
@@ -283,10 +349,9 @@ Features, in the order the user asked for them:
   5.2 and 4.5: a rig duplicated with its parts has its pointers re-pointed to the
   copies (Shift+D and Alt+D alike); duplicated alone it still points at the originals.
   The pointer is an ID user, so an object deleted with X is not freed (no collection,
-  one user, its name kept): `part_object` treats an object in no collection as gone, and
-  `let_go_of_deleted` clears the pointer and removes the object if nothing else uses
-  it, from `catch_up` and from a timer the handler sets (never in the handler, which
-  must not take things out of the file). The rig is a user of every part's object, so
+  one user, its name kept): `let_go_of_deleted` lets go of it, from `catch_up` and from
+  a timer the handler sets (never in the handler, which must not take things out of the
+  file); see **A deleted part (0.19.1)**. The rig is a user of every part's object, so
   `take_back_reframed` leaves it out of `user_map`. `own_actions` (in `catch_up`): a
   move whose Action another rig plays through its constraints takes a copy named
   "<Action> <rig>", and this rig's constraints are pointed at it.
@@ -314,6 +379,58 @@ Features, in the order the user asked for them:
   hand-built rig still compose, one move over another. `doubled(data)` finds an object
   that is the object of two parts (a file from before): `bind_loose` and `heal_bindings`
   leave it alone, and Build reports it.
+- **A deleted part (0.19.1):** `let_go_of_deleted` (a timer's `let_deleted_go` and every
+  `catch_up`) lets go of an object in no collection: it first hangs what hung from it
+  from what it hung from (`free_children`, `keep_world`: Blender frees an object's
+  children without keeping them where they stand, which a loose follower shows - a bound
+  one is on its Before anyway), clears the part's pointer, marks the part `gone`, and
+  removes the object if nothing else holds it. `part_object` answers None for a `gone`
+  part before any fallback: its name may be a new object's. `catch_up` then runs
+  `take_out_gone`: a gone part is taken out of its move by `take_riders_out` (any part
+  can be), the parts that follow it get `follows` and `follows_kept` "" written straight
+  in and `hang`, and HEARD says it. A gone part stays - renamed `name + DELETED` through
+  `rename_parts`, which `follow_renames` shares - when a rider has it as `leader` or
+  `rides_on`: its bone plays what they copy and carries them (taken out, Blender hangs
+  the tip of a copied finger from the original's middle joint). It goes at the catch-up
+  after its last rider. A button that names a part by its place in the list
+  (`drop_rider`, `set_mirror`, `drop_curve`) keeps it with `part_held` and finds it with
+  `part_again` after `catch_up`, which takes parts out of the list. `Remove` takes the
+  bone of a part whose object is gone too, and `_follows_changed` turns down a `gone`
+  part as a target. A part that vanished without passing through the pointer (an older
+  file; `bpy.data.objects.remove`) is not marked gone: it stays, and Ring names it ("was
+  deleted"). Tests: `TestADeletedPartLeavesItsMove`,
+  `TestANewObjectTakesTheNameOfADeletedPart`.
+- **Standing by users (0.19.1):** `part_object` counts the object a part points at as
+  standing when it has more than one user (the pointer is one, each collection another),
+  not by `users_collection`, which looks through every collection in the file; an object
+  held by two pointers and in no collection reads as standing there, and
+  `let_go_of_deleted` asks the exact question at every button. The scan for an object
+  bound by the part's group asks `type`, the group and `bound_to` before the
+  collections. `follow_renames_handler` is one pass over the parts' pointers, names and
+  users, asks `follow_renames` only when a name differs and sets the timer only when an
+  object has one user (the part's `object`, or `home_object`). `TestABigSceneStaysQuick`
+  times it with the processor's time and wide limits (30 ms, 150 ms; it was 140 ms and
+  1 s with a part deleted).
+- **A copy of a whole model owns what it edits (0.19.1):** `catch_up` runs
+  `own_armature` (a rig whose Armature has more users than itself, a fake user not
+  counted, and is not linked: `rig.data = armature.copy()`, named like an Action's copy;
+  the pose, constraints, drivers and custom properties find their bones by name) and
+  `own_curves` (a part whose `path_curve` is another rig's gets a copy of the object and
+  its curve data into the same collections; a move whose `paths_object` is another rig's
+  lets go of it) after `own_actions` and before the carry, which then takes the copied
+  curve along with the model. Nothing else points at a curve but the part.
+  `unbind_object` makes a shared mesh the object's own before it removes the group (the
+  groups live on the mesh). `TestAnAltDCopyOfAWholeModelIsAModelOfItsOwn`,
+  `TestACopyOfAWholeModelHasPathCurvesOfItsOwn`.
+- **The object a part hung from (0.19.1):** `Part.home_object` holds it by pointer
+  beside the name `home_parent` (`remember_home`); `home_of(part)` is the one lookup
+  (`unhang`, `unbind_object`): the pointer while it is in a scene, the name only when
+  there is no pointer (a file from before). A deleted one is let go of by
+  `let_go_of_deleted` like a part's object, and `home_parent` is marked `name + DELETED`
+  so a new object given the name is not taken for it. `Remove` says what it could not
+  give back. NLA: `clip_strips(strips, muted=False)`; `own_action` counts the object's
+  own strips, muted and in meta strips, as users (`muted=True`); `moved_by_nla` counts a
+  muted strip on a track that plays.
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in
@@ -434,8 +551,9 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     ringed alone and its copies hang from the hub's bone (`rider_holder`); a copy of
     a middle joint hangs from the joint above it.
   - Copies are numbered from 2 past every name in use, objects *and* parts of every
-    rig (`names_in_use`): the parts of deleted copies stay in the move, and a new
-    object under such a name is "already known" to `newcomers` and was never
+    rig (`names_in_use`): the parts of deleted copies are taken out of the move at the
+    next button (0.19.1; a part kept as "(deleted)" keeps its name), and before that a
+    new object under such a name was "already known" to `newcomers` and was never
     bound. A place already holding a rider of the part (its object still there) is
     skipped. After `ride_along` every copy must be a rider of the joint it was
     copied from, or `take_riders_out` (the part of `drop_rider` that unbinds and
