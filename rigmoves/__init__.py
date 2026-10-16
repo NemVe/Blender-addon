@@ -6807,6 +6807,13 @@ def reframe_blocker(obj, where, rig, users):
         if not (isinstance(user, bpy.types.Object) and user.parent is obj
                 and user.parent_type == "OBJECT"):
             return "'{:s}' depends on it".format(short(user.name, 14))
+        # A child hung by the object is held where it is by rewriting its own
+        # transform - and keys, a driver or an NLA strip rewrite it again on the
+        # next frame, from the new frame it would now hang from: the bee on the
+        # petal flew off.
+        if has_own_motion(user):
+            return "has a child with keys or drivers of its own ('{:s}')".format(
+                short(user.name, 14))
     plain = all(abs(abs(s) - 1.0) < 1e-4
                 for s in list(obj.matrix_world.to_scale()) + list(where.to_scale()))
     for modifier in obj.modifiers:

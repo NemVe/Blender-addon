@@ -6004,6 +6004,128 @@ class TestSharedActions(CopyThatCase):
         self.assertIn("3 stray keyframe track(s) on the parts", rig().rigmoves.report)
 
 
+class TestRingAnimatedChild(RingFlows):
+    """Eight petals modelled in place, with every origin left at the world's
+    origin - the most ordinary way to model them - and something hung from the
+    petals. Ring stands the petals on their frames, and holds what hangs from
+    them where it is by rewriting its own transform: not an animated child,
+    which its own keys, drivers or NLA strips rewrite on the next frame."""
+
+    def modelled_flower(self):
+        shape = prism("Petal Shape", 4, 0.15, 1.0)
+        self.petals = []
+        for k in range(8):
+            mesh = shape.copy()
+            mesh.transform(self.turn(k) @ self.base)
+            self.petals.append(stood("Petal" if not k else "Petal {:d}".format(k + 1),
+                                     mesh, Matrix.Identity(4)))
+        bpy.context.view_layer.update()
+        self.leader = self.petals[0]
+
+    def hang(self, name, petal):
+        """A small object parented to a petal with Ctrl+P > Object."""
+        kid = stood(name, prism(name + " Shape", 3, 0.03, 0.05), Matrix.Translation((0.0, 0.0, 0.0)))
+        select(kid, petal)
+        bpy.context.view_layer.objects.active = petal
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=False),
+                         {"FINISHED"})
+        return kid
+
+    def key_a_flight(self, kid):
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        kid.keyframe_insert("location", frame=1)
+        kid.location.x += 0.3
+        kid.location.z += 0.2
+        kid.keyframe_insert("location", frame=10)
+        kid.location.x -= 0.3
+        kid.location.z -= 0.2
+        scene.frame_set(1)
+
+    def worked_by_a_driver(self, kid):
+        curve = kid.driver_add("location", 2)
+        curve.driver.type = "SCRIPTED"
+        curve.driver.expression = "0.1 * frame"
+
+    def worked_by_the_nla(self, kid):
+        self.key_a_flight(kid)
+        action = kid.animation_data.action
+        kid.animation_data.nla_tracks.new().strips.new("Flight", 1, action)
+        kid.animation_data.action = None
+
+    def seen_at(self, kids, frames=(1, 10)):
+        out = {}
+        for frame in frames:
+            bpy.context.scene.frame_set(frame)
+            out[frame] = {kid.name: world_points(kid) for kid in kids}
+        bpy.context.scene.frame_set(1)
+        return out
+
+    def ring_it(self, **kwargs):
+        self.record_after(self.leader, turned=60.0)
+        return self.ring(self.leader, **kwargs)
+
+    def check_the_bee(self, how):
+        self.modelled_flower()
+        bee = self.hang("Bee", self.petals[3])
+        how(bee)
+        dew = self.hang("Dewdrop", self.petals[2])
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        was = self.seen_at([bee, dew])
+        self.assertEqual(self.ring_it(), {"FINISHED"})
+        # Petal 4 is left where it stands, and named, with the reason.
+        self.assertNotIn("Petal 4", self.riders())
+        self.assertEqual(len(self.riders()), 6)
+        self.assertIn("'Petal 4' cannot be re-framed safely (has a child with keys or "
+                      "drivers of its own ('Bee'))", self.report())
+        # The bee plays exactly as before. So does the dewdrop, that is held
+        # where it hung by the petal that was re-framed.
+        now = self.seen_at([bee, dew])
+        for frame in (1, 10):
+            for kid in (bee, dew):
+                self.assertLess(drift_of(now[frame][kid.name], was[frame][kid.name]), 1e-5,
+                                (kid.name, frame))
+        # The leader's frame is the world's, so a petal's is its place's turn.
+        self.assertIn("Petal 3", self.riders())
+        self.assertTrue(same_matrix_of(self.petals[2].matrix_world, self.turn(2)))
+
+    def test_a_petal_with_a_keyed_child_is_left_out_and_the_child_plays_as_before(self):
+        self.check_the_bee(self.key_a_flight)
+
+    def test_a_petal_with_a_child_driven_by_a_driver_is_left_out_too(self):
+        self.check_the_bee(self.worked_by_a_driver)
+
+    def test_a_petal_with_a_child_in_the_nla_is_left_out_too(self):
+        self.check_the_bee(self.worked_by_the_nla)
+
+    def test_a_child_that_is_not_animated_is_still_held_where_it_is(self):
+        self.modelled_flower()
+        dew = self.hang("Dewdrop", self.petals[3])
+        bpy.context.view_layer.update()
+        was = world_points(dew)
+        self.assertEqual(self.ring_it(), {"FINISHED"})
+        self.assertEqual(len(self.riders()), 7)
+        self.assertNotIn("child with keys", self.report())
+        self.assertLess(drift_of(world_points(dew), was), 1e-5)
+
+    def test_without_the_blocker_the_keyed_bee_would_fly_off(self):
+        # What happens to a keyed child of a petal that is re-framed anyway:
+        # the fault the blocker keeps away, to show the others test something.
+        self.modelled_flower()
+        bee = self.hang("Bee", self.petals[3])
+        self.key_a_flight(bee)
+        was = self.seen_at([bee])
+        with mock.patch.object(rigmoves, "has_own_motion", lambda obj: False):
+            self.assertEqual(self.ring_it(), {"FINISHED"})
+        self.assertGreater(drift_of(self.seen_at([bee])[10]["Bee"], was[10]["Bee"]), 0.1)
+
+
+def drift_of(points, expected):
+    """How far the furthest of these points is from the same one of the others."""
+    return max((a - b).length for a, b in zip(points, expected))
+
+
 class TestCombined(CopyThatCase):
 
     def test_combined_control_plays_members_in_order(self):

@@ -361,7 +361,9 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     place first and only says "off the ring" when it is.
     Before any change `reframe_blocker` refuses constraints, instancing, particles,
     a vertex/bone parent, any dependent in `bpy.data.user_map` but an OBJECT-parented
-    child, modifiers except Subsurf/Triangulate/Edge Split/Weighted Normal/an
+    child (and that child must have no `has_own_motion`: its keys, driver or NLA
+    would rewrite the transform `reframe` holds it by - "has a child with keys or
+    drivers of its own ('Bee')"), modifiers except Subsurf/Triangulate/Edge Split/Weighted Normal/an
     Armature of another rig (Bevel/Solidify only when both scales are 1), and a
     mirrored frame with custom normals. Then `reframe` (a NEW mesh from `old.copy()`
     is transformed - exact rollback by swapping `old` back, `put_back`; `settle`

@@ -228,7 +228,9 @@ else is left exactly as it is, and the report says why:
   **not** re-framed if it has constraints, instances other objects, has
   particles, hangs from a vertex or a bone, has another object depending on it
   (a Child Of, a Shrinkwrap target, a modifier's target, a child hung from its
-  vertices - only a child hung by the object is held in place), has a modifier
+  vertices - only a child hung by the object is held in place, and not one with
+  keys, a driver or an NLA strip of its own, which would throw it off on the next
+  frame), has a modifier
   that reads its frame (anything but Subdivision, Triangulate, Edge Split,
   Weighted Normal or an Armature of another rig; Bevel and Solidify only at a
   scale of 1, before and after), or is mirrored and has custom normals. Textures
@@ -1241,6 +1243,13 @@ and one lifted 1 m:
   itself plays are looked at, lifted and counted, and an action another object plays
   too is copied for the part first, so the keys come out of the copy: the others keep
   theirs exactly. **Lift Those Keyframes** does the same.
+- **A bee on a petal that Ring re-framed flew off.** Ring stands a petal on its frame
+  and holds what hangs from it where it is by rewriting the child's own transform,
+  which the child's own keys, drivers or NLA strips rewrite again on the next
+  frame, from the petal's new frame: a keyed bee was half a unit off by frame 10. A
+  petal with a child like that is now left out, and named: "'Petal 4' cannot be
+  re-framed safely (has a child with keys or drivers of its own ('Bee'))". A child
+  with nothing of its own is held where it is, as before.
 
 ## Known rough edges
 
