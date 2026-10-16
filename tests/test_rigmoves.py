@@ -6369,6 +6369,69 @@ class TestOneObjectOneMove(ChestCase):
         self.check_lid()
 
 
+class TestACopyAddedToAMove(ChestCase):
+    """A Shift+D or Alt+D copy of a built part carries its vertex group and its
+    Armature modifier, which is how Blender copies a rigged mesh: it swings
+    about the original's hinge until it is bound to a bone of its own. Added to
+    the move with Add To This Group, the eye on After then showed it seven
+    metres from where it stands, and an After posed by that eye played
+    somewhere else."""
+
+    OFF = Matrix.Translation((4.0, 0.0, 0.0))
+
+    def copy_of_the_lid(self, linked=False):
+        select(self.lid)
+        self.assertEqual(bpy.ops.object.duplicate(linked=linked), {"FINISHED"})
+        copy = bpy.context.view_layer.objects.active
+        copy.matrix_world = self.OFF @ copy.matrix_world
+        bpy.context.view_layer.update()
+        return copy
+
+    def test_the_eye_shows_the_copy_where_it_stands_and_an_after_posed_by_it_plays_there(self):
+        copy = self.copy_of_the_lid()
+        copy_home = copy.matrix_world.copy()
+        select(copy, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertEqual([g.name for g in copy.vertex_groups], [])
+        self.assertEqual([m.type for m in copy.modifiers], [])
+        self.assertEqual(bpy.ops.rigmoves.show(index=0, which="AFTER"), {"FINISHED"})
+        self.assertLess(drift(copy, rest_points(copy)), TOLERANCE)
+        # Dragged until it looks right on screen, and recorded.
+        wanted = turn_about(self.OFF @ self.hinge, "X", -45.0) @ copy_home
+        copy.matrix_world = wanted
+        bpy.context.view_layer.update()
+        self.assertLess(drift(copy, [wanted @ v.co for v in copy.data.vertices]), TOLERANCE)
+        select(copy)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        drive(self.move, 1.0)
+        self.assertLess(drift(copy, [wanted @ v.co for v in copy.data.vertices]), TOLERANCE)
+
+    def test_an_alt_d_copy_is_freed_without_taking_the_original_s_binding(self):
+        # Its mesh is the original's, and the groups live on the mesh.
+        copy = self.copy_of_the_lid(linked=True)
+        self.assertIs(copy.data, self.lid.data)
+        select(copy, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.assertIsNot(copy.data, self.lid.data)
+        self.assertEqual([g.name for g in copy.vertex_groups], [])
+        self.assertEqual([g.name for g in self.lid.vertex_groups], ["Lid"])
+        # The sliders were paused for the newcomer: Build puts them back.
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual([g.name for g in self.lid.vertex_groups], ["Lid"])
+        self.check_lid()
+
+    def test_a_copy_started_as_a_move_of_its_own_stands_still_too(self):
+        copy = self.copy_of_the_lid()
+        drive(self.move, 1.0)
+        select(copy)
+        self.assertEqual(bpy.ops.rigmoves.new_move(fresh=True), {"FINISHED"})
+        self.assertEqual([g.name for g in copy.vertex_groups], [])
+        self.assertLess(drift(copy, rest_points(copy)), TOLERANCE)
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):

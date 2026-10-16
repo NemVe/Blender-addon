@@ -147,6 +147,12 @@ the object belongs:
 The group the selection points at is offered first and large. Every other
 group on every rig in view is listed underneath, for when it is not.
 
+A copy of a built part, made with Shift+D or Alt+D, comes into a move free of the
+original's binding, so it stands where it is, and the eye shows it there: Blender
+copies a rigged mesh with its group and modifier, which swing it about the
+original's hinge until it has a bone of its own. (A copy never added to a move still
+swings with the original: that is how Blender copies it.)
+
 An object is in one move only, because it is bound to one bone. New Move, Add To
 This Group and Ride Along leave out any object that is a part of a move already,
 and say so by name; with nothing left to take, they refuse and change nothing. For
@@ -1287,6 +1293,11 @@ and one lifted 1 m:
   right, which was not so. An object is in one move now: New Move, Add To This Group and
   Ride Along leave out what is in one, say so, and refuse if nothing is left. Build
   reports an object that a file already has in two moves, and leaves it alone.
+- **A copy of a built part, added to its move, was drawn swung about the original's
+  hinge.** Shift+D a built door, move the copy, Add To This Group, the eye beside After:
+  the copy was drawn seven metres from where it stands, and an After posed by that eye
+  played somewhere else. An object that joins a move is taken off what bound it to
+  another part first, so it stands still where it is.
 
 ## Known rough edges
 

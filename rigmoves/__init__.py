@@ -2414,6 +2414,47 @@ def own_binding(rig, obj, keep):
     return len(stale)
 
 
+def set_free(obj):
+    """Take off an object what binds it to a part it is not, so it stands still
+    where it is. Returns whether anything was taken off.
+
+    Blender copies the binding with the object: a Shift+D copy of a built part
+    has its vertex group and its Armature modifier, so it is swung about the
+    original's hinge wherever it is - which is how Blender copies a rigged
+    mesh, and no fault of the copy's. Brought into a move it would be drawn
+    there too, the eye on After would show it seven metres from where it
+    stands, and an After posed by that eye would play somewhere else.
+
+    The groups named after any rig's bones, and the Armature modifiers this
+    add-on made that point at any of its rigs (or at nothing). The mesh is made
+    the object's own first if it is shared, as an Alt+D copy's is: its groups
+    are the original's too.
+    """
+    # What a part of a move is bound by is its own, and stays.
+    if obj in objects_in_moves():
+        return False
+    rigs = [o for o in bpy.data.objects if o.type == "ARMATURE" and len(o.rigmoves.moves)]
+    stale = []
+    for owner in rigs:
+        stale.extend(name for name in copied_groups(owner, obj, None) if name not in stale)
+    foreign = [m for m in obj.modifiers
+               if m.type == "ARMATURE" and m.name.startswith("RigMoves")
+               and (m.object is None or m.object in rigs)]
+    if not (stale or foreign):
+        return False
+    if (obj.type == "MESH" and obj.data is not None
+            and obj.data.users - int(obj.data.use_fake_user) > 1):
+        obj.data = obj.data.copy()
+    for name in stale:
+        obj.vertex_groups.remove(obj.vertex_groups[name])
+    for modifier in foreign:
+        obj.modifiers.remove(modifier)
+    if obj.type == "MESH" and obj.data is not None:
+        obj.data.update_tag()
+    obj.update_tag()
+    return True
+
+
 def heal_bindings(rig, data, leave=()):
     """Every bound object moved by its own bone only - for files bound before
     copies were looked out for. Returns how many were being moved by another
@@ -4729,6 +4770,7 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
         for pose_bone in chosen_bones:
             move.parts.add().name = pose_bone.name
         for obj in chosen_objects:
+            set_free(obj)
             part = move.parts.add()
             part.name = obj.name
             part.kind = "OBJECT"
@@ -4934,6 +4976,7 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
         # they go quiet while the newcomers are measured.
         set_paused(rig, data, True)
         for obj in fresh:
+            set_free(obj)
             part = move.parts.add()
             part.name = obj.name
             part.kind = "OBJECT"
@@ -5070,6 +5113,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
         # Where each stands now is the place it copies the move from. That is
         # all there is to record: the path itself is the leader's.
         for obj, joint, rides in joining:
+            set_free(obj)
             part = move.parts.add()
             part.name = obj.name
             part.kind = "OBJECT"

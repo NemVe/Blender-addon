@@ -272,6 +272,13 @@ Features, in the order the user asked for them:
   `take_back_reframed` leaves it out of `user_map`. `own_actions` (in `catch_up`): a
   move whose Action another rig plays through its constraints takes a copy named
   "<Action> <rig>", and this rig's constraints are pointed at it.
+- **A copy joins a move free (0.19):** Blender copies a rigged mesh with its vertex group
+  and its Armature modifier, so a Shift+D or Alt+D copy of a bound part swings about the
+  original's bone. `set_free(obj)`, run by New Move, Add To This Group and Ride Along on
+  each object they take in, takes off the groups named after any rig's marked bones and
+  this add-on's Armature modifiers that point at one of its rigs (the mesh made single-user
+  first when it is shared, as an Alt+D copy's is: the groups live on the mesh, and they
+  are the original's too). The parent is left; the object stands still where it is.
 - **One object, one move (0.19):** an object is bound to one bone (`own_binding` takes
   every other part's group off it), so a second move on it left it moved by neither.
   `moves_holding(context, objects)` says which objects are a part of a move of a rig
