@@ -1176,6 +1176,12 @@ class RIGMOVES_Rig(bpy.types.PropertyGroup):
     kept_action: bpy.props.StringProperty()
     kept_slot: bpy.props.StringProperty()
     kept_range: bpy.props.IntVectorProperty(size=3, default=(1, 250, 1))
+    # Where the rig stood when the world matrices a move keeps - every part's
+    # Before and After - were last true. The rig and its parts can be moved
+    # as a whole after that, and catch_up carries what is kept by however far
+    # the rig has gone since. False for a rig made before this was kept.
+    seat: bpy.props.FloatVectorProperty(size=16)
+    seated: bpy.props.BoolProperty(default=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1611,6 +1617,80 @@ def reseat_bound(data, move=None):
     return count
 
 
+def curve_start(obj):
+    """Where a path curve begins, in the world."""
+    spline = obj.data.splines[0]
+    first = (spline.bezier_points[0].co if spline.type == "BEZIER"
+             else Vector(spline.points[0].co[:3]))
+    return obj.matrix_world @ first
+
+
+def carry_stored(data, shift):
+    """Carry every world matrix a rig remembers by `shift`, a matrix.
+
+    A part's Before and After are where its object stood in the world, and
+    the rig and everything bound to it move as one: when the whole model is
+    moved, or the rig is parented to something that is, they are moved by the
+    same amount. A bone's own pose is in the rig's space and goes with the rig
+    by itself, so only objects have anything to carry. A path curve is an
+    object of its own, which comes along only if it was moved with the rest;
+    it is told by its start, which every Build pins to the pivot at Before.
+    """
+    for move in data.moves:
+        for part in move.parts:
+            if part.kind != "OBJECT":
+                continue
+            curve = part.path_curve
+            if part.has_before and curve_alive(curve):
+                pivot = as_matrix(part.before) @ Vector(part.pivot)
+                slack = 1e-4 * (1.0 + max(abs(c) for c in pivot))
+                if ((curve_start(curve) - pivot).length <= slack
+                        and (shift @ pivot - pivot).length > slack):
+                    curve.matrix_world = shift @ curve.matrix_world
+            if part.has_before:
+                part.before = flat(shift @ as_matrix(part.before))
+            if part.has_after:
+                part.after = flat(shift @ as_matrix(part.after))
+
+
+def catch_up(rig, data=None):
+    """Bring what a rig remembers of where its parts stand into step with
+    where the rig stands now. Run first by every operator that reads or writes
+    it; never from drawing, where nothing may be written.
+
+    Returns a sentence saying why the operator must not go on, or "".
+
+    Every part's Before and After are world matrices, true for as long as the
+    rig stood where it did when they were taken. Move the rig - on its own,
+    with everything selected, or by parenting it to a hand and moving the
+    hand - and the parts go with it, but what is remembered stayed behind: a
+    Build then put every part back where the model used to be.
+    """
+    data = rig.rigmoves if data is None else data
+    bpy.context.view_layer.update()
+    now = rig.matrix_world.copy()
+    if not data.seated:
+        # A new rig, or one from before this was kept: it stands where it
+        # stands, and what it remembers is taken to be true of that.
+        data.seat, data.seated = flat(now), True
+        return ""
+    shift = now @ as_matrix(data.seat).inverted_safe()
+    if not same_matrix(shift, Matrix.Identity(4), 1e-6):
+        carry_stored(data, shift)
+        data.seat = flat(now)
+    return ""
+
+
+def ready(operator, rig, data):
+    """Catch a rig up, and say why if the operator may not go on."""
+    refusal = catch_up(rig, data)
+    if not refusal:
+        return True
+    data.report = refusal
+    operator.report({"WARNING"}, refusal)
+    return False
+
+
 def chain_parts(move):
     """The parts that can follow and be followed: objects, riders aside."""
     return [p for p in move.parts if p.kind == "OBJECT" and not p.leader]
@@ -1788,6 +1868,8 @@ def ensure_rig(context, chosen, force_new=False):
     root.use_deform = False
     bpy.ops.object.mode_set(mode="OBJECT")
     context.scene.rigmoves_rig = rig
+    rig.rigmoves.seat = flat(rig.matrix_world)
+    rig.rigmoves.seated = True
     return rig
 
 
@@ -1856,6 +1938,10 @@ def seat_rig(rig, data=None):
     for child, world in held:
         child.matrix_parent_inverse = rig.matrix_world.inverted_safe()
         child.matrix_world = world
+    # Moved on purpose, with every child held where it stood: nothing a move
+    # remembers has gone anywhere, so this is where the rig stands now.
+    rig.rigmoves.seat = flat(rig.matrix_world)
+    rig.rigmoves.seated = True
     if was_mode != "OBJECT":
         try:
             bpy.ops.object.mode_set(mode=was_mode)
@@ -4190,6 +4276,8 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
         if rig is None:
             return {"CANCELLED"}
         data = rig.rigmoves
+        if not ready(self, rig, data):
+            return {"CANCELLED"}
         move = data.moves.add()
         move.name = "Move {:d}".format(len(data.moves))
         move.prop = unique_prop_name(rig, move, safe_prop_name(move.name))
@@ -4342,6 +4430,8 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
         move = data.moves[self.index]
+        if not ready(self, rig, data):
+            return {"CANCELLED"}
         fresh = newcomers(context, rig)
         if not fresh:
             data.report = "Nothing selected that is not already in this rig."
@@ -4430,6 +4520,8 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
         move = data.moves[self.index]
+        if not ready(self, rig, data):
+            return {"CANCELLED"}
         leader = move.parts.get(self.leader)
         if leader is None or leader.leader or leader.kind != "OBJECT":
             return {"CANCELLED"}
@@ -4543,7 +4635,7 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
-        if not keeps_drags(self, data):
+        if not ready(self, rig, data) or not keeps_drags(self, data):
             return {"CANCELLED"}
         # A copied finger mirrors as one, by the setting on its first joint.
         rider = copy_root(move, move.parts[self.part])
@@ -4611,6 +4703,7 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
         move = data.moves[self.index]
         if not 0 <= self.part < len(move.parts) or not move.parts[self.part].leader:
             return {"CANCELLED"}
+        catch_up(rig, data)
         if not keeps_drags(self, data):
             return {"CANCELLED"}
         # The joints riding on it go with it: left behind they would hang
@@ -4696,6 +4789,8 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
         if not here(context, rig):
             return {"CANCELLED"}
         data = rig.rigmoves
+        if not ready(self, rig, data):
+            return {"CANCELLED"}
         objects, bones, still_keyed = clear_autokey(
             rig, data, context.scene.tool_settings.use_keyframe_insert_auto)
         if not (objects or bones):
@@ -4735,6 +4830,7 @@ class RIGMOVES_OT_use_selected(bpy.types.Operator):
         rig = rig_of(context)
         data = rig.rigmoves
         move = data.moves[self.index]
+        catch_up(rig, data)
         taken = [b.name for b in context.selected_pose_bones]
         # Objects going out of the move come off what they were hung from to
         # follow; bones never were.
@@ -4779,6 +4875,8 @@ class RIGMOVES_OT_record(bpy.types.Operator):
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
         move = data.moves[self.index]
+        if not ready(self, rig, data):
+            return {"CANCELLED"}
         if not len(move.parts):
             data.report = "'{:s}': no parts yet.".format(move.name)
             self.report({"WARNING"}, data.report)
@@ -5009,6 +5107,8 @@ class RIGMOVES_OT_show(bpy.types.Operator):
         rig = rig_of(context)
         data = rig.rigmoves
         move = data.moves[self.index]
+        if not ready(self, rig, data):
+            return {"CANCELLED"}
         set_paused(rig, data, True)
         # Anything dragged since the build is standing off its rest, so the
         # pose would be shown measured from the wrong place.
@@ -5108,6 +5208,8 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             return {"CANCELLED"}
         data = rig.rigmoves
         if not len(data.moves):
+            return {"CANCELLED"}
+        if not ready(self, rig, data):
             return {"CANCELLED"}
 
         # Loose objects first: each gets a bone, gets bound to it, and has its
@@ -5369,13 +5471,19 @@ def keeps_drags(operator, data):
     return False
 
 
-def move_at(context, index):
-    """(rig, data, move) for a move index on the rig in front of the user."""
+def move_at(context, index, operator=None):
+    """(rig, data, move) for a move index on the rig in front of the user.
+
+    Given the operator that asks, it also catches the rig up first, and the
+    move is None, with the reason said, when the operator must not go on.
+    """
     rig = rig_of(context)
     if not here(context, rig):
         return None, None, None
     data = rig.rigmoves
     if not 0 <= index < len(data.moves):
+        return rig, data, None
+    if operator is not None and not ready(operator, rig, data):
         return rig, data, None
     return rig, data, data.moves[index]
 
@@ -5391,7 +5499,7 @@ class RIGMOVES_OT_set_pivot(bpy.types.Operator):
     kind: bpy.props.EnumProperty(items=PIVOTS, default="ORIGIN")
 
     def execute(self, context):
-        rig, data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index, self)
         if move is None:
             return {"CANCELLED"}
         parts = [p for p in chosen_parts(context, move) if p.has_before]
@@ -5439,7 +5547,7 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
     index: bpy.props.IntProperty()
 
     def execute(self, context):
-        rig, data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index, self)
         if move is None:
             return {"CANCELLED"}
         chosen = chosen_parts(context, move)
@@ -5524,7 +5632,7 @@ class RIGMOVES_OT_drop_curve(bpy.types.Operator):
     part: bpy.props.IntProperty()
 
     def execute(self, context):
-        _rig, data, move = move_at(context, self.index)
+        _rig, data, move = move_at(context, self.index, self)
         if move is None or not 0 <= self.part < len(move.parts):
             return {"CANCELLED"}
         if not keeps_drags(self, data):
@@ -5556,7 +5664,7 @@ class RIGMOVES_OT_show_paths(bpy.types.Operator):
     show: bpy.props.BoolProperty(default=True)
 
     def execute(self, context):
-        rig, data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index, self)
         if move is None:
             return {"CANCELLED"}
         move.show_paths = self.show
@@ -5650,7 +5758,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
 
     def plan(self, context):
         """(rig, data, move, groups) - or None, with the reason said."""
-        rig, data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index, self)
         if move is None:
             return None
         groups = spread_groups(context, move, self.what, self.only_selected)
@@ -5858,7 +5966,7 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
         return {"CANCELLED"}
 
     def execute(self, context):
-        rig, data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index, self)
         if move is None:
             return {"CANCELLED"}
         chosen = {o.name for o in context.selected_objects}
@@ -6045,7 +6153,7 @@ class RIGMOVES_OT_curl(bpy.types.Operator):
         return {"CANCELLED"}
 
     def execute(self, context):
-        rig, data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index, self)
         if move is None:
             return {"CANCELLED"}
         active = context.view_layer.objects.active
@@ -6879,7 +6987,7 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
         does. A finger's first joint is the whole finger, and Ride Along takes
         the copies joint for joint.
         """
-        rig, data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index, self)
         if move is None:
             return None
         active = context.view_layer.objects.active
@@ -7371,6 +7479,9 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
         move = data.moves[self.index]
+        # Never held up by what it is taking out: whatever is wrong with a part
+        # is no reason to keep it.
+        catch_up(rig, data)
         gone = []
         for pose_bone, constraint in our_constraints(rig, move):
             pose_bone.constraints.remove(constraint)

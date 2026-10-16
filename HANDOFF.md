@@ -215,6 +215,21 @@ Features, in the order the user asked for them:
   and dead "RigMoves" Armature modifiers. `bind_object` calls it, and
   `heal_bindings` runs at the end of every Build, after every bone exists - a
   stale group only starts to pull when a bone of its name is made.
+- **Moving the whole model (0.19):** every Before and After is a world matrix, true
+  for as long as the rig stood where it did when it was taken, so the rig's data
+  keeps `seat` (the rig's `matrix_world` then, 16 floats) and `seated`.
+  `catch_up(rig, data)` is run first by every operator that reads or writes those
+  matrices - `ready(self, rig, data)` for the ones that may refuse, `move_at(context,
+  index, self)` for the ones that go through a move - and never from drawing, where
+  nothing may be written. `shift = rig.matrix_world @ seat^-1`; unless it is the
+  identity, `carry_stored` puts it on every OBJECT part's `before` and `after` (a bone
+  part keeps rig-space data) and on a part's path curve if that stayed behind (told by
+  its start still being on the old pivot-at-Before), then `seat` is the rig as it is.
+  `seat_rig` and `ensure_rig` set `seat` themselves: they move the rig on purpose with
+  nothing else going anywhere. Not `seated` (a new rig, a file from before): it is
+  only noted. An animated rig is caught up at the current frame. Remove, Use Selected
+  and the `x` on a rider catch up too but never refuse. Loose parts are carried like
+  bound ones: nothing says whether a loose object was moved with the rig.
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in

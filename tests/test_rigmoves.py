@@ -5807,6 +5807,170 @@ class TestNamesBesideControls(CopyThatCase):
             self.assertLessEqual(text_width(row), self.room(280), row)
 
 
+class ChestCase(CopyThatCase):
+    """A chest with a lid hinged on its back edge, built: the lid swings open
+    100 degrees about X. The model the second round of review was made on, and
+    the one the tests of what happens to a finished model are made on."""
+
+    SWING = 100.0
+
+    def setUp(self):
+        super().setUp()
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        self.home = self.lid.matrix_world.copy()
+        self.hinge = Vector((0.0, 0.6, 1.0))
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        bpy.context.scene.cursor.location = self.hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.lid.matrix_world = turn_about(self.hinge, "X", -self.SWING) @ self.home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        # Where the shut lid is, point by point: what every later place of it
+        # is measured from, however its mesh is framed.
+        self.shut = rest_points(self.lid)
+
+    def lid_at(self, share, shift=None, shut=None, hinge=None):
+        """Where the lid should be this far along its move, with the whole
+        model moved by `shift`."""
+        shift = Matrix.Identity(4) if shift is None else shift
+        turn = turn_about(self.hinge if hinge is None else hinge, "X",
+                          -eased(self.SWING, share))
+        return [shift @ turn @ point for point in (self.shut if shut is None else shut)]
+
+    def check_lid(self, shift=None, lid=None, move=None, shut=None, hinge=None,
+                  shares=(0.0, 0.5, 1.0)):
+        """The lid on the recording at both ends and half way."""
+        lid = self.lid if lid is None else lid
+        move = self.move if move is None else move
+        for share in shares:
+            drive(move, share)
+            self.assertLess(drift(lid, self.lid_at(share, shift, shut, hinge)), TOLERANCE,
+                            "{:s} at {:.0%}".format(lid.name, share))
+        drive(move, 0.0)
+
+
+class TestAModelMovedAsAWhole(ChestCase):
+    """A finished model is moved - everything selected and dragged, or the rig
+    parented to a hand and the hand moved - and then Built, or something that
+    Builds is pressed. The parts used to jump back to where the model had
+    been, because every Before and After it remembers is a place in the world."""
+
+    MOVE = Matrix.Translation((5.0, 2.0, 0.0))
+
+    def move_everything(self):
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_a_model_moved_as_a_whole_builds_where_it_now_stands(self):
+        self.move_everything()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(self.MOVE)
+
+    def test_a_rig_parented_to_a_hand_that_is_moved_builds_where_it_now_stands(self):
+        # The guide's own advice for a model that is carried: parent the rig
+        # to what carries it.
+        hand = bpy.data.objects.new("Hand", None)
+        bpy.context.scene.collection.objects.link(hand)
+        bpy.context.view_layer.update()
+        select(hand, rig())
+        self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=True),
+                         {"FINISHED"})
+        hand.location = (5.0, 2.0, 0.0)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(self.MOVE)
+
+    def test_set_pivot_after_the_whole_model_was_moved_is_not_refused(self):
+        self.move_everything()
+        bpy.context.scene.cursor.location = self.MOVE @ self.hinge
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+        self.check_lid(self.MOVE)
+
+    def test_a_ring_and_a_spread_after_the_whole_model_was_moved(self):
+        self.move_everything()
+        centre = self.MOVE @ Vector((0.0, 0.0, 0.0))
+        bpy.context.scene.cursor.location = centre
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.spread(index=0, what="LEAD", by="RANGE",
+                                                 first=0.0, last=-20.0, order="AROUND"),
+                         {"FINISHED"})
+        copies = sorted((o for o in bpy.data.objects if o.name.startswith("Lid ")),
+                        key=lambda o: o.name)
+        self.assertEqual(len(copies), 3)
+        for number, copy in enumerate(copies, start=1):
+            turn = turn_about(centre, "Z", 90.0 * number)
+            for share in (0.0, 1.0):
+                drive(self.move, share)
+                self.assertLess(drift(copy, [turn @ p for p in self.lid_at(share, self.MOVE)]),
+                                TOLERANCE, "{:s} at {:.0%}".format(copy.name, share))
+        # Riders sent behind lengthen the control, so only its ends are the
+        # leader's own.
+        self.check_lid(self.MOVE, shares=(0.0, 1.0))
+
+    def test_the_whole_model_moved_twice_is_still_exact(self):
+        self.move_everything()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move_everything()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(self.MOVE @ self.MOVE)
+
+    def test_a_path_curve_left_behind_comes_along(self):
+        # Made with the lid, bent in edit mode, and not moved with the rest:
+        # a Build pins its ends to the pivot, so a curve left behind would be
+        # dragged out of shape between two places.
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        curve = self.move.parts["Lid"].path_curve
+
+        def starts():
+            return curve.matrix_world @ curve.data.splines[0].bezier_points[0].co
+
+        was = starts()
+        select(rig(), self.lid)
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        # Only the model moved: the curve is an object of its own.
+        self.assertLess((starts() - was).length, 1e-6)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertLess((starts() - self.MOVE @ was).length, 1e-4)
+        self.check_lid(self.MOVE)
+
+    def test_a_rig_animated_along_a_path_is_caught_up_at_the_frame_it_is_at(self):
+        scene = bpy.context.scene
+        scene.frame_set(1)
+        rig().keyframe_insert("location", frame=1)
+        here_ = rig().location.copy()
+        rig().location = here_ + Vector((5.0, 2.0, 0.0))
+        rig().keyframe_insert("location", frame=10)
+        scene.frame_set(10)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(self.MOVE)
+        scene.frame_set(1)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid()
+
+    def test_a_rig_made_before_the_seat_was_kept_takes_where_it_stands_as_it_is(self):
+        # A file from before: nothing remembered of where the rig stood, so
+        # the first catch-up only notes it, and nothing is carried.
+        rig().rigmoves.seated = False
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertTrue(rig().rigmoves.seated)
+        self.check_lid()
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):

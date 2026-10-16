@@ -104,6 +104,17 @@ time after; on a built move the path is re-keyed so every recorded pose -
 Before, After and every step - stays exactly where it was. Riders turn about
 their leader's pivot, carried over to where each one stands.
 
+### Moving the finished model
+
+A built model can be moved as a whole: select everything - the rig and its
+parts - and move, turn or scale it, or parent the rig to a hand, a car, an
+Empty, and move that. Everything recorded goes with it. The next button you
+press - Build, Record, Set Pivot, Ride Along, Ring, Spread - finds the model
+where it now stands, so nothing jumps back and nothing has to be recorded
+again. The rig can be animated too: it is caught up at the frame it is at. Only
+the parts moved *without* the rig, one at a time, are read as a pose to record.
+A curve for a part's path that is left behind is carried along with the rest.
+
 ### Starting the next thing
 
 Select an object the rig has never been told about and the panel says so. What
@@ -1222,6 +1233,14 @@ and one lifted 1 m:
   cut at both ends: seven rows of "…ter Lead…". The name is now cut from the
   front only as far as it has to be, so the number shows, and the header keeps
   its count: "Riding along (7)", not "Riding alon…".
+
+- **A finished model that was moved as a whole jumped back on the next Build.**
+  Select everything and move it five metres, or parent the rig to a hand and
+  move the hand, and the next Build put every part back where the model had
+  stood. Set Pivot, Ride Along, Ring and Mirror refused with "has been moved and
+  not recorded", and doing as that said - Record After - baked the move into the
+  animation. The rig now remembers where it stood, and carries what it recorded
+  along when it has been moved, however it was moved.
 
 ## Known rough edges
 
