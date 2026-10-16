@@ -357,7 +357,9 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     Armature of another rig (Bevel/Solidify only when both scales are 1), and a
     mirrored frame with custom normals. Then `reframe` (a NEW mesh from `old.copy()`
     is transformed - exact rollback by swapping `old` back, `put_back`; `settle`
-    names the new one after the old on success) and one `view_layer.update()`:
+    removes each distinct old mesh ONCE - Alt+D petals share one, found by
+    `as_pointer()` before any removal, never touching a removed datablock - when
+    nothing uses it, and names the new ones after it) and one `view_layer.update()`:
     `look_of` (evaluated world vertices and winding as shown, i.e. times the sign of
     the frame's determinant) must equal the look before to 1e-5 of the part's size,
     and the signed volume of the new mesh must have the leader's sign; otherwise the
@@ -365,6 +367,11 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     gets its faces turned over (`Mesh.transform` does not). Only OBJECT-parented
     children are held in the world: `matrix_world` cannot be solved against a vertex
     parent. The whole thing is inside the operator, so Ctrl+Z restores meshes too.
+    Everything of `execute` after Ride Along is in a `try` (0.19): anything that
+    raises goes through `take_back` - the riders out, `put_back`, the copies
+    discarded - and says "Ring could not be finished: <reason>. Nothing was
+    changed.", because a Python error in an operator leaves what it did with no
+    undo step. `settle` is the last call in it.
     Taken objects and copies share the `told` pairing. `bpy.data.objects.remove`
     leaves `None` in `view_layer.objects` (and in `scene.objects`) until an update:
     `standing_pool` skips them. Not checked (rough edge): materials using Object or

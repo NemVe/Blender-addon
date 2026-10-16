@@ -5681,6 +5681,183 @@ class TestRingTurnedAndMirrored(CopyThatCase):
         self.assertEqual({o.name for o in bpy.data.objects}, before)
 
 
+class RingFlows(CopyThatCase):
+    """What the 0.19 review of Ring found, played the way a person would: the
+    petals, the frames and the cursor are the ones the review used."""
+
+    def setUp(self):
+        super().setUp()
+        bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
+        azimuth = math.radians(-90.0)
+        self.base = (Matrix.Translation((0.4 * math.cos(azimuth), 0.4 * math.sin(azimuth), 1.0))
+                     @ Matrix.Rotation(azimuth, 4, "Z"))
+
+    @staticmethod
+    def turn(number, count=8):
+        return Matrix.Rotation(math.radians(360.0 * number / count), 4, "Z")
+
+    def report(self):
+        return rig().rigmoves.report
+
+    def riders(self):
+        return {p.name: p.lead for p in rig().rigmoves.moves[0].parts if p.leader}
+
+    def record_after(self, leader, turned=50.0, build=False):
+        """New Move on the leader, opened by hand, Record After."""
+        select(leader)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.rest = rest_points(leader)
+        leader.matrix_world = leader.matrix_world @ Matrix.Rotation(math.radians(turned), 4, "X")
+        bpy.context.view_layer.update()
+        self.after = rest_points(leader)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        if build:
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def ring(self, leader, **kwargs):
+        select(leader)
+        kwargs.setdefault("count", 8)
+        return bpy.ops.rigmoves.ring(index=0, **kwargs)
+
+    def what_is_there(self):
+        """Everything a ring could change, to compare before and after: each
+        object's frame, its mesh and where its vertices are, and the meshes
+        there are."""
+        return ({o.name: (o.matrix_world.copy(), o.data.name if o.data else None,
+                          rest_points(o) if o.type == "MESH" else None)
+                 for o in bpy.data.objects},
+                sorted((m.name, m.users) for m in bpy.data.meshes),
+                len(rig().rigmoves.moves[0].parts))
+
+    def assert_as_found(self, was):
+        frames, meshes, parts = self.what_is_there()
+        self.assertEqual(sorted(frames), sorted(was[0]))
+        for name, (matrix, mesh, points) in was[0].items():
+            self.assertTrue(same_matrix_of(frames[name][0], matrix, 1e-6), name)
+            self.assertEqual(frames[name][1], mesh, name)
+            if points is not None:
+                self.assertLess(max((a - b).length for a, b in zip(frames[name][2], points)),
+                                1e-6, name)
+        self.assertEqual(meshes, was[1])
+        self.assertEqual(parts, was[2])
+
+
+class TestRingPetalsSharingOneMesh(RingFlows):
+    """Petals made with Alt+D share one mesh. With Apply Rotation on the leader
+    alone, every one of the seven stands on a frame of its own, and is re-framed
+    to a mesh of its own: the mesh they shared goes once, not once for each."""
+
+    def alt_d_flower(self):
+        mesh = prism("Petal Shape", 4, 0.15, 1.0)
+        self.petal = stood("Petal", mesh,
+                           Matrix.Translation((0.0, -0.4, 1.0))
+                           @ Matrix.Rotation(math.radians(-90.0), 4, "Z")
+                           @ Matrix.Rotation(math.radians(20.0), 4, "Y"))
+        bpy.context.view_layer.update()
+        for k in range(1, 8):
+            select(self.petal)
+            self.assertEqual(bpy.ops.object.duplicate(linked=True), {"FINISHED"})
+            bpy.context.view_layer.objects.active.matrix_world = (
+                self.turn(k) @ self.petal.matrix_world)
+        bpy.context.view_layer.update()
+        self.assertEqual(mesh.users, 8)
+        # Ctrl+A > Rotation: Blender gives the leader a mesh of its own to do it.
+        select(self.petal)
+        self.assertEqual(bpy.ops.object.transform_apply(
+            location=False, rotation=True, scale=False, isolate_users=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(mesh.users, 7)
+        self.record_after(self.petal, build=True)
+        self.others = [bpy.data.objects["Petal.{:03d}".format(k)] for k in range(1, 8)]
+
+    def test_the_ring_finishes_and_each_petal_has_a_mesh_of_its_own(self):
+        self.alt_d_flower()
+        stood_at = {o.name: rest_points(o) for o in self.others}
+        self.assertEqual(self.ring(self.petal, lead_step=-10), {"FINISHED"})
+        self.assertEqual(len(self.riders()), 7)
+        self.assertEqual(sorted(self.riders().values()), [-40, -30, -30, -20, -20, -10, -10])
+        self.assertIn("7 objects re-framed", self.report())
+        self.assertEqual(len({o.data.name for o in self.others}), 7)
+        for petal in self.others:
+            self.assertEqual(petal.data.users, 1, petal.name)
+            self.assertLess(max((a - b).length for a, b in zip(rest_points(petal),
+                                                              stood_at[petal.name])), 1e-5)
+        # The mesh they shared is gone, and nothing is left unused.
+        self.assertEqual([m.name for m in bpy.data.meshes if m.users == 0], [])
+
+    def test_the_petals_then_play_like_the_leader_from_their_own_places(self):
+        self.alt_d_flower()
+        self.assertEqual(self.ring(self.petal), {"FINISHED"})
+        for number, petal in enumerate(self.others, start=1):
+            drive(self.move, 0.0)
+            self.assertLess(drift(petal, [self.turn(number) @ p for p in self.rest]),
+                            TOLERANCE, petal.name)
+            drive(self.move, 1.0)
+            self.assertLess(drift(petal, [self.turn(number) @ p for p in self.after]),
+                            TOLERANCE, petal.name)
+
+    def test_one_undo_takes_the_whole_ring_back(self):
+        self.alt_d_flower()
+        select(self.petal)
+        was = self.what_is_there()
+        undo_push()
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8, lead_step=-10),
+                         {"FINISHED"})
+        undo_push()
+        self.assertEqual(len(self.riders()), 7)
+        undo_once()
+        self.assertEqual(len([p for p in rig().rigmoves.moves[0].parts if p.leader]), 0)
+        self.assert_as_found(was)
+        self.assertEqual(bpy.data.meshes["Petal Shape"].users, 7)
+
+    def test_a_ring_that_fails_at_the_end_puts_everything_back(self):
+        # Whatever goes wrong after Ride Along - here the mesh clean-up - takes
+        # the riders out and puts every petal back as it was found, and says so.
+        self.alt_d_flower()
+        was = self.what_is_there()
+        with mock.patch.object(rigmoves, "settle", side_effect=RuntimeError("boom")):
+            self.assertEqual(self.ring(self.petal, lead_step=-10), {"CANCELLED"})
+        self.assertEqual(self.report(),
+                         "Ring could not be finished: boom. Nothing was changed.")
+        self.assertEqual(self.riders(), {})
+        self.assert_as_found(was)
+        self.assertEqual(bpy.data.meshes["Petal Shape"].users, 7)
+
+    def test_a_ring_that_fails_while_stepping_the_leads_puts_everything_back(self):
+        self.alt_d_flower()
+        was = self.what_is_there()
+        with mock.patch.object(rigmoves, "spread_put", side_effect=ValueError("no good.")):
+            self.assertEqual(self.ring(self.petal, lead_step=-10), {"CANCELLED"})
+        self.assertEqual(self.report(),
+                         "Ring could not be finished: no good. Nothing was changed.")
+        self.assertEqual(self.riders(), {})
+        self.assert_as_found(was)
+
+    def test_copies_made_for_a_ring_that_fails_are_taken_away_again(self):
+        self.alt_d_flower()
+        was = self.what_is_there()
+        with mock.patch.object(rigmoves, "spread_put", side_effect=ValueError("no good")):
+            self.assertEqual(self.ring(self.petal, use="COPY", lead_step=-10),
+                             {"CANCELLED"})
+        self.assertIn("Ring could not be finished: no good. Nothing was changed.",
+                      self.report())
+        self.assert_as_found(was)
+
+    def test_the_mesh_of_petals_still_used_elsewhere_is_kept(self):
+        # A twin that is not part of the ring still has the mesh the petals
+        # shared: it stays, with its name, and the petals get names of their own.
+        self.alt_d_flower()
+        shared = self.others[0].data
+        twin = stood("Twin", shared, Matrix.Translation((6.0, 6.0, 0.0)))
+        self.assertEqual(self.ring(self.petal), {"FINISHED"})
+        self.assertIs(twin.data, shared)
+        self.assertEqual(shared.users, 1)
+        for petal in self.others:
+            self.assertIsNot(petal.data, shared)
+            self.assertEqual(petal.data.users, 1, petal.name)
+
+
 class TestCombined(CopyThatCase):
 
     def test_combined_control_plays_members_in_order(self):

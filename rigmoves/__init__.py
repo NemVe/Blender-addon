@@ -6823,11 +6823,26 @@ def put_back(framed):
 
 def settle(framed):
     """Let a re-frame stand: the old meshes nobody uses any more go, and the
-    new ones take their names."""
+    new ones take their names.
+
+    Objects that shared one mesh - petals made with Alt+D - all name the same
+    old one, and it can only go once. Which are the same is worked out before
+    any is removed, because a mesh that has been removed must not be touched
+    again, not even to ask who uses it.
+    """
+    olds, wanted = {}, []
     for obj, _was, old, _kept in framed:
+        olds.setdefault(old.as_pointer(), old)
+        wanted.append((obj, old.name, old.as_pointer()))
+    gone = set()
+    for pointer, old in olds.items():
         if old.users == 0:
-            name = old.name
             bpy.data.meshes.remove(old)
+            gone.add(pointer)
+    # An old mesh that something else still uses keeps its name; the new one
+    # of each object that stood on a frame takes the name of the one that went.
+    for obj, name, pointer in wanted:
+        if pointer in gone:
             obj.data.name = name
 
 
@@ -7118,6 +7133,19 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             done = {"CANCELLED"}
         data = rig.rigmoves
         move = data.moves[self.index]
+
+        def take_back(why):
+            """Everything as it was found: the riders out, the objects that
+            were stood on a new frame put back, the copies gone."""
+            take_riders_out(rig, move, [obj.name for obj in objects
+                                        if move.parts.find(obj.name) >= 0])
+            if move.built:
+                bpy.ops.rigmoves.build()
+            put_back(framed)
+            discard_copies(copies)
+            self.refuse(data, why)
+            return {"CANCELLED"}
+
         # Every copy has to be a rider of the joint it was copied from. One
         # that is not - an object Ride Along took for already known - stands
         # still, or is put back where an old part stood, and the report would
@@ -7126,59 +7154,60 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                     if move.parts.get(obj.name) is None
                     or move.parts[obj.name].leader != joint]
         if done != {"FINISHED"} or stranded:
-            take_riders_out(rig, move, [obj.name for obj in objects
-                                        if move.parts.find(obj.name) >= 0])
-            if move.built:
-                bpy.ops.rigmoves.build()
-            # Objects that were taken up are put back as they were found.
-            put_back(framed)
-            discard_copies(copies)
-            self.refuse(data, "Not every copy of '{:s}' could be made to ride along, so "
-                              "none were kept.".format(short(name, 18)))
-            return {"CANCELLED"}
-        settle(framed)
+            return take_back("Not every copy of '{:s}' could be made to ride along, so "
+                             "none were kept.".format(short(name, 18)))
 
-        said = self.first_sentence(name, joints, len(placed), made_whole)
-        if framed:
-            said += (" {:s} re-framed to stand on {:s} place, the mesh moved the "
-                     "other way so nothing shifted.".format(
-                         counted(len(framed), "object"),
-                         "its" if len(framed) == 1 else "their"))
-        said += outs
-        if standing.partial:
-            said += " {:s} had only part of a chain standing and {:s} left alone.".format(
-                counted(len(standing.partial), "place"),
-                "was" if len(standing.partial) == 1 else "were")
-        if elsewhere:
-            said += " {:s} had something standing there that is not a copy and {:s} left alone.".format(
-                counted(len(elsewhere), "place"), "was" if len(elsewhere) == 1 else "were")
-        if gave_up:
-            said += " {:s} hold{:s} a copy that could not safely be re-framed and {:s} left alone.".format(
-                counted(len(gave_up), "place"), "s" if len(gave_up) == 1 else "",
-                "was" if len(gave_up) == 1 else "were")
-        if empty:
-            said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
-                counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
-        if notes:
-            said += " " + notes
-        if skipped:
-            said += " {:s} already held a copy and {:s} skipped.".format(
-                counted(skipped, "place"), "was" if skipped == 1 else "were")
-        if self.lead_step:
-            # Out from the original both ways round: the two sides match. Only
-            # for the copies made now: the Leads of riders already there are
-            # theirs. A copied finger has the one Lead, its first joint's.
-            roots = [move.parts[obj.name] for obj, joint in riders
-                     if joint == first_joint]
-            ranks = spread_ranks(rig, move, [(move.parts[name], roots)], "LEAD",
-                                 "AROUND", "Z", True, 0)
-            limited = spread_put("LEAD", roots,
-                                 [self.lead_step * ranks[r.name] for r in roots])
-            refresh_drivers(rig, data, move)
-            said += " Leads step by {:d}, out from it both ways round.".format(
-                self.lead_step)
-            if limited:
-                said += " {:d} held at the limit.".format(limited)
+        # Whatever goes wrong from here puts everything back too: a Python
+        # error in the middle of an operator leaves what it had done, with no
+        # step to undo it by. Settling the meshes is last, so that nothing is
+        # half settled when something else fails.
+        try:
+            said = self.first_sentence(name, joints, len(placed), made_whole)
+            if framed:
+                said += (" {:s} re-framed to stand on {:s} place, the mesh moved the "
+                         "other way so nothing shifted.".format(
+                             counted(len(framed), "object"),
+                             "its" if len(framed) == 1 else "their"))
+            said += outs
+            if standing.partial:
+                said += " {:s} had only part of a chain standing and {:s} left alone.".format(
+                    counted(len(standing.partial), "place"),
+                    "was" if len(standing.partial) == 1 else "were")
+            if elsewhere:
+                said += " {:s} had something standing there that is not a copy and {:s} left alone.".format(
+                    counted(len(elsewhere), "place"), "was" if len(elsewhere) == 1 else "were")
+            if gave_up:
+                said += " {:s} hold{:s} a copy that could not safely be re-framed and {:s} left alone.".format(
+                    counted(len(gave_up), "place"), "s" if len(gave_up) == 1 else "",
+                    "was" if len(gave_up) == 1 else "were")
+            if empty:
+                said += " {:s} had nothing standing in {:s}: Fill the gaps would copy the part there.".format(
+                    counted(len(empty), "place"), "it" if len(empty) == 1 else "them")
+            if notes:
+                said += " " + notes
+            if skipped:
+                said += " {:s} already held a copy and {:s} skipped.".format(
+                    counted(skipped, "place"), "was" if skipped == 1 else "were")
+            if self.lead_step:
+                # Out from the original both ways round: the two sides match. Only
+                # for the copies made now: the Leads of riders already there are
+                # theirs. A copied finger has the one Lead, its first joint's.
+                roots = [move.parts[obj.name] for obj, joint in riders
+                         if joint == first_joint]
+                ranks = spread_ranks(rig, move, [(move.parts[name], roots)], "LEAD",
+                                     "AROUND", "Z", True, 0)
+                limited = spread_put("LEAD", roots,
+                                     [self.lead_step * ranks[r.name] for r in roots])
+                refresh_drivers(rig, data, move)
+                said += " Leads step by {:d}, out from it both ways round.".format(
+                    self.lead_step)
+                if limited:
+                    said += " {:d} held at the limit.".format(limited)
+            settle(framed)
+        except Exception as error:
+            why = " ".join(str(error).split()).rstrip(".") or type(error).__name__
+            return take_back("Ring could not be finished: {:s}. Nothing was changed.".format(
+                why if len(why) <= 70 else why[:69] + "…"))
         data.report = said
         self.report({"INFO"}, said)
         return {"FINISHED"}

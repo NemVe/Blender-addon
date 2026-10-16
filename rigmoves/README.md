@@ -1223,6 +1223,17 @@ and one lifted 1 m:
   front only as far as it has to be, so the number shows, and the header keeps
   its count: "Riding along (7)", not "Riding alon…".
 
+- **Ring stopped with a Python error when the petals it stood on a new frame
+  shared one mesh.** Petals made with Alt+D share a mesh, and applying the
+  rotation of the leader alone puts each of the other seven on a frame of its own,
+  so Ring re-frames all seven. The first one settled took the shared mesh away, and
+  the next one asked it a question: "StructRNA of type Mesh has been removed". The
+  riders were left bound with a Lead of 0, and there was no step to undo. The old
+  mesh now goes once, after every petal is settled, and only if nothing else uses
+  it. And if anything at all goes wrong once the riders are made, Ring takes them
+  out again, puts every petal back as it found it, and says "Ring could not be
+  finished: ... Nothing was changed."
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
