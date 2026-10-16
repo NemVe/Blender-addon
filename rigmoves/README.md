@@ -1,4 +1,4 @@
-# CopyThat (experiment) - v0.18.2
+# CopyThat (experiment) - v0.18.3
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -20,7 +20,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 CopyThat is a Blender extension, and it needs Blender 4.5 or newer: Blender
 will not install it on an older one. First, if an older RigMoves or CopyThat
 is listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
-the two cannot be on at once. Then drag `CopyThat-0.18.2.zip` into Blender,
+the two cannot be on at once. Then drag `CopyThat-0.18.3.zip` into Blender,
 or use Edit > Preferences > **Get Extensions** > the drop-down at the top
 right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
 **CopyThat**. Files made with older versions keep working.
@@ -1216,6 +1216,12 @@ and one lifted 1 m:
   reported the right numbers, but Blender's console printed "F-Curve not found"
   once for every track they took off. Each track is counted once now. Blender
   5.0 and newer never did it.
+
+- **At the sidebar's usual width every row under Riding along read the same.**
+  Ring's copies are named alike but for the number at the end, and the name was
+  cut at both ends: seven rows of "…ter Lead…". The name is now cut from the
+  front only as far as it has to be, so the number shows, and the header keeps
+  its count: "Riding along (7)", not "Riding alon…".
 
 ## Known rough edges
 

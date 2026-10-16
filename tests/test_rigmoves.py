@@ -148,7 +148,9 @@ class Sketch:
 
     The panel cannot be drawn without a window, but its code can run against
     this: every row, column and sub-panel is another sketch, and every button
-    is logged with the path of sub-panels it was put in.
+    is logged with the path of sub-panels it was put in. So is every label,
+    and every row that is told how to align: those say how much of the width
+    something takes, and what a person reads on the row.
     """
 
     def __init__(self, log, where=()):
@@ -169,15 +171,26 @@ class Sketch:
         self.log.append((self.where, idname, text))
         return types.SimpleNamespace()
 
+    def label(self, text="", icon="NONE", **_kwargs):
+        self.log.append((self.where, "label:" + icon, text))
+
+    def __setattr__(self, name, value):
+        if name == "alignment":
+            self.log.append((self.where, "alignment", value))
+        super().__setattr__(name, value)
+
     def __getattr__(self, name):
-        # label, prop, separator and the rest: nothing to note.
+        # prop, separator and the rest: nothing to note.
         if name.startswith("__"):
             raise AttributeError(name)
         return lambda *args, **kwargs: None
 
 
-def drawn_buttons():
-    """Every button the panel draws now, as (path, operator id, text)."""
+def drawn_panel(context=None):
+    """Everything the panel draws now, as (path, kind, text). A button's kind
+    is its operator id, a label's is "label:" and its icon, and a row that is
+    aligned has "alignment" and the alignment for its text. Drawn for the real
+    context, or for the one given."""
     log = []
 
     class Drawing:
@@ -186,8 +199,36 @@ def drawn_buttons():
     for name in dir(rigmoves.RIGMOVES_PT_panel):
         if name == "draw" or name.startswith("_draw"):
             setattr(Drawing, name, getattr(rigmoves.RIGMOVES_PT_panel, name))
-    Drawing().draw(bpy.context)
+    Drawing().draw(bpy.context if context is None else context)
     return log
+
+
+def drawn_buttons():
+    """Every button the panel draws now, as (path, operator id, text)."""
+    return [row for row in drawn_panel() if "." in row[1]]
+
+
+class Sidebar:
+    """The real context, as a panel sees it from a sidebar this wide. A run
+    with no window has no region, and Blender's own UI scale reads 0 there, so
+    both are given; the font and its size are the real ones."""
+
+    def __init__(self, width, scale=1.0):
+        self.region = types.SimpleNamespace(width=width)
+        self.preferences = types.SimpleNamespace(
+            system=types.SimpleNamespace(ui_scale=scale),
+            ui_styles=bpy.context.preferences.ui_styles)
+
+    def __getattr__(self, name):
+        return getattr(bpy.context, name)
+
+
+def text_width(text, scale=1.0):
+    """How wide Blender draws this text in the font and size its widgets use,
+    in pixels - 0 where the font is not there to measure with."""
+    import blf
+    blf.size(0, bpy.context.preferences.ui_styles[0].widget.points * scale)
+    return blf.dimensions(0, text)[0]
 
 
 class CopyThatCase(unittest.TestCase):
@@ -2309,8 +2350,21 @@ class TestSpread(CopyThatCase):
         found = [(where, text, idname) for where, idname, text in drawn_buttons()
                  if idname == "rigmoves.spread"]
         self.assertEqual(sorted(found), sorted([
-            (("head:show_riders",), "Spread…", "rigmoves.spread"),
-            (("head:show_timing",), "Spread…", "rigmoves.spread")]))
+            (("head:show_riders", "row"), "Spread…", "rigmoves.spread"),
+            (("head:show_timing", "row"), "Spread…", "rigmoves.spread")]))
+
+    def test_the_spread_buttons_take_only_their_own_width_in_the_headers(self):
+        # Set straight in a header, the button and the label share it half and
+        # half, and "Riding along (7)" was cut to "Riding alon…". In a row of
+        # its own, aligned right, the button takes what it needs and the label
+        # keeps the rest.
+        self.ring_of_riders(count=4)
+        log = drawn_panel()
+        spread = sorted(where for where, kind, _text in log if kind == "rigmoves.spread")
+        aligned = sorted(where for where, kind, text in log
+                         if kind == "alignment" and text == "RIGHT")
+        self.assertEqual(spread, [("head:show_riders", "row"), ("head:show_timing", "row")])
+        self.assertEqual(aligned, spread)
 
 
 class TestMakeChain(CopyThatCase):
@@ -5668,6 +5722,89 @@ class TestCombined(CopyThatCase):
         left = [d.data_path for d in rig().animation_data.drivers
                 if '["{:s}"]'.format(slider) in d.data_path]
         self.assertEqual(left, [])
+
+
+class TestNamesBesideControls(CopyThatCase):
+    """A name is cut to the room its row gives it, from the front, so that the
+    number which tells the copies of a petal apart stays on the row. Measured
+    in the font the panel draws in, which a run with no window can still do."""
+
+    NAME = "Outer Leader 2"
+
+    def setUp(self):
+        super().setUp()
+        if not text_width(self.NAME):
+            self.skipTest("this Blender has no font to measure text with here")
+
+    @staticmethod
+    def room(width, share=0.42, scale=1.0):
+        """What a label may take of a sidebar this wide: the rows are the
+        region less 53 px, and the label loses 32 px of its share to its icon
+        and its padding (both measured in a real window)."""
+        return share * (width - 53.0 * scale) - 32.0 * scale
+
+    def test_a_long_name_is_cut_from_the_front_only_as_far_as_it_must(self):
+        got = rigmoves.fitted(Sidebar(280), self.NAME, 0.42)
+        self.assertTrue(got.startswith("…"), got)
+        self.assertTrue(self.NAME.endswith(got[1:]), got)
+        self.assertTrue(got.endswith(" 2"), got)
+        self.assertLessEqual(text_width(got), self.room(280), got)
+        # And no further than it had to: one more letter would not have fitted.
+        more = "…" + self.NAME[-len(got):]
+        self.assertGreater(text_width(more), self.room(280), more)
+
+    def test_a_name_that_fits_is_left_whole(self):
+        self.assertEqual(rigmoves.fitted(Sidebar(440), self.NAME, 0.42), self.NAME)
+        self.assertEqual(rigmoves.fitted(Sidebar(280), "Petal 2", 0.42), "Petal 2")
+
+    def test_a_wider_sidebar_never_shows_less_of_the_name(self):
+        shown = [len(rigmoves.fitted(Sidebar(width), self.NAME, 0.42))
+                 for width in range(120, 460, 20)]
+        self.assertEqual(shown, sorted(shown))
+
+    def test_the_tail_after_the_name_is_never_cut(self):
+        for width in (60, 120, 200, 280, 360, 440):
+            got = rigmoves.fitted(Sidebar(width), self.NAME, 0.42, " +2")
+            self.assertTrue(got.endswith(" +2"), (width, got))
+        got = rigmoves.fitted(Sidebar(280), self.NAME, 0.42, " +2")
+        self.assertTrue(got.startswith("…"), got)
+        self.assertLessEqual(text_width(got), self.room(280), got)
+        # With no room at all the last letter stays, and the tail.
+        self.assertEqual(rigmoves.fitted(Sidebar(60), self.NAME, 0.42, " +2"),
+                         "…2 +2")
+
+    def test_the_ui_scale_is_allowed_for(self):
+        # Twice the scale: a sidebar twice as wide in pixels, a font twice as big.
+        got = rigmoves.fitted(Sidebar(560, scale=2.0), self.NAME, 0.42)
+        self.assertTrue(got.startswith("…"), got)
+        self.assertTrue(got.endswith(" 2"), got)
+        self.assertLessEqual(text_width(got, scale=2.0), self.room(560, scale=2.0), got)
+
+    def test_without_a_region_it_is_cut_as_it_always_was(self):
+        for context in (types.SimpleNamespace(region=None), bpy.context,
+                        types.SimpleNamespace(region=types.SimpleNamespace(width=1))):
+            self.assertEqual(rigmoves.fitted(context, self.NAME, 0.42),
+                             rigmoves.short(self.NAME, 13))
+            self.assertEqual(rigmoves.fitted(context, self.NAME, 0.42, " +2"),
+                             rigmoves.short(self.NAME, 10) + " +2")
+
+    def test_a_ring_of_seven_copies_reads_as_seven_rows_at_the_usual_width(self):
+        # As found in a real window: the sidebar at its default width, Ring
+        # having made seven copies of 'Outer Leader', and every row under
+        # Riding along read the same, the number cut off the end.
+        leader = cube("Outer Leader", (3.0, 0.0, 0.0))
+        record_move([leader], lambda: setattr(leader, "location", (3.0, 0.0, 1.0)))
+        select(leader)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8), {"FINISHED"})
+        rows = [text for where, kind, text in drawn_panel(Sidebar(280))
+                if kind == "label:OBJECT_DATA" and where[:1] == ("body:show_riders",)]
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(len(set(rows)), 7, rows)
+        for number, row in zip(range(2, 9), rows):
+            self.assertTrue(row.endswith(" {:d}".format(number)), row)
+            # What Blender draws is what fits: a longer label is cut at its
+            # end, which is where the number is.
+            self.assertLessEqual(text_width(row), self.room(280), row)
 
 
 class TestRegistration(unittest.TestCase):

@@ -43,7 +43,10 @@ guide: what the add-on promises).
   - 0.18.1 (the safety fixes below) is pushed (fddbd6e).
   - 0.18.2 is pushed: it runs on Blender 4.5 LTS, 5.0 and 5.2, and needs 4.5
     or newer (4.4 cannot run it at all).
-  - 326 tests pass on 4.5.14, 5.0.1 and 5.2.1 (`CLAUDE.md` has the three
+  - 0.18.3 is pushed: the Riding along list reads at the sidebar's usual
+    width (the header keeps its count, and a rider's name is cut from the
+    front to the room it has, so a Ring's copy numbers show).
+  - 334 tests pass on 4.5.14, 5.0.1 and 5.2.1 (`CLAUDE.md` has the three
     Blender paths): `.venv/bin/python tests/test_rigmoves.py`;
     `ruff check rigmoves tests tools`.
 - **Features, in order:**
@@ -76,8 +79,9 @@ guide: what the add-on promises).
   Done and pushed; the commit message has the details and the guide's bug list
   the five user-facing entries. Ring's own Lead step stays 0 unless typed (it is
   not sized to fit).
-- **Not yet seen in a real Blender window:** the Ring… and Spread… dialogs.
-  The user confirmed the panel shows Ring… and Spread… (0.17.1 screenshot).
+- **Seen in a real Blender 5.2.1 window** (0.18.2, the sidebar at its default
+  width): the panel and the Ring… and Spread… dialogs drew correctly, except
+  the Riding along list, which 0.18.3 fixes.
 
 ## Superhive (Blender Market) release: status
 
@@ -89,11 +93,11 @@ documentation and FAQ ON the product page, and a valid extension.
 | Licence | GPL-3.0-or-later. `LICENSE` at the root, and it goes into the zip. |
 | Valid extension | `rigmoves/blender_manifest.toml`. `tools/build_zip.py` builds an extension zip (manifest at the top, version written from bl_info). Blender's own `blender_ext.py validate` passes, and it installed and enabled headless as `bl_ext.user_default.copythat`. |
 | Product page docs and FAQ | `docs/SUPERHIVE_PAGE.md`. If it is missing, it was still being written: regenerate it from `rigmoves/README.md` (install, quick start, every feature with steps, two worked examples, 15+ FAQs, troubleshooting, changelog, credits). |
-| Install instructions | In the product page, and in the guide's Install section. **The guide still says "Install from Disk" under Add-ons**: update it to Get Extensions > Install from Disk, or drag and drop the zip. Users must remove the old legacy RigMoves/CopyThat add-on first. |
+| Install instructions | In the product page, and in the guide's Install section: drag the zip into Blender, or Edit > Preferences > Get Extensions > Install from Disk. Users must remove the old legacy RigMoves/CopyThat add-on first. |
 
 Still to do for the release:
-- update the guide's install section for the extension;
-- check the dialogs in a real Blender;
+- look at 0.18.3's Riding along list in a real Blender again (the sidebar at
+  190, 280 and 440 px);
 - add product images and video (the promo below);
 - consider tags (the blender_version_min is settled: 4.5.0, since 0.18.2).
 

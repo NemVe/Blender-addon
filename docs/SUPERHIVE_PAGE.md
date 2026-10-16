@@ -30,7 +30,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 ## Installation
 
-CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.18.2.zip`).
+CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.18.3.zip`).
 
 ### Removing an older version first (RigMoves or an old CopyThat)
 
@@ -695,6 +695,8 @@ Read the grey report box at the bottom of the panel first. It says what happened
 
 ## Version history
 
+- **0.18.3:** the list under **Riding along** can be read at the sidebar's usual width. Its header keeps its count ("Riding along (7)") instead of being cut off, and each row keeps the end of the part's name, where the number of a Ring's copy is, so seven copies no longer all read the same.
+- **0.18.2:** CopyThat needs **Blender 4.5 or newer** (on 4.4 every Build stopped with an error) and is tested on Blender 4.5 LTS, 5.0 and 5.2. On 4.5 and 5.0 a file tidied by Build is redrawn at once, instead of showing the old pull until it was reopened, and on 4.5 each stray keyframe is counted once.
 - **0.18.1:** Ring takes up or re-frames an object only when that is provably safe. It leaves alone, and names, objects with keys or drivers of their own, linked from a library, or that cannot be selected; it re-frames only plain objects and puts back anything that would look different. Objects are matched as sets of points, so a Ctrl+M half of a flower and the teeth of a gear copied and never turned are taken. Fill the gaps never copies onto anything standing in a place, and is turned down when copies stand near the ring but off its places (a wrong 3D cursor or Count). Spread's default Step is sized to fit, and Both ways opens on for Leads around a ring.
 - **0.18.0:** Ring can use what is already modelled: a **Use** choice (Make copies, Use what's there, Fill the gaps). Spread works by **Step** (a start and a step for each place in the order) or **Range**. Ring's Lead step works the same way.
 - **0.17.1:** Make Chain follows the way joints are built, so a leaf folded in pleats is chained in the right order. Reports use the right singular and plural.

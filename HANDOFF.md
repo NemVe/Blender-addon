@@ -47,7 +47,7 @@ promises to the user.
 |---|---|
 | `rigmoves/__init__.py` | the whole add-on, about 8,100 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 326 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 334 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
@@ -108,6 +108,7 @@ Features, in the order the user asked for them:
 | 0.18.1 | Review of 0.18.0, fourteen findings, mostly data safety: Ring takes up or re-frames an object only when provably safe (no keys/drivers, not linked, selectable, no frame-reading constraint/modifier/dependent, result compared and put back exactly); matching by point set (mirrored halves, unturned cubes); Fill never copies onto anything standing in a place, and is refused when copies stand near the ring on none of its places; Spread's default step sized to fit | `standing_pool`, `why_not_taken`, `Joint`/`Seen`/`Slot`, `fit_error`, `find_standing`, `reframe_blocker`, `look_of`, `looks_the_same`, `signed_volume`, `settle`, `sized_step` |
 | 0.18.0 | **Spread by Step**: Start and Step for each place in the order (default, -10 for Leads and 0.1 for Delays), ties share a place; Range is the old First and Last; Ring's Lead step is the same | `spread_keys`, `tied_ranks`, `spread_ranks`, `spread_put`, `SPREAD_BY`, `RIGMOVES_OT_spread` |
 | 0.18.2 | **Runs on Blender 4.5 LTS, 5.0 and 5.2; needs 4.5 or newer.** 4.4 has no Replace mode on the Action constraint, so every Build failed there. On 4.5 and 5.0 a healed copy was not redrawn (the mesh is tagged after a group is removed). On 4.4 and 4.5 every action curve was read twice (curves are read from the channelbags only). Guard test: the manifest and `bl_info` name one Blender and one version | `own_binding`, `own_transform_curves`, `rig_own_curves`, `action_curve`, `drop_empty_action`, `bl_info["blender"]`, `blender_manifest.toml`, `TestManifest` |
+| 0.18.3 | **The Riding along list reads at the sidebar's usual width** (found in a real 5.2.1 window, sidebar at its default 280 px). The Spread... button of the Riding along and Timing headers sits in a right-aligned sub-row: it took half the header, and the count was cut ("Riding alon…"). A rider's name is cut from the front to the room its row has, measured with `blf` in the panel's font, so Ring's copy numbers show: it was `short(name, 13)`, which Blender then cut at the end as well, seven rows of "…ter Lead…". Tests draw the panel for a sidebar of a given width (`Sidebar`, `drawn_panel`, and the logging layout now notes labels and alignments) | `fitted`, `_draw_move`, `TestNamesBesideControls` |
 
 ## The model underneath (read before changing any maths)
 

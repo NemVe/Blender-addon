@@ -39,7 +39,7 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 18, 2),
+    "version": (0, 18, 3),
     "blender": (4, 5, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -7579,6 +7579,47 @@ def short(name, keep=15):
     return name if len(name) <= keep else "…" + name[-(keep - 1):]
 
 
+def fitted(context, name, share, tail=""):
+    """A name as it fits beside a row's controls, cut from the front only as
+    far as it has to be, with the tail after it kept whole.
+
+    The end is what is kept because it is where copies differ: Ring numbers
+    them "Petal 2", "Petal 3", and Shift+D adds ".001", ".002". A fixed count
+    of letters cannot know the room there is - it depends on how wide the
+    sidebar has been dragged and on the UI scale - and a label that does not
+    fit is cut off by Blender at its END, which is the number: seven copies
+    then read as seven identical rows. So the room is worked out, and the
+    name measured against it in the panel's own font.
+
+    `share` is how much of the row the label has (the factor of its split),
+    `tail` something that must show whole, such as a copied finger's " +2".
+    """
+    region = getattr(context, "region", None)
+    if region is None or region.width <= 1:
+        # A script, or a run with no window: there is no room to measure.
+        return short(name, 13 if not tail else 10) + tail
+    import blf
+    scale = context.preferences.system.ui_scale
+    # Measured in a real window: the panel's rows are the region less about
+    # 53 px, and a label loses about 32 px of its share to its icon and its
+    # padding.
+    room = share * (region.width - 53.0 * scale) - 32.0 * scale
+    blf.size(0, context.preferences.ui_styles[0].widget.points * scale)
+
+    def width(text):
+        return blf.dimensions(0, text)[0]
+
+    if width(name + tail) <= room:
+        return name + tail
+    for keep in range(len(name) - 1, 0, -1):
+        cut = "…" + name[-keep:] + tail
+        if width(cut) <= room:
+            return cut
+    # Not even one letter fits: the last is still the one that tells it from
+    # the row above.
+    return "…" + name[-1:] + tail
+
+
 def wrapped(text, width=34, most=6):
     words, line, out = text.split(), "", []
     for word in words:
@@ -7872,7 +7913,13 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         if riders:
             head, listed = layout.panel_prop(move, "show_riders")
             head.label(text="Riding along ({:d})".format(len(riders)), icon="LINKED")
-            spreading = head.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
+            # The button in a row of its own, aligned right, so that it takes
+            # only its own width: set straight in the header it shares it with
+            # the label half and half, and at the sidebar's usual width the
+            # count was the first thing cut off.
+            side = head.row()
+            side.alignment = "RIGHT"
+            spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
             spreading.index, spreading.what = index, "LEAD"
             if listed is not None:
                 note = listed.row()
@@ -7886,9 +7933,12 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                         said.enabled = False
                         said.label(text="with '{:s}'".format(short(part.leader, 22)))
                     joints = len(copy_of(move, part)) - 1
-                    line = listed.split(factor=0.42, align=True)
-                    line.label(text=short(part.name, 13) if not joints else
-                               "{:s} +{:d}".format(short(part.name, 10), joints),
+                    # The copies of a petal are named alike but for the number
+                    # at the end, so that is what the name is cut to keep.
+                    share = 0.42
+                    line = listed.split(factor=share, align=True)
+                    line.label(text=fitted(context, part.name, share,
+                                           " +{:d}".format(joints) if joints else ""),
                                icon="OBJECT_DATA")
                     right = line.row(align=True)
                     right.prop(part, "lead", text="Lead", slider=True)
@@ -7937,7 +7987,10 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         # animated: the parts do not all leave at once.
         head, timing = layout.panel_prop(move, "show_timing")
         head.label(text="Timing", icon="TIME")
-        spreading = head.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
+        # In a row of its own, as in the header of Riding along.
+        side = head.row()
+        side.alignment = "RIGHT"
+        spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
         spreading.index, spreading.what = index, "DELAY"
         if timing is not None:
             note = timing.row()
