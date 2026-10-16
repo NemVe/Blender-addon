@@ -5127,8 +5127,11 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
     bl_description = ("Start a move from the bones selected in pose mode. Where "
                       "they stand now is recorded as Before")
     bl_options = {"REGISTER", "UNDO"}
+    # Not remembered from the last New Move, as the others would be: only the
+    # New Rig button asks for it, and left alone, Blender gave every plain New
+    # Move the choice of the last press, so each one started another rig.
     fresh: bpy.props.BoolProperty(
-        default=False,
+        default=False, options={"SKIP_SAVE"},
         description="Start a rig of its own rather than adding to the one "
                     "already being worked on")
 

@@ -4998,6 +4998,18 @@ class TestMutingAnNlaStrip(CopyThatCase):
         self.plays_the_move_at_every_frame()
 
 
+class TestNewMoveDoesNotRememberNewRig(CopyThatCase):
+    """New Rig is New Move with `fresh` on, and Blender opens an operator with
+    what it was last used with, for every property not marked SKIP_SAVE: after
+    one press of New Rig every plain New Move was a New Rig, and each press
+    started another rig."""
+
+    def test_the_new_rig_choice_is_not_remembered(self):
+        props = bpy.ops.rigmoves.new_move.get_rna_type().properties
+        self.assertTrue(props["fresh"].is_skip_save)
+        self.assertFalse(props["fresh"].default)
+
+
 class TestMakeChainOrder(CopyThatCase):
     """The order follows how a joint is built, at the far end of the part before
     it: not whichever pivot happens to be nearest."""
