@@ -5918,6 +5918,20 @@ class TestAModelMovedAsAWhole(ChestCase):
         # leader's own.
         self.check_lid(self.MOVE, shares=(0.0, 1.0))
 
+    def test_a_part_added_but_not_built_yet_goes_with_the_model(self):
+        # Added to the move and not built: a loose object, moved with the rest.
+        coin = cube("Coin", (0.3, 0.0, 0.6))
+        coin.scale = (0.3, 0.3, 0.05)
+        bpy.context.view_layer.update()
+        where = rest_points(coin)
+        select(coin, self.lid)
+        self.assertEqual(bpy.ops.rigmoves.add_to_move(index=0, rig_name=rig().name),
+                         {"FINISHED"})
+        self.move_everything()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertLess(drift(coin, [self.MOVE @ p for p in where]), TOLERANCE)
+        self.check_lid(self.MOVE)
+
     def test_the_whole_model_moved_twice_is_still_exact(self):
         self.move_everything()
         self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
