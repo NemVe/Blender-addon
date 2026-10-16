@@ -2471,9 +2471,15 @@ def seat_of(rig):
     where the Root bone does not stir. Move the rig, or the thing it hangs from,
     and the Root goes with it. A rig with no Root bone of ours is seated by its
     object.
+
+    The bone's length is the size of its axes. Apply Scale on a rig that is
+    scaled turns the object's scale into the bones' length - their heads and
+    tails move out by it - and a model made twice the size is still that size.
     """
     root = rig.data.bones.get("Root")
-    return rig.matrix_world @ root.matrix_local if root is not None else rig.matrix_world.copy()
+    if root is None:
+        return rig.matrix_world.copy()
+    return rig.matrix_world @ root.matrix_local @ Matrix.Scale(root.length, 4)
 
 
 def store_seat(rig, data):
@@ -2489,7 +2495,7 @@ def moved_since(rig, data):
         return None
     now = seat_of(rig) if data.seat_on_root else rig.matrix_world
     was = as_matrix(data.seat)
-    if is_singular(now) or is_singular(was):
+    if is_singular(rig.matrix_world) or is_singular(was):
         return None
     return now @ was.inverted_safe()
 
@@ -2515,7 +2521,7 @@ def has_no_size(operator, rig, data):
     part with a bone placed through the rig's inverse: neither can be told
     anything by a rig that has no size. (catch_up leaves such a rig alone.)
     """
-    if not is_singular(seat_of(rig)):
+    if not is_singular(rig.matrix_world):
         return False
     data.report = ("'{:s}' is scaled to nothing at this frame, so there is no telling "
                    "where its parts stand: go to a frame where it has a size, and press "
@@ -2549,7 +2555,7 @@ def catch_up(rig, data=None, reframe=True):
     point_at_objects(rig, data)
     own_actions(rig, data)
     now = seat_of(rig)
-    if is_singular(now):
+    if is_singular(rig.matrix_world):
         # A rig scaled to nothing - a grow-in, on its first frame - stands
         # nowhere that can be told, and carrying by it squeezes every Before and
         # After into a point for good. Nothing is done until it has a size again;

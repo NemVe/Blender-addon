@@ -8415,9 +8415,57 @@ class TestApplyAndSetOriginOnTheRig(ChestCase):
         self.assertTrue(data.seat_on_root)
         self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat),
                                              rigmoves.seat_of(rig()), 1e-5))
+        # The Root bone's rest in the world, its length the size of its axes.
         root = rig().data.bones["Root"]
-        self.assertTrue(rigmoves.same_matrix(rigmoves.seat_of(rig()),
-                                             rig().matrix_world @ root.matrix_local, 1e-6))
+        self.assertTrue(rigmoves.same_matrix(
+            rigmoves.seat_of(rig()),
+            rig().matrix_world @ root.matrix_local @ Matrix.Scale(root.length, 4), 1e-6))
+
+    def seen_at_the_ends_and_half_way(self):
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            out[share] = world_points(self.lid)
+        drive(self.move, 0.0)
+        return out
+
+    def check_the_lid_is(self, was):
+        for share, points in was.items():
+            drive(self.move, share)
+            self.assertLess(drift(self.lid, points), TOLERANCE, "at {:.0%}".format(share))
+        drive(self.move, 0.0)
+
+    def test_apply_scale_on_a_rig_that_was_scaled_moves_nothing(self):
+        # The object's scale becomes the bones' length, and the model is still
+        # the size it was made.
+        select(rig())
+        self.assertEqual(bpy.ops.transform.resize(value=(2.0, 2.0, 2.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        was = self.seen_at_the_ends_and_half_way()
+        self.assertAlmostEqual(rig().scale.x, 2.0, places=5)
+        select(rig())
+        self.assertEqual(bpy.ops.object.transform_apply(location=False, rotation=False,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(rig().scale.x, 1.0, places=5)
+        self.check_the_lid_is(was)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_the_lid_is(was)
+
+    def test_scaling_everything_and_then_applying_it_all_moves_nothing(self):
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.resize(value=(0.5, 0.5, 0.5)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        was = self.seen_at_the_ends_and_half_way()
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.object.transform_apply(location=True, rotation=True,
+                                                        scale=True), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.check_the_lid_is(was)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_the_lid_is(was)
 
     def test_a_rig_without_a_root_is_seated_by_its_object(self):
         # A rig of its own, with bones of its own and no "Root".
