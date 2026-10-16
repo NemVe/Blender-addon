@@ -6126,6 +6126,105 @@ def drift_of(points, expected):
     return max((a - b).length for a, b in zip(points, expected))
 
 
+class TestRingDuplicateOnTop(RingFlows):
+    """Shift+D, then a right-click to cancel the move, leaves a copy exactly on
+    the part. That is not a copy off the ring - the advice for those, the centre
+    and the Count, is wrong for it - but a slip, and is said to be one."""
+
+    SAID = ("'Petal.001' stands exactly where 'Petal' is - a duplicate left on top of "
+            "it? Delete it, then Ring again.")
+
+    def one_petal_with_a_duplicate_on_it(self):
+        self.leader = stood("Petal", prism("Petal Shape", 4, 0.15, 1.0), self.base)
+        self.record_after(self.leader, turned=60.0)
+        self.leader.matrix_world = self.base
+        bpy.context.view_layer.update()
+        select(self.leader)
+        self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
+        self.dup = bpy.context.view_layer.objects.active
+        self.assertEqual(self.dup.name, "Petal.001")
+        self.assertTrue(same_matrix_of(self.dup.matrix_world, self.base))
+
+    def made_by(self, **kwargs):
+        before = {o.name for o in bpy.data.objects}
+        result = self.ring(self.leader, **kwargs)
+        return result, {o.name for o in bpy.data.objects} - before
+
+    def test_fill_refuses_and_names_the_duplicate(self):
+        self.one_petal_with_a_duplicate_on_it()
+        result, made = self.made_by(use="FILL")
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertEqual(made, set())
+        self.assertEqual(self.report(), self.SAID + " Nothing done.")
+        self.assertEqual(self.riders(), {})
+
+    def test_use_what_is_there_names_it_too_and_does_not_call_it_off_the_ring(self):
+        self.one_petal_with_a_duplicate_on_it()
+        result, made = self.made_by(use="ADOPT")
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertEqual(made, set())
+        self.assertIn(self.SAID, self.report())
+        self.assertNotIn("off the ring", self.report())
+        self.assertNotIn("off its places", self.report())
+        self.assertNotIn("Left out", self.report())
+        # Fill the gaps is not what it would be sent to: it refuses the same.
+        self.assertNotIn("Fill the gaps would copy", self.report())
+
+    def test_use_what_is_there_takes_what_fits_and_adds_it_as_a_note(self):
+        self.one_petal_with_a_duplicate_on_it()
+        shape = self.leader.data
+        for k in (2, 5):
+            stood("Petal {:d}".format(k + 1), shape.copy(), self.turn(k) @ self.base)
+        bpy.context.view_layer.update()
+        result, made = self.made_by(use="ADOPT")
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(made, set())
+        self.assertEqual(sorted(self.riders()), ["Petal 3", "Petal 6"])
+        self.assertTrue(self.report().endswith(self.SAID), self.report())
+        self.assertNotIn("off the ring", self.report())
+
+    def test_after_the_duplicate_is_deleted_fill_makes_seven(self):
+        self.one_petal_with_a_duplicate_on_it()
+        self.assertEqual(self.made_by(use="FILL")[0], {"CANCELLED"})
+        bpy.data.objects.remove(self.dup, do_unlink=True)
+        bpy.context.view_layer.update()
+        result, made = self.made_by(use="FILL")
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(len(made), 7)
+        self.assertEqual(self.report(),
+                         "7 copies of 'Petal' round the 3D cursor ride along with it.")
+
+    def test_making_copies_is_not_refused_for_it(self):
+        self.one_petal_with_a_duplicate_on_it()
+        result, made = self.made_by(use="COPY")
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(len(made), 7)
+        self.assertNotIn("exactly where", self.report())
+
+    def test_two_duplicates_are_named_together(self):
+        self.one_petal_with_a_duplicate_on_it()
+        select(self.leader)
+        self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
+        result, made = self.made_by(use="FILL")
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertEqual(self.report(),
+                         "'Petal.001' and 'Petal.002' stand exactly where 'Petal' is - "
+                         "duplicates left on top of it? Delete them, then Ring again. "
+                         "Nothing done.")
+
+    def test_a_copy_off_the_ring_is_still_said_to_be_off_it(self):
+        # What the old sentence is for: a copy that stands near the ring and on
+        # none of its places, and is not on the part.
+        self.one_petal_with_a_duplicate_on_it()
+        bpy.data.objects.remove(self.dup, do_unlink=True)
+        stood("Stray", self.leader.data.copy(), self.turn(0.5) @ self.base)
+        bpy.context.view_layer.update()
+        self.assertEqual(self.made_by(use="FILL")[0], {"CANCELLED"})
+        self.assertIn("1 copy of 'Petal' stands near the ring but off its places",
+                      self.report())
+        self.assertNotIn("exactly where", self.report())
+
+
 class TestPartsMovedByTheirOwn(CopyThatCase):
     """A part whose transform is worked by an NLA strip or a driver of its own
     plays the wrong move: the rig is measured from where it stands, and what it

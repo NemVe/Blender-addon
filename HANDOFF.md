@@ -366,7 +366,12 @@ buttons. Each refuses in words, reports what it did in `data.report`, and is
     move excluded) standing on no place; the operator refuses Fill when any is within
     1.5 x the ring's radius of the axis and the part's height (a wrong 3D cursor or
     Count), and appends it as a note in Use what's there. `left` is sorted nearest
-    place first and only says "off the ring" when it is.
+    place first and only says "off the ring" when it is. `stacked` (0.19) lists the
+    copies of the first joint standing on the part's OWN place (a `Slot` with the
+    identity turn: a Shift+D cancelled with a right-click): not `off`, not in
+    `left`, and `stacked_words` is Fill's refusal and Use what's there's note. Use
+    what's there says "Fill the gaps would copy the part there" only when Fill
+    would not be refused (no note).
     Before any change `reframe_blocker` refuses constraints, instancing, particles,
     a vertex/bone parent, any dependent in `bpy.data.user_map` but an OBJECT-parented
     child (and that child must have no `has_own_motion`: its keys, driver or NLA

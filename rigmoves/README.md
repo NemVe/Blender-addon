@@ -267,6 +267,13 @@ else is left exactly as it is, and the report says why:
   (3D cursor) and Count. Nothing done." **Use what's there** takes what fits and
   says the same as a note. **Make copies** is never turned down. Copies a move
   plays already do not count.
+- **A duplicate left on top of the part is a case of its own.** Shift+D, then a
+  right-click to cancel the move, leaves a copy exactly where the part stands. That
+  is no place of the ring, and no copy off it: "'Petal.001' stands exactly where
+  'Petal' is - a duplicate left on top of it? Delete it, then Ring again."
+  **Fill the gaps** is turned down with that, and nothing is done; **Use what's
+  there** takes what fits and says it as a note; **Make copies** is not turned
+  down.
 - **The report names what was left out**, up to three, the nearest to the ring's
   places first: "'Leaf B1' is not a copy of 'Leaf A1'", "'Petal 4' stands in a place
   and is not a copy of 'Petal'", "'Stray' is a copy of 'Petal' that is not turned to
@@ -1269,6 +1276,15 @@ and one lifted 1 m:
   Lift Those Keyframes does not touch them, and Build is a warning, not a success,
   until they are gone. A muted strip, a muted track and a muted driver play nothing,
   and are not named.
+- **A duplicate left on top of the part was blamed on the centre and the Count.**
+  Shift+D, then a right-click, leaves a copy exactly on the part. Ring looked at the
+  places round the ring but not the part's own, so Fill the gaps refused with "1
+  copy of 'Petal' stands near the ring but off its places: check the centre (3D
+  cursor) and Count" - wrong, and with no name - and Use what's there called it "a
+  copy that stands off the ring". A copy standing where the part does now has a
+  sentence of its own that names it and says what to do, in Fill the gaps and in Use
+  what's there. Use what's there no longer says "Fill the gaps would copy the part
+  there" when Fill the gaps would be turned down.
 
 ## Known rough edges
 

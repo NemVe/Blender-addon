@@ -6667,13 +6667,15 @@ class Standing:
     occupied: {place: names} for the places, of those not placed, with
     something standing in them; left: (distance, words) for each object that
     was looked at and is not taken up; off: (name, middle) for each copy of
-    the part standing on none of the places; first: (middle, reach) of the
-    part; empty: the places with nothing in them.
+    the part standing on none of the places; stacked: the names of the copies
+    of the part standing on the part's own place (a duplicate left on top of
+    it); first: (middle, reach) of the part; empty: the places with nothing in
+    them.
     """
 
     def __init__(self):
         self.placed, self.partial, self.occupied = {}, [], {}
-        self.left, self.off, self.empty = [], [], []
+        self.left, self.off, self.empty, self.stacked = [], [], [], []
         self.first = (Vector(), 0.0)
         self.joints = []
 
@@ -6760,13 +6762,21 @@ def find_standing(pool, joints, turns, free, ours=()):
         else:
             found.empty.append(number)
 
-    # Copies of the part, standing on no place at all.
+    # Copies of the part, standing on no place at all - and, apart from those,
+    # on the part's own place: a duplicate made with Shift+D and left where it
+    # was, on top of the part. That is no place of the ring, so it is not off
+    # it either.
     first = shapes[0]
+    own = Slot(first, Matrix.Identity(4))
     for one in seen:
         # What a move plays already is not a stray copy.
         if (one.name in used or one.why == "is already part of a move"
                 or not one.like(first)):
             continue
+        if (one.box - own.box()).length <= 0.25 * first.reach:
+            found.stacked.append(one.name)
+            continue
+
         def on_a_place(number):
             there = slot(number, 0)
             close = (one.box - there.box()).length <= 0.25 * first.reach
@@ -6783,7 +6793,8 @@ def find_standing(pool, joints, turns, free, ours=()):
         if holder.get((number, index), name) != name:
             rival.setdefault(name, holder[(number, index)])
     for one in seen:
-        if one.name in used or one.name in ours:
+        # A duplicate on top of the part has a sentence of its own.
+        if one.name in used or one.name in ours or one.name in found.stacked:
             continue
         likes = [shape for shape in shapes if len(shape.local) == one.count]
         near = min((((one.mean - slot(number, index).mean).length, shape)
@@ -6999,6 +7010,17 @@ def settle(framed):
             obj.data.name = name
 
 
+def stacked_words(names, part):
+    """What to tell somebody whose duplicates of the part stand exactly where
+    the part does, as they do when Shift+D is cancelled with a right-click: the
+    copy is on top of the part, no part of the ring, and is most likely a slip."""
+    one = len(names) == 1
+    return ("{:s} {:s} exactly where '{:s}' is - {:s} left on top of it? Delete {:s}, then "
+            "Ring again.".format(named(names), "stands" if one else "stand", short(part, 18),
+                                 "a duplicate" if one else "duplicates",
+                                 "it" if one else "them"))
+
+
 class RIGMOVES_OT_ring(bpy.types.Operator):
     bl_idname = "rigmoves.ring"
     bl_label = "Ring"
@@ -7152,13 +7174,18 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                         and abs(off.dot(axis) - along.dot(axis)) <= 1.5 * radius)
 
             near = [n for n, spot in standing.off if in_the_ring(spot)]
+            sentences = []
+            if standing.stacked:
+                sentences.append(stacked_words(standing.stacked, name))
             if near:
-                notes = "{:s} of '{:s}' {:s} near the ring but off its places: check the centre (3D cursor) and Count.".format(
-                    counted(len(near), "copy", "copies"), short(name, 18),
-                    "stands" if len(near) == 1 else "stand")
-                if self.use == "FILL":
-                    self.refuse(data, notes + " Nothing done.")
-                    return {"CANCELLED"}
+                sentences.append(
+                    "{:s} of '{:s}' {:s} near the ring but off its places: check the centre (3D cursor) and Count.".format(
+                        counted(len(near), "copy", "copies"), short(name, 18),
+                        "stands" if len(near) == 1 else "stand"))
+            notes = " ".join(sentences)
+            if notes and self.use == "FILL":
+                self.refuse(data, notes + " Nothing done.")
+                return {"CANCELLED"}
 
         # Objects to be taken up that are not on the frame a copy would have
         # are stood on it - but only those where that is provably safe: the
@@ -7222,7 +7249,9 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                 "; ".join(words for _distance, _object, words in left[:3]),
                 "; and {:d} more".format(len(left) - 3) if len(left) > 3 else "")
         elsewhere = [n for n in standing.occupied if n not in standing.partial]
-        empty = standing.empty if self.use == "ADOPT" else []
+        # What Fill the gaps would do about the empty places: copy the part
+        # there - unless it would be refused, as it is with a note to give.
+        empty = standing.empty if self.use == "ADOPT" and not notes else []
 
         taken = names_in_use()
         copies, riders, told = [], [], []
