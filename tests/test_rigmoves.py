@@ -8124,8 +8124,9 @@ class TestAnAltDCopyMadeWithItsPathCurvesBendsOnlyItsOwn(CopiedModel):
     """Select All - the path curves too - and Alt+D: the copy has curve objects of
     its own, but linked ones, which share the originals' Curve. Bent on the copy,
     the original's curve was bent as well, and its lid moved 3 m at its next
-    Build. (The first button pressed on a copy parts them; a bend made before
-    any is made on both, and nothing can tell.)"""
+    Build. (The scene parts them when it first shows the copy, and the first
+    button does if it has not; a bend made before either is covered in
+    TestBendingTheCurveOnACopyOfTheWholeModel.)"""
 
     def setUp(self):
         super().setUp()
@@ -8153,9 +8154,10 @@ class TestAnAltDCopyMadeWithItsPathCurvesBendsOnlyItsOwn(CopiedModel):
     def test_bending_the_copys_curve_leaves_the_originals_lid_where_it_was(self):
         rig2, part2 = self.copy_everything(True, self.curve)
         curve2 = rig2.rigmoves.moves[0].parts[0].path_curve
-        # The copy's curve is an object of its own, on the original's Curve.
+        # The copy's curve is an object of its own, and the scene parted its Curve from
+        # the original's as soon as it showed the copy.
         self.assertIsNot(curve2, self.curve)
-        self.assertIs(curve2.data, self.curve.data)
+        self.assertIsNot(curve2.data, self.curve.data)
         select(part2)
         self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
         self.bend(curve2, 3.0)
@@ -12303,6 +12305,116 @@ class TestAMeshWithGroupsJoinedIntoABuiltPart(CopyThatCase):
                     if joins:
                         self.assertAlmostEqual(held[own.index], 1.0, places=5)
                 self.assertEqual("new geometry" in rig().rigmoves.report, joins, label)
+
+
+class TestBendingTheCurveOnACopyOfTheWholeModel(ChestCase):
+    """A built lid goes along a curve (Curve the Path). The whole model is copied
+    with Alt+D, the curve and all - the copy's curve object shares the original's
+    Curve - and the copy is moved. The artist bends the copy's curve with the
+    panel's Edit the Curve, or with Tab, and the original's bent as well: its lid
+    played 3.0 m off at its next Build. The Curve was parted from the original's
+    only by a button that catches the rig up, and neither of these is one. (Copied
+    without its curve, the copy points at the original's curve object.)"""
+
+    def setUp(self):
+        super().setUp()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.rig1 = rig()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.shape = self.shape_of(self.rig1)
+        self.kept = self.play(self.rig1, self.lid)
+        # The original has been seen by the scene's handler long before it is copied.
+        rigmoves.follow_renames_handler()
+
+    @staticmethod
+    def curve_of(owner):
+        return owner.rigmoves.moves[0].parts[0].path_curve
+
+    def shape_of(self, owner):
+        points = self.curve_of(owner).data.splines[0].bezier_points
+        return [tuple(round(c, 5) for c in point.co) for point in points]
+
+    @staticmethod
+    def bend(curve):
+        middle = curve.data.splines[0].bezier_points[1]
+        for point in (middle.co, middle.handle_left, middle.handle_right):
+            point.z += 3.0
+
+    @staticmethod
+    def play(owner, part):
+        """Where the part is, point by point, at the start, the middle and the end."""
+        move = owner.rigmoves.moves[0]
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            owner.pose.bones[move.handle_name].location.y = move.rail * share
+            bpy.context.view_layer.update()
+            out[share] = [p.copy() for p in world_points(part)]
+        owner.pose.bones[move.handle_name].location.y = 0.0
+        bpy.context.view_layer.update()
+        return out
+
+    def copy_the_model(self, with_curve):
+        """Alt+D of the rig, the lid and (or not) the curve, the copy 6 m along."""
+        chosen = [self.rig1, self.lid] + ([self.curve_of(self.rig1)] if with_curve else [])
+        select(*chosen)
+        self.assertEqual(bpy.ops.object.duplicate_move_linked(
+            TRANSFORM_OT_translate={"value": (6.0, 0.0, 0.0)}), {"FINISHED"})
+        bpy.context.view_layer.update()
+        made = list(bpy.context.selected_objects)
+        self.rig2 = next(o for o in made if o.type == "ARMATURE")
+        self.lid2 = next(o for o in made if o.type == "MESH")
+        bpy.context.scene.rigmoves_rig = self.rig2
+
+    def check_the_original_is_as_it_was(self):
+        """Its curve is the shape it was, and its lid plays as it did, built again."""
+        self.assertEqual(self.shape_of(self.rig1), self.shape, "its curve")
+        bpy.context.scene.rigmoves_rig = self.rig1
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.shape_of(self.rig1), self.shape, "its curve, built")
+        now = self.play(self.rig1, self.lid)
+        for share, places in self.kept.items():
+            self.assertLess(max((a - b).length for a, b in zip(now[share], places)),
+                            TOLERANCE, "its lid at {:.0%}".format(share))
+
+    def test_edit_the_curve_on_the_copy_bends_the_copys_curve_and_not_the_originals(self):
+        for with_curve in (True, False):
+            with self.subTest(with_curve=with_curve):
+                self.setUp()
+                # The scene's handler, which would part them as soon as the copy is seen
+                # (the next test), is out of the way: the button has to do it itself.
+                with mock.patch.object(rigmoves, "look_over"):
+                    self.copy_the_model(with_curve)
+                    select(self.lid2)
+                    self.assertEqual(bpy.ops.rigmoves.edit_curve(index=0, part=0),
+                                     {"FINISHED"})
+                    editing = bpy.context.object
+                    self.assertEqual(editing.mode, "EDIT")
+                    self.bend(editing)
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                self.assertIs(editing, self.curve_of(self.rig2))
+                self.assertIsNot(editing, self.curve_of(self.rig1))
+                self.check_the_original_is_as_it_was()
+                # The copy plays along the curve it bent: well above the original's.
+                bpy.context.scene.rigmoves_rig = self.rig2
+                select(self.lid2)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                played = self.play(self.rig2, self.lid2)
+                rise = max((a - b).z for a, b in zip(played[0.5], self.kept[0.5]))
+                self.assertGreater(rise, 1.0)
+
+    def test_a_curve_bent_with_tab_on_the_copy_does_not_bend_the_originals(self):
+        # Only with the curve copied: without it the copy's part points at the original's
+        # curve object itself, and to bend that is to bend the original's (Edit the Curve
+        # makes the copy a curve of its own first, in the test above).
+        self.copy_the_model(True)
+        # The copy is seen as soon as the scene updates after Alt+D.
+        rigmoves.follow_renames_handler()
+        self.assertIsNot(self.curve_of(self.rig2).data, self.curve_of(self.rig1).data)
+        self.bend(self.curve_of(self.rig2))
+        self.check_the_original_is_as_it_was()
 
 
 if __name__ == "__main__":

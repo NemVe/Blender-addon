@@ -1184,7 +1184,7 @@ def own_armature(rig):
     return True
 
 
-def own_curves(rig, data):
+def own_curves(rig, data, objects=True):
     """The path curves and drawn path lines a rig shares with another rig get
     copies for this one.
 
@@ -1201,6 +1201,12 @@ def own_curves(rig, data):
     but they share the originals' Curve: bent in Edit Mode on the copy, the
     original's bent as well, and its lid moved at its next Build. Those get a
     Curve of their own here.
+
+    Run by every button (catch_up) and by Edit the Curve, and the first time the
+    scene shows a rig (settle_old_rig) - but then with `objects` off, and only the
+    Curves are parted: a curve is bent with Tab as well, and no button comes
+    before that. No curve object is made for a part that may be deleted before
+    any button is pressed, which would leave one standing that nothing owns.
     """
     others = [o for o in bpy.data.objects
               if o.type == "ARMATURE" and o is not rig and len(o.rigmoves.moves)]
@@ -1220,6 +1226,8 @@ def own_curves(rig, data):
                 if (curve.type == "CURVE" and curve.data is not None
                         and curve.data.users - int(curve.data.use_fake_user) > 1):
                     curve.data = curve.data.copy()
+                continue
+            if not objects:
                 continue
             fresh = curve.copy()
             fresh.name = "{:s} {:s}".format(curve.name, rig.name)
@@ -2961,6 +2969,12 @@ def settle_old_rig(rig, data):
 
     The seat is changed only for a rig that stands where the seat says. One
     that was moved since is carried by the first button, as it was.
+
+    A rig is looked over when the scene first shows it after Alt+D as well, and
+    the Curves of its curve objects are parted from the original's then
+    (own_curves, with no object made): bent with Tab on the copy, which no button
+    comes before, the shared Curve was the original's too. Not for a rig from a
+    library, which cannot be written to.
     """
     if data.seated:
         if not data.seat_on_root:
@@ -2971,6 +2985,8 @@ def settle_old_rig(rig, data):
                 data.seat_world = flat(rig.matrix_world)
     point_at_objects(rig, data)
     retake_marks(data, shift=moved_since(rig, data), old=True)
+    if rig.library is None:
+        own_curves(rig, data, objects=False)
 
 
 def look_over(rig):
@@ -7396,7 +7412,7 @@ class RIGMOVES_OT_edit_curve(bpy.types.Operator):
     part: bpy.props.IntProperty()
 
     def execute(self, context):
-        rig, _data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index)
         if move is None or not 0 <= self.part < len(move.parts):
             return {"CANCELLED"}
         obj = move.parts[self.part].path_curve
@@ -7404,6 +7420,15 @@ class RIGMOVES_OT_edit_curve(bpy.types.Operator):
             return {"CANCELLED"}
         if context.object is not None and context.object.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
+        # A copy of the whole model shares the original's Curve until a button that
+        # catches the rig up parts them, and this is not one: bent here, the
+        # original's bent as well and its lid played off at its next Build. After
+        # the mode is left, as the Curve of an object in Edit Mode cannot be swapped;
+        # and the pointer is read again, as it may be a curve of the copy's own now,
+        # which the view layer does not list until it has been brought up to date.
+        own_curves(rig, data)
+        context.view_layer.update()
+        obj = move.parts[self.part].path_curve
         for other in context.selected_objects:
             other.select_set(False)
         obj.hide_set(False)
