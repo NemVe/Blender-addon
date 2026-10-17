@@ -663,7 +663,9 @@ def ensure_slider(rig, carrier):
     carrier.control = control
     if not control:
         return None
-    if not carrier.prop:
+    # A name too long for a property is made again. A file saved after a Build
+    # that failed on one holds it, and nothing was ever written under it.
+    if not carrier.prop or len(carrier.prop.encode()) > 63:
         carrier.prop = unique_prop_name(rig, carrier, safe_prop_name(carrier.name))
     bone = rig.pose.bones[control]
     if carrier.prop not in bone.keys():
@@ -1505,6 +1507,10 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
 
 def safe_prop_name(text):
     kept = "".join(c if (c.isalnum() or c in " _-") else "_" for c in text).strip()
+    # Blender holds the name of a custom property to 63 bytes - bytes, so 32
+    # accented letters are one too many - and unique_prop_name may add a number
+    # after it. Cut short of that, and on the edge of a letter.
+    kept = kept.encode()[:56].decode("utf-8", "ignore").strip()
     return kept or "Move"
 
 

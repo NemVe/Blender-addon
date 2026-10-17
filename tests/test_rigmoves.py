@@ -7378,6 +7378,110 @@ class TestTheSelectIconBesideAPart(CopyThatCase):
         self.assertEqual(bpy.context.mode, "POSE")
 
 
+class TestAMoveWithALongName(CopyThatCase):
+    """A move's slider is a custom property named after it, and so is a combined
+    control's, and Blender holds a property's name to 63 bytes. A move named with
+    64 bytes or more - 92 letters, 32 accented ones, 22 CJK - failed its Build at
+    the slider with a KeyError, after the parts were bound and before anything
+    played them; so did two moves of one 62-byte name, the second slider being
+    given a " 2", and a combined control named with 70 characters."""
+
+    @staticmethod
+    def lift(obj):
+        def pose():
+            obj.location.z += 1.0
+        return pose
+
+    def moves_named(self, *names):
+        """A box of its own for each name, risen 1 m by a move of that name, and
+        recorded; not built."""
+        boxes = []
+        for number, name in enumerate(names):
+            box = cube("Box {:d}".format(number + 1), (3.0 * number, 0.0, 1.0))
+            record_move([box], self.lift(box))
+            rig().rigmoves.moves[number].name = name
+            boxes.append(box)
+        return boxes
+
+    def check_plays(self, carrier, box, others=()):
+        """The control raises this box 1 m, and no other."""
+        drive(carrier, 1.0)
+        self.assertAlmostEqual(centre(box).z, 2.0, places=4)
+        for other in others:
+            self.assertAlmostEqual(centre(other).z, 1.0, places=4)
+        drive(carrier, 0.0)
+        self.assertAlmostEqual(centre(box).z, 1.0, places=4)
+
+    def check_a_name(self, name, kept):
+        """A move of this name builds, with a slider named `kept`, and plays."""
+        (box,) = self.moves_named(name)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual(move.name, name)
+        self.assertEqual(move.prop, kept)
+        self.assertIn(kept, rig().pose.bones[move.control].keys())
+        self.check_plays(move, box)
+
+    def test_a_name_of_ninety_two_characters_builds_and_plays(self):
+        self.check_a_name("a" * 92, "a" * 56)
+
+    def test_thirty_two_accented_letters_build_and_play(self):
+        # 64 bytes, cut to the 56 that leave room: 28 letters, none of them split.
+        self.check_a_name("é" * 32, "é" * 28)
+
+    def test_twenty_two_cjk_characters_build_and_play(self):
+        # 66 bytes, cut to 54: 18 characters of 3 bytes.
+        self.check_a_name("移" * 22, "移" * 18)
+
+    def test_two_moves_named_alike_at_sixty_two_bytes_build_and_play_alone(self):
+        # Two names that make one slider name ("!" and "?" are both made "_"):
+        # the second slider is given a " 2" after its 62 bytes.
+        first, second = self.moves_named("n" * 61 + "!", "n" * 61 + "?")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        one, two = rig().rigmoves.moves
+        self.assertEqual((one.prop, two.prop), ("n" * 56, "n" * 56 + " 2"))
+        self.check_plays(one, first, (second,))
+        self.check_plays(two, second, (first,))
+
+    def test_two_moves_of_one_name_at_sixty_two_bytes_get_a_slider_each(self):
+        alike = "n" * 62
+        self.moves_named(alike, alike)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        one, two = rig().rigmoves.moves
+        self.assertNotEqual(one.prop, two.prop)
+        for move in (one, two):
+            self.assertLessEqual(len(move.prop.encode()), 63)
+            self.assertIn(move.prop, rig().pose.bones[move.control].keys())
+
+    def test_a_combined_control_named_with_seventy_characters_builds_and_plays(self):
+        first, second = self.moves_named("Lid", "Latch")
+        self.assertEqual(bpy.ops.rigmoves.combine(), {"FINISHED"})
+        group = rig().rigmoves.groups[0]
+        group.name = "g" * 70
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(group.prop, "g" * 56)
+        self.assertTrue(group.built)
+        self.assertIn(group.prop, rig().pose.bones[group.control].keys())
+        drive(group, 1.0)
+        for box in (first, second):
+            self.assertAlmostEqual(centre(box).z, 2.0, places=4)
+        drive(group, 0.0)
+        for box in (first, second):
+            self.assertAlmostEqual(centre(box).z, 1.0, places=4)
+
+    def test_a_name_too_long_for_a_property_that_a_file_holds_is_made_again(self):
+        # What a file saved after a Build that failed on a long name holds.
+        (box,) = self.moves_named("Lid opens")
+        move = rig().rigmoves.moves[0]
+        move.prop = "q" * 70
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(move.prop, "Lid opens")
+        self.check_plays(move, box)
+
+    def test_a_name_that_fits_is_kept_whole(self):
+        self.check_a_name("Open the big lid", "Open the big lid")
+
+
 def drift_of(points, expected):
     """How far the furthest of these points is from the same one of the others."""
     return max((a - b).length for a, b in zip(points, expected))
