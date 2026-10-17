@@ -10727,6 +10727,112 @@ class TestAChestAndLatchCarriedFarThenBuilt(CopyThatCase):
                     self.assertLess(drift(self.latch, places), TOLERANCE, share)
 
 
+class TestGeometryAddedToABuiltPart(ChestCase):
+    """New vertices are added to the mesh of a built lid: a cube made in Edit Mode
+    with Shift+A, or a handle joined to it with Ctrl+J. They are in no vertex
+    group, and the Armature modifier moves only what is in one, so at full share
+    the lid swung open and they stayed where they were, 1.96 m behind it. Build
+    said nothing."""
+
+    SAID = "'Lid' had new geometry; it moves with it now."
+
+    def add_a_cube(self):
+        """Shift+A, Mesh, Cube, in Edit Mode, over the lid."""
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="DESELECT")
+        bpy.ops.mesh.primitive_cube_add(size=0.2, location=(0.0, -0.3, 1.3))
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def join_a_handle(self):
+        """A handle of its own, joined to the lid with Ctrl+J."""
+        handle = cube("Handle", (0.0, -0.3, 1.45))
+        handle.scale = (0.3, 0.1, 0.1)
+        bpy.context.view_layer.update()
+        select(self.lid, handle)
+        self.assertEqual(bpy.ops.object.join(), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def extrude_the_top(self):
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        editing = bmesh.from_edit_mesh(self.lid.data)
+        for face in editing.faces:
+            face.select_set(False)
+        max(editing.faces, key=lambda face: face.calc_center_median().z).select_set(True)
+        bmesh.update_edit_mesh(self.lid.data)
+        self.assertEqual(bpy.ops.mesh.extrude_region_move(
+            TRANSFORM_OT_translate={"value": (0.0, 0.0, 0.5)}), {"FINISHED"})
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def subdivide(self):
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.mesh.subdivide(number_cuts=1), {"FINISHED"})
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def build_and_check(self):
+        """Build, and the lid, new vertices and all, is the rigid copy of itself
+        that the move plays."""
+        shut = rest_points(self.lid)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(shut=shut)
+
+    def test_a_cube_added_in_edit_mode_swings_with_the_lid(self):
+        self.add_a_cube()
+        self.assertEqual(len(self.lid.data.vertices), 16)
+        self.build_and_check()
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_a_handle_joined_with_ctrl_j_swings_with_the_lid(self):
+        self.join_a_handle()
+        self.assertEqual(len(self.lid.data.vertices), 16)
+        self.build_and_check()
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_it_is_said_once(self):
+        self.add_a_cube()
+        self.build_and_check()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_extruding_and_subdividing_still_work_and_say_nothing(self):
+        # Their new vertices take the weights of the ones they come from.
+        for how in (self.extrude_the_top, self.subdivide):
+            with self.subTest(how=how.__name__):
+                how()
+                self.build_and_check()
+                self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_vertices_in_another_group_are_somebodys_weights_and_are_left(self):
+        self.add_a_cube()
+        other = self.lid.vertex_groups.new(name="Somebody")
+        other.add(range(8, 16), 0.5, "REPLACE")
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        own = self.lid.vertex_groups[self.move.parts["Lid"].bone_name]
+        for vertex in list(self.lid.data.vertices)[8:]:
+            self.assertEqual([g.group for g in vertex.groups], [other.index])
+        self.assertEqual(sum(1 for v in self.lid.data.vertices
+                             if any(g.group == own.index for g in v.groups)), 8)
+        self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_a_lid_in_edit_mode_is_waited_for(self):
+        self.add_a_cube()
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            self.assertEqual(rigmoves.bind_new_geometry(rig().rigmoves), [])
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        self.assertEqual(rigmoves.bind_new_geometry(rig().rigmoves), ["Lid"])
+
+
 if __name__ == "__main__":
     # Inside a Blender binary sys.argv is Blender's own command line; only what
     # follows "--" is meant for the tests.

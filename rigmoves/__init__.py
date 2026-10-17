@@ -3287,6 +3287,35 @@ def heal_bindings(rig, data, leave=()):
     return healed
 
 
+def bind_new_geometry(data, leave=()):
+    """Put the vertices a built part has gained into its group, at full weight,
+    and return the names of the parts that had any.
+
+    Binding put every vertex there was in the part's group, and a vertex added
+    since - a cube made with Shift+A in Edit Mode, a handle joined with Ctrl+J -
+    is in none: the Armature modifier moves only what is in a group, so at full
+    share the part swung off and left them where they were. One that is in a
+    group already is somebody's weight - extruded or subdivided from a vertex
+    that was weighted, or painted to another bone - and is left alone. An object
+    in Edit Mode is waited for, as its mesh does not hold what is being edited,
+    and one that is a part of two moves is left as heal_bindings leaves it.
+    """
+    grown = []
+    for move in data.moves:
+        for part in bound_parts(move):
+            obj = part_object(part)
+            if obj is None or obj.type != "MESH" or obj.mode == "EDIT" or obj in leave:
+                continue
+            group = obj.vertex_groups.get(part.bone_name)
+            if group is None:
+                continue
+            loose = [vertex.index for vertex in obj.data.vertices if not vertex.groups]
+            if loose:
+                group.add(loose, 1.0, "REPLACE")
+                grown.append(part.name)
+    return grown
+
+
 def bind_object(rig, obj, bone_name):
     """Tie a whole object to one bone, and let it travel with the rig.
 
@@ -6715,6 +6744,9 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         # a group left from a deleted rig only starts to pull when a part of
         # its name joins, and its bone is made in this very Build.
         healed = heal_bindings(rig, data, twice)
+        # Then whatever was added to a part since it was bound goes with the rest
+        # of it, now that each part is in its own group and no other.
+        grown = bind_new_geometry(data, twice)
 
         # Every move needs a stable name of its own, because a combined
         # control refers to its members by one - names change, this does not.
@@ -6895,6 +6927,9 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += (" {:d} part(s) copied from another were being moved "
                              "by its bone as well as their own; now only by their "
                              "own.".format(healed))
+        if grown:
+            data.report += (" {:s} had new geometry; it moves with {:s} now."
+                            .format(named(grown), "it" if len(grown) == 1 else "them"))
         if hung:
             data.report += " {:d} part(s) hung from the part they follow.".format(hung)
         if let_go:
