@@ -3522,12 +3522,20 @@ def bind_new_geometry(data, leave=()):
     Binding put every vertex there was in the part's group, and a vertex added
     since - a cube made with Shift+A in Edit Mode, a handle joined with Ctrl+J -
     is in none: the Armature modifier moves only what is in a group, so at full
-    share the part swung off and left them where they were. One that is in a
-    group already is somebody's weight - extruded or subdivided from a vertex
-    that was weighted, or painted to another bone - and is left alone. An object
-    in Edit Mode is waited for, as its mesh does not hold what is being edited,
-    and one that is a part of two moves is left as heal_bindings leaves it.
+    share the part swung off and left them where they were. One that is weighted
+    already is somebody's weight - extruded or subdivided from a vertex that was
+    weighted, or painted to another bone - and is left alone. An object in Edit
+    Mode is waited for, as its mesh does not hold what is being edited, and one
+    that is a part of two moves is left as heal_bindings leaves it.
+
+    Weighted is a weight above nothing in a group named after a bone of this rig
+    that deforms. A mesh joined in brings its groups along: the knob's, for a bone
+    Build has just taken out, or a "Pin" for a modifier or a cloth. Those move
+    nothing, and a vertex in no other group was left behind as if it were weighted.
+    It is put in the part's group like any other, and keeps the rest.
     """
+    rig = data.id_data
+    deforming = {bone.name for bone in rig.data.bones if bone.use_deform}
     grown = []
     for move in data.moves:
         for part in bound_parts(move):
@@ -3537,7 +3545,16 @@ def bind_new_geometry(data, leave=()):
             group = obj.vertex_groups.get(part.bone_name)
             if group is None:
                 continue
-            loose = [vertex.index for vertex in obj.data.vertices if not vertex.groups]
+            pulling = {g.index for g in obj.vertex_groups if g.name in deforming}
+            # A walk in Python over every vertex at every Build, so no generator
+            # per vertex: a part of half a million of them took three times as long.
+            loose = []
+            for vertex in obj.data.vertices:
+                for held in vertex.groups:
+                    if held.weight > 0.0 and held.group in pulling:
+                        break
+                else:
+                    loose.append(vertex.index)
             if loose:
                 group.add(loose, 1.0, "REPLACE")
                 grown.append(part.name)

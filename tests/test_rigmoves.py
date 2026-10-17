@@ -12077,6 +12077,16 @@ class TestGeometryAddedToABuiltPart(ChestCase):
                 self.assertNotIn("new geometry", rig().rigmoves.report)
 
     def test_vertices_in_another_group_are_somebodys_weights_and_are_left(self):
+        # Weights on a bone of the artist's own, which deforms: a group named after
+        # no bone moves nothing, and is not somebody's weight (see
+        # TestAMeshWithGroupsJoinedIntoABuiltPart).
+        select(rig())
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bone = rig().data.edit_bones.new("Somebody")
+            bone.head, bone.tail = (3.0, 0.0, 0.0), (3.0, 0.0, 1.0)
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
         self.add_a_cube()
         other = self.lid.vertex_groups.new(name="Somebody")
         other.add(range(8, 16), 0.5, "REPLACE")
@@ -12184,6 +12194,115 @@ class TestTheModelScaledOrTurnedThenApplied(ChestCase):
         self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
         self.assertNotIn("put back", rig().rigmoves.report)
         self.check_lid(change)
+
+
+class TestAMeshWithGroupsJoinedIntoABuiltPart(CopyThatCase):
+    """A lid and its knob are two parts of one move, built. The knob is joined
+    into the lid with Ctrl+J, and Build is pressed: the lid keeps the knob's
+    vertex group "Knob", for a bone Build has just taken out, and 0.19.2 counted
+    a vertex in any group as weighted. The knob's vertices were left alone, in a
+    group that moves nothing, and stayed 2.23 m behind at full share. So did the
+    vertices of any mesh joined in with a group of its own ("Pin")."""
+
+    def setUp(self):
+        super().setUp()
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        self.knob = cube("Knob", (0.0, -0.7, 1.3))
+        self.knob.scale = (0.3, 0.2, 0.2)
+        bpy.context.view_layer.update()
+        self.hinge = Vector((0.0, 0.6, 1.0))
+        homes = {obj: obj.matrix_world.copy() for obj in (self.lid, self.knob)}
+        select(self.lid, self.knob)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        bpy.context.scene.cursor.location = self.hinge
+        select(self.lid, self.knob)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        for obj, home in homes.items():
+            obj.matrix_world = turn_about(self.hinge, "X", -100.0) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def join_into_the_lid(self, other):
+        """Ctrl+J, the lid being the active object."""
+        select(self.lid, other)
+        self.assertEqual(bpy.ops.object.join(), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def build_and_check(self, shut):
+        """Build, and the lid, every vertex of it, swings as one piece."""
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            turn = turn_about(self.hinge, "X", -eased(100.0, share))
+            self.assertLess(drift(self.lid, [turn @ p for p in shut]), TOLERANCE,
+                            "at {:.0%}".format(share))
+        drive(self.move, 0.0)
+
+    def test_a_knob_that_was_a_part_swings_with_the_lid_it_is_joined_into(self):
+        shut = rest_points(self.lid) + rest_points(self.knob)
+        self.join_into_the_lid(self.knob)
+        self.assertEqual(len(self.lid.data.vertices), 16)
+        self.assertIn("Knob", self.lid.vertex_groups)
+        self.build_and_check(shut)
+        self.assertIn("'Lid' had new geometry; it moves with it now.", rig().rigmoves.report)
+        # Said once, and nothing is undone by the next Build.
+        self.build_and_check(shut)
+        self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_a_mesh_with_a_group_of_its_own_swings_with_the_lid_it_is_joined_into(self):
+        pin = cube("Pin", (0.0, 0.1, 1.3))
+        pin.scale = (0.1, 0.1, 0.3)
+        bpy.context.view_layer.update()
+        pin.vertex_groups.new(name="Pin").add(range(8), 1.0, "REPLACE")
+        shut = rest_points(self.lid) + rest_points(pin)
+        self.join_into_the_lid(pin)
+        self.build_and_check(shut)
+        # The group it came with is kept, beside the lid's own.
+        group = self.lid.vertex_groups["Pin"]
+        self.assertEqual(sum(1 for v in self.lid.data.vertices
+                             if any(g.group == group.index for g in v.groups)), 8)
+        self.assertIn("'Lid' had new geometry; it moves with it now.", rig().rigmoves.report)
+
+    def test_only_a_weight_on_a_bone_that_deforms_is_somebodys_weight(self):
+        # (label, a bone of that name, that deforms, the weight, joins the lid's group)
+        cases = (("a bone that deforms, weight 0.5", True, True, 0.5, False),
+                 ("a bone that deforms, weight 0", True, True, 0.0, True),
+                 ("a bone that does not deform", True, False, 0.5, True),
+                 ("no such bone", False, True, 0.5, True))
+        for label, has_bone, deforms, weight, joins in cases:
+            with self.subTest(label):
+                self.setUp()
+                if has_bone:
+                    select(rig())
+                    bpy.ops.object.mode_set(mode="EDIT")
+                    try:
+                        bone = rig().data.edit_bones.new("Somebody")
+                        bone.head, bone.tail = (3.0, 0.0, 0.0), (3.0, 0.0, 1.0)
+                        bone.use_deform = deforms
+                    finally:
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                select(self.lid)
+                bpy.ops.object.mode_set(mode="EDIT")
+                bpy.ops.mesh.select_all(action="DESELECT")
+                bpy.ops.mesh.primitive_cube_add(size=0.2, location=(0.0, -0.3, 1.3))
+                bpy.ops.object.mode_set(mode="OBJECT")
+                other = self.lid.vertex_groups.new(name="Somebody")
+                other.add(range(8, 16), weight, "REPLACE")
+                select(self.lid)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                own = self.lid.vertex_groups[self.move.parts["Lid"].bone_name]
+                for vertex in list(self.lid.data.vertices)[8:]:
+                    held = {g.group: g.weight for g in vertex.groups}
+                    # Whatever it was painted to is kept.
+                    self.assertAlmostEqual(held[other.index], weight, places=5)
+                    self.assertEqual(own.index in held, joins, label)
+                    if joins:
+                        self.assertAlmostEqual(held[own.index], 1.0, places=5)
+                self.assertEqual("new geometry" in rig().rigmoves.report, joins, label)
 
 
 if __name__ == "__main__":
