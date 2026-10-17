@@ -38,50 +38,7 @@ guide: what the add-on promises).
 
 ## State of the add-on
 
-- **Version:**
-  - 0.18.0 is pushed (dbc6d22).
-  - 0.18.1 (the safety fixes below) is pushed (fddbd6e).
-  - 0.18.2 is pushed: it runs on Blender 4.5 LTS, 5.0 and 5.2, and needs 4.5
-    or newer (4.4 cannot run it at all).
-  - 0.18.3 is pushed: the Riding along list reads at the sidebar's usual
-    width (the header keeps its count, and a rider's name is cut from the
-    front to the room it has, so a Ring's copy numbers show).
-  - 334 tests pass on 4.5.14, 5.0.1 and 5.2.1 (`CLAUDE.md` has the three
-    Blender paths): `.venv/bin/python tests/test_rigmoves.py`;
-    `ruff check rigmoves tests tools`.
-- **Features, in order:**
-  - Before/After/Steps, Build Sliders, Play and the handle;
-  - Speed per stretch, Ease;
-  - Timing (Delay);
-  - Ride Along with Lead and Mirror;
-  - Pivot, Curve the Path, Paths;
-  - Animate;
-  - Follows (finger chains), with whole-chain riders (0.16);
-  - Spread (Lead or Delay by pattern; Step or Range), Make Chain (a joint
-    sits at the far end of the part before it), Curl (factor**k), Ring
-    (copies, or **Use what's there / Fill the gaps** to adopt modelled
-    parts, with safe re-framing) (0.17-0.18);
-  - the author credit (0.14.3);
-  - the rename to CopyThat (0.15).
-
-  The internal names stay `rigmoves` so old .blend files work. Never rename
-  them.
-- **0.18.1:** the fixes for 14 confirmed review findings on Ring's
-  "use existing" and Spread's step.
-  - Never adopt objects that are animated, library-linked or unselectable.
-  - Re-frame only plain objects, and verify nothing moved, or roll back.
-  - Match as a point set.
-  - Fill never stacks; a place with a near-miss counts as occupied.
-  - Refuse Fill when copies stand off the ring (a wrong cursor or Count).
-  - Size the default step to fit ±40.
-  - Clearer reports.
-
-  Done and pushed; the commit message has the details and the guide's bug list
-  the five user-facing entries. Ring's own Lead step stays 0 unless typed (it is
-  not sized to fit).
-- **Seen in a real Blender 5.2.1 window** (0.18.2, the sidebar at its default
-  width): the panel and the Ring… and Spread… dialogs drew correctly, except
-  the Riding along list, which 0.18.3 fixes.
+Current version: 0.19.2. On NemVe3D's PC the state, plan and procedures live in the Obsidian vault D:\ObsidianVault\NemVe3D (read its CLAUDE.md first). Elsewhere, read HANDOFF.md.
 
 ## Superhive (Blender Market) release: status
 

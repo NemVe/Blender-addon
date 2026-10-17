@@ -39,15 +39,15 @@ promises to the user.
 - Explain results in plain words: what was wrong, what changed, and how to
   check it in Blender. They aren't a programmer.
 - Don't open a PR unless they ask. The only branch is
-  `claude/funny-hypatia-jnendi` on `NemVe/Blender-addon`.
+  `main` on `NemVe/Blender-addon`.
 
 ## Files
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 8,100 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 9,500 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
-| `tests/test_rigmoves.py` | 334 end-to-end tests, run headless |
+| `tests/test_rigmoves.py` | 629 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
 | `.claude/hooks/session-start.sh` | installs `bpy==5.2.2` into `.venv` in cloud sessions |
 | `CLAUDE.md` | short rules: commands, drivers, style |
@@ -111,6 +111,7 @@ Features, in the order the user asked for them:
 | 0.18.3 | **The Riding along list reads at the sidebar's usual width** (found in a real 5.2.1 window, sidebar at its default 280 px). The Spread... button of the Riding along and Timing headers sits in a right-aligned sub-row: it took half the header, and the count was cut ("Riding alon…"). A rider's name is cut from the front to the room its row has, measured with `blf` in the panel's font, so Ring's copy numbers show: it was `short(name, 13)`, which Blender then cut at the end as well, seven rows of "…ter Lead…". Tests draw the panel for a sidebar of a given width (`Sidebar`, `drawn_panel`, and the logging layout now notes labels and alignments) | `fitted`, `_draw_move`, `TestNamesBesideControls` |
 | 0.19.0 | The review of 0.18.3, 17 confirmed findings: a part is its object (`part_object`, renames, whole-model copies with their own Action), the rig's seat (`catch_up`: a moved model is carried), re-framed parts put back (fingerprints), one object in one move, copies join a move free, children named; Ring's shared-mesh settle and rollback, shared actions (own slot, own copy), keyed children, NLA/driver parts named, stacked duplicates, Spread's step re-sized live, SKIP_SAVE on Ring's Lead step and Spread's toggles, reports | see the batch commits and the guide's bug list |
 | 0.19.1 | The review of 0.19.0, 22 confirmed items in two batches. Who is who: a deleted part is let go of and taken out of its move at the next button (kept as "Name (deleted)" while riders copy it or hang from it), and a new object given its name is not it; the deletion timer no longer removes objects from the list it loops over; a big scene stays quick (users, not collections); a copy of a whole model, Alt+D too, owns its Armature and its path curves; the object a part hung from is kept by pointer; Build no longer empties an NLA strip that plays the part's own action, and a muted strip on a track that plays is named (the advice is the track); New Rig is not remembered; Ring says what is wrong with a deleted part or a non-mesh. Where things stand: a part is told from a drag by a rigid fit of three far-apart vertices (so a drag on top of Set Origin or Apply is kept, and parts not built yet are looked at), the marks are kept current as the mesh is edited, the model's seat is its Root bone (Ctrl+A and Set Origin on the rig move nothing), `same_place` allows for the rounding far from the origin, a rig scaled to nothing is left alone and Record and Build refuse it, a rig that moves itself is not seated, a rig switched off in the viewport is refused before anything changes, re-framed children are hung again as Build hangs a follower, a refused re-frame names its blocker, and riders' seats are worked out in the rig's own space | `let_go_of_deleted`, `take_out_gone`, `own_armature`, `own_curves`, `home_of`, `clip_strips`, `spread_vertices`, `was_reframed`, `retake_marks`, `marks_handler`, `seat_of`, `same_place`, `has_no_size`, `unavailable`; see the batch commits and the guide's bug list |
+| 0.19.2 | The review of 0.19.1's 14 confirmed bugs fixed in four batches; 629 tests on 4.5/5.0/5.2. | see the batch commits and the guide's bug list |
 
 ## The model underneath (read before changing any maths)
 
@@ -145,14 +146,16 @@ Features, in the order the user asked for them:
   other ID uses the action (`bpy.data.user_map`) the object gets `action.copy()`,
   without the other slots and without a fake user, and the same slot, and the keys
   come out of the copy only (`drop_empty_action` then drops the empty copy).
-- **Motion Build cannot lift** (0.19): `fighting_parts(data)` names the parts whose
-  transform an unmuted NLA strip (`moved_by_nla`: the strip's own slot, tracks muted
-  or put aside by a solo skipped, `use_nla` off skipped, meta strips followed) or an
-  unmuted driver (`moved_by_driver`) works. They are the user's work: the panel's
-  box (`_draw_own_keys`) says what to do, with no Lift button for them, Build adds
-  `fighting_words` to its report and is a WARNING while any are left, and
-  `clear_autokey` / Lift Those Keyframes never touch them. `has_own_motion` (Ring's
-  "may it be taken up") is the wider test: any NLA track at all.
+- **Motion Build cannot lift** (0.19): `fighting_parts(data)` names the parts
+  whose transform an NLA strip on a track that plays (a muted strip still
+  counts: Blender resets its channels) (`moved_by_nla`: the strip's own slot,
+  tracks muted or put aside by a solo skipped, `use_nla` off skipped, meta
+  strips followed) or an unmuted driver (`moved_by_driver`) works. They are the
+  user's work: the panel's box (`_draw_own_keys`) says what to do, with no Lift
+  button for them, Build adds `fighting_words` to its report and is a WARNING
+  while any are left, and `clear_autokey` / Lift Those Keyframes never touch
+  them. `has_own_motion` (Ring's "may it be taken up") is the wider test: any
+  NLA track at all.
 - **Drivers must stay "simple expressions"** so they run with Auto Run
   Python Scripts off, and must stay under 256 characters, or Blender cuts
   them short.
@@ -431,6 +434,64 @@ Features, in the order the user asked for them:
   give back. NLA: `clip_strips(strips, muted=False)`; `own_action` counts the object's
   own strips, muted and in meta strips, as users (`muted=True`); `moved_by_nla` counts a
   muted strip on a track that plays.
+- `take_riders_out` makes the rig's Action its own first (`own_actions`), so
+  whoever takes a part out cannot pull curves out of the Action a copy of the
+  whole model still shares. The review's order (`take_out_gone` after
+  `own_curves` in `catch_up`) was tried and leaves a stray copy of the part's
+  path curve in the scene, so it was not used.
+- new rig property `seat_world` (the rig object's matrix, kept by `store_seat`
+  beside the seat). `rig_stayed(rig, data)` = seat kept on the Root, object
+  where it was: the Root bone was edited, the model has not moved, so `catch_up`
+  carries nothing and re-keeps the seat, and `moved_since` says None. Apply /
+  Set Origin on the rig (object changed, seat not) refresh `seat_world` in
+  `catch_up`'s last branch. All zeros in a file from 0.19.1 or before: the first
+  button, or E1.3's look at the file, fills it.
+- `settle_old_rig(rig, data)`, asked through `look_over(rig)` (once per object
+  `session_uid`, set `SETTLED`) from `follow_renames_handler` the first time a
+  rig is seen after a file is opened. It makes a 0.19.0 seat over to the Root
+  bone if the rig stands where the seat says, fills `seat_world` of a 0.19.1
+  rig, runs `point_at_objects` and `retake_marks(old=True)` (new kwarg: marks of
+  0.19.0, `rest_which[0] < 0`, are taken afresh for a part standing on its
+  Before). `load_post` was tried and cannot be used: objects' matrices are not
+  worked out yet inside it (all identity). A background session never runs the
+  handlers after `open_mainfile` until something is tagged, so the tests nudge
+  it (`update_tag()` on every object, then `view_layer.update()`), as a window
+  does.
+- `point_at_objects` also points `home_object` at the standing object
+  `home_parent` names, when the pointer is empty.
+- **New geometry (0.19.2):** `bind_new_geometry(data, leave)` runs in Build
+  right after `heal_bindings` (so each part is in its own group and no other).
+  For every bound mesh part it adds the vertices that are in NO vertex group to
+  the part's group at 1.0 (REPLACE) and returns the part names, which Build
+  reports. It skips a part in Edit Mode (its `data.vertices` do not hold the
+  edit yet; the next Build catches it up), a part that is not a mesh, and the
+  objects that are parts of two moves (`doubled`, as `heal_bindings` does). It
+  is a Python pass over each bound mesh's vertices per Build.
+- **Names that Blender cuts (0.19.2):** a custom property's name is held to 63
+  BYTES. `safe_prop_name` keeps 56 (room for the " 2" that `unique_prop_name`
+  adds) and cuts with `fit_name(text, limit=63)`, which never splits a UTF-8
+  letter. `ensure_slider` makes the name again when the stored `prop` is over 63
+  bytes (a file saved after a Build that failed on one). The handle bone is
+  named `fit_name(name + " handle")`: Blender 4.5 cuts a bone's name at the 63rd
+  byte wherever it falls (5.0 cuts at a letter), and Python then raises
+  UnicodeDecodeError on `bone.name`.
+- **A rig with no size (0.19.2):** `has_no_size` refuses Record, Build, Remove,
+  and Set Pivot and Ring when the move is built (before the drag check,
+  `keeps_drags`, which would call every part dragged there). Nothing that sets a
+  world matrix through the rig runs on such a frame: `hang`, `reseat_bound` and
+  `stand_parts` return at once when `is_singular(rig.matrix_world)` (a follower
+  is hung by the next Build, `hang_objects`; the eye still FINISHES, posing the
+  bones and leaving the parts and their scales alone). Remove is the one button
+  of that list that used to catch up and never refuse; it refuses this one thing
+  only, and still not for what is wrong with a part.
+- **Where a handle hangs (0.19.2):** `sync_handles` hangs a handle from its
+  control bone as before, but never from a bone that is a part of any move, nor
+  one with a part above it (`under_a_part`): it walks up from the control to the
+  nearest bone clear of parts, or leaves the handle with no parent. A handle on
+  a part is a dependency cycle (handle -> slider property -> the part's Action
+  constraint -> the part -> the handle) and the part plays one evaluation
+  behind. The slider property itself may sit on a part bone; that is no cycle.
+  `default_control` is unchanged (first bone with no parent).
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in
