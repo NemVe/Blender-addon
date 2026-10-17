@@ -10621,6 +10621,112 @@ class TestAVeryThinPartGivenANewOrigin(CopyThatCase):
         self.assertLess(miss, 1e-4)
 
 
+class TestAChestAndLatchCarriedFarThenBuilt(CopyThatCase):
+    """A chest with a lid hinged on its back edge and a latch on the lid, each
+    turning about a pivot of its own, is carried some tens of metres by G and
+    turned by R, then Built. The pivots had moved by no more than 3e-5, the
+    rounding of a model carried that far, and Build took that for new pivots:
+    "2 turned about a new pivot", and both paths were re-keyed. Nothing visible
+    moved, and nothing had changed."""
+
+    HINGE = Vector((0.0, 0.6, 1.0))
+    LATCH_PIVOT = Vector((0.0, -0.62, 1.1))
+    CARRIES = (30.0, 300.0)
+
+    def make_chest(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.body = cube("Body", (0.0, 0.0, 0.5))
+        self.body.scale = (2.0, 1.2, 1.0)
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        self.latch = cube("Latch", (0.0, -0.62, 0.95))
+        self.latch.scale = (0.3, 0.05, 0.3)
+        bpy.context.view_layer.update()
+        homes = {o.name: o.matrix_world.copy() for o in (self.lid, self.latch)}
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for part, pivot in ((self.lid, self.HINGE), (self.latch, self.LATCH_PIVOT)):
+            bpy.context.scene.cursor.location = pivot
+            select(part)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        swing = turn_about(self.HINGE, "X", -100.0)
+        self.lid.matrix_world = swing @ homes["Lid"]
+        self.latch.matrix_world = swing @ turn_about(self.LATCH_PIVOT, "X", 40.0) @ homes["Latch"]
+        bpy.context.view_layer.update()
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def seen(self):
+        """Where the lid and the latch are at both ends of the slider and half way."""
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            out[share] = {part.name: world_points(part) for part in (self.lid, self.latch)}
+        drive(self.move, 0.0)
+        return out
+
+    def carry_everything(self, distance):
+        """G and then R, the rig and every part selected."""
+        select(rig(), self.body, self.lid, self.latch)
+        self.assertEqual(bpy.ops.transform.translate(value=(distance * 0.8, distance * 0.6, 0.0)),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.transform.rotate(value=math.radians(30.0), orient_axis="Z"),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_a_carry_is_not_taken_for_new_pivots(self):
+        for distance in self.CARRIES:
+            with self.subTest(distance=distance):
+                self.make_chest()
+                was = self.seen()
+                body = self.body.matrix_world.copy()
+                self.carry_everything(distance)
+                carry = self.body.matrix_world @ body.inverted()
+                with mock.patch.object(rigmoves, "shift_pivot",
+                                       wraps=rigmoves.shift_pivot) as shifted:
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                    self.assertNotIn("new pivot", rig().rigmoves.report)
+                    self.assertEqual(shifted.call_count, 0)
+                # And the lid and latch play what they played, carried.
+                for share, places in was.items():
+                    drive(self.move, share)
+                    for part in (self.lid, self.latch):
+                        self.assertLess(drift(part, [carry @ p for p in places[part.name]]),
+                                        TOLERANCE, "{:s} at {:.0%}".format(part.name, share))
+
+    def test_a_pivot_that_really_moves_still_moves_the_bone(self):
+        for distance in self.CARRIES:
+            with self.subTest(distance=distance):
+                self.make_chest()
+                self.carry_everything(distance)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                part = self.move.parts["Latch"]
+                was = rig().data.bones[part.bone_name].head_local.copy()
+                ends = {}
+                for share in (0.0, 1.0):
+                    drive(self.move, share)
+                    ends[share] = world_points(self.latch)
+                drive(self.move, 0.0)
+                # 5 cm along the world's X from where the latch turns now.
+                bpy.context.scene.cursor.location = (rigmoves.pivot_world(part)
+                                                     + Vector((0.05, 0.0, 0.0)))
+                select(self.latch)
+                with mock.patch.object(rigmoves, "shift_pivot",
+                                       wraps=rigmoves.shift_pivot) as shifted:
+                    self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"),
+                                     {"FINISHED"})
+                    self.assertEqual(shifted.call_count, 1)
+                now = rig().data.bones[part.bone_name].head_local
+                self.assertAlmostEqual((now - was).length, 0.05, places=4)
+                # The poses stay as recorded.
+                for share, places in ends.items():
+                    drive(self.move, share)
+                    self.assertLess(drift(self.latch, places), TOLERANCE, share)
+
+
 if __name__ == "__main__":
     # Inside a Blender binary sys.argv is Blender's own command line; only what
     # follows "--" is meant for the tests.

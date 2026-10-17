@@ -4473,13 +4473,18 @@ def apply_pivots(context, rig, data):
     """
     into = rig.matrix_world.inverted_safe()
     jobs = []
+    # A model carried tens of metres has its places rounded by the carrying, and
+    # a pivot a hair off its bone is that, not a new pivot, up to what same_place
+    # allows for the farthest the rig has stood: taken for one, it re-keys the
+    # paths and puts a change in the report for nothing.
+    limit = 1e-6 + 2e-6 * data.far
     for move in data.moves:
         for part in bound_parts(move):
             bone = rig.data.bones.get(part.bone_name)
             if part.leader or bone is None:
                 continue
             shift = into @ pivot_world(part) - bone.head_local
-            if shift.length > 1e-6:
+            if shift.length > limit:
                 jobs.append((move, part, shift))
     if not jobs:
         return 0
