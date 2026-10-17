@@ -1879,15 +1879,20 @@ def same_place(one, other, near, far=0.0):
 
     A matrix keeps seven digits, so one that stands a few hundred metres from the
     world's origin is only right to a hair over 1e-5, and one carried there and
-    back is a little less right than that for good. Its turn and scale are not
-    out by more than 1e-5 whatever the distance; its position is by 1e-5 of
-    1 + `near`, how far from the origin the two stand, and 2e-6 of `far`, the
-    farthest the rig has been carried (see RIGMOVES_Rig.far).
+    back is a little less right than that for good. So is one of a big scale: its
+    seven digits are of its biggest entry, `size` (1 at the least), and a float
+    near 200 steps by 1.5e-5, so a part scaled by 200, or a model made 200 times
+    the size, is never quite where it was put. Its turn and scale are not out by
+    more than 1e-5 of `size`, whatever the distance; its position is by 1e-5 of
+    `size` + `near`, how far from the origin the two stand, and 2e-6 of `far`,
+    the farthest the rig has been carried (see RIGMOVES_Rig.far), taken `size`
+    times over: a model scaled up has the rounding of its places scaled with them.
     """
-    turn = max(abs(a - b) for row_a, row_b in zip(one.to_3x3(), other.to_3x3())
-               for a, b in zip(row_a, row_b))
+    ours, theirs = one.to_3x3(), other.to_3x3()
+    size = max(1.0, max(abs(a) for row in (*ours, *theirs) for a in row))
+    turn = max(abs(a - b) for row_a, row_b in zip(ours, theirs) for a, b in zip(row_a, row_b))
     shift = max(abs(a - b) for a, b in zip(one.translation, other.translation))
-    return turn <= 1e-5 and shift <= 1e-5 * (1.0 + near) + 2e-6 * far
+    return turn <= 1e-5 * size and shift <= 1e-5 * (size + near) + 2e-6 * far * size
 
 
 def hand_moved(part, shift=None):
@@ -2464,10 +2469,14 @@ def reach_of(obj, corners=None):
 def triangle_frame(a, b, c):
     """A frame standing on the first of three points: its X along the first
     edge, its Z square to the triangle, its Y between. None when the three lie
-    (nearly) in a line, and no frame stands on them."""
+    (nearly) in a line, and no frame stands on them: when the sine of the angle at
+    the first is under 1e-7, the third is off the line by about as much as the
+    positions are rounded (a float keeps 6e-8 of its size). Anything over that is
+    a frame - a rod a hundred metres long and 1 cm across has one, and a part that
+    thin must not be taken for dragged when its origin is set."""
     along, across = b - a, c - a
     normal = along.cross(across)
-    if along.length < 1e-12 or normal.length < 1e-4 * along.length * across.length:
+    if along.length < 1e-12 or normal.length < 1e-7 * along.length * across.length:
         return None
     x = along.normalized()
     z = normal.normalized()
@@ -3376,6 +3385,35 @@ def heal_bindings(rig, data, leave=()):
                 own_binding(rig, obj, part.bone_name)
                 healed += 1
     return healed
+
+
+def bind_new_geometry(data, leave=()):
+    """Put the vertices a built part has gained into its group, at full weight,
+    and return the names of the parts that had any.
+
+    Binding put every vertex there was in the part's group, and a vertex added
+    since - a cube made with Shift+A in Edit Mode, a handle joined with Ctrl+J -
+    is in none: the Armature modifier moves only what is in a group, so at full
+    share the part swung off and left them where they were. One that is in a
+    group already is somebody's weight - extruded or subdivided from a vertex
+    that was weighted, or painted to another bone - and is left alone. An object
+    in Edit Mode is waited for, as its mesh does not hold what is being edited,
+    and one that is a part of two moves is left as heal_bindings leaves it.
+    """
+    grown = []
+    for move in data.moves:
+        for part in bound_parts(move):
+            obj = part_object(part)
+            if obj is None or obj.type != "MESH" or obj.mode == "EDIT" or obj in leave:
+                continue
+            group = obj.vertex_groups.get(part.bone_name)
+            if group is None:
+                continue
+            loose = [vertex.index for vertex in obj.data.vertices if not vertex.groups]
+            if loose:
+                group.add(loose, 1.0, "REPLACE")
+                grown.append(part.name)
+    return grown
 
 
 def bind_object(rig, obj, bone_name):
@@ -4564,13 +4602,18 @@ def apply_pivots(context, rig, data):
     """
     into = rig.matrix_world.inverted_safe()
     jobs = []
+    # A model carried tens of metres has its places rounded by the carrying, and
+    # a pivot a hair off its bone is that, not a new pivot, up to what same_place
+    # allows for the farthest the rig has stood: taken for one, it re-keys the
+    # paths and puts a change in the report for nothing.
+    limit = 1e-6 + 2e-6 * data.far
     for move in data.moves:
         for part in bound_parts(move):
             bone = rig.data.bones.get(part.bone_name)
             if part.leader or bone is None:
                 continue
             shift = into @ pivot_world(part) - bone.head_local
-            if shift.length > 1e-6:
+            if shift.length > limit:
                 jobs.append((move, part, shift))
     if not jobs:
         return 0
@@ -6807,6 +6850,9 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         # a group left from a deleted rig only starts to pull when a part of
         # its name joins, and its bone is made in this very Build.
         healed = heal_bindings(rig, data, twice)
+        # Then whatever was added to a part since it was bound goes with the rest
+        # of it, now that each part is in its own group and no other.
+        grown = bind_new_geometry(data, twice)
 
         # Every move needs a stable name of its own, because a combined
         # control refers to its members by one - names change, this does not.
@@ -6987,6 +7033,9 @@ class RIGMOVES_OT_build(bpy.types.Operator):
             data.report += (" {:d} part(s) copied from another were being moved "
                              "by its bone as well as their own; now only by their "
                              "own.".format(healed))
+        if grown:
+            data.report += (" {:s} had new geometry; it moves with {:s} now."
+                            .format(named(grown), "it" if len(grown) == 1 else "them"))
         if hung:
             data.report += " {:d} part(s) hung from the part they follow.".format(hung)
         if let_go:

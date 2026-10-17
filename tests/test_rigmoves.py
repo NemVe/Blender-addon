@@ -10952,6 +10952,426 @@ class TestRigidFit(unittest.TestCase):
         self.assertGreater(miss, 0.5)
 
 
+class TestAModelScaledUpAsAWhole(CopyThatCase):
+    """A built model of three parts is made 200 times the size, the rig and its
+    parts selected - as a model drawn in centimetres is. A float near 200 steps
+    by 1.5e-5, so a part's matrix was a step out of the one kept for it, and
+    that was read as a drag: Build "put back" all three, Record After "read them
+    as a pose", and the travel of the move, 200 metres, was lost."""
+
+    # Each with a drag the add-on must still notice: a centimetre of a part a
+    # hundred metres across, and ten of one a kilometre across.
+    SCALES = {200.0: 0.01, 1000.0: 0.1}
+
+    def make_model(self):
+        """Three cubes in a row, each lifted a metre: built."""
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.parts = [cube(name, (x, 0.0, 0.5))
+                      for name, x in (("A", 0.0), ("B", 3.0), ("C", 6.0))]
+
+        def pose():
+            for part in self.parts:
+                part.location.z += 1.0
+
+        record_move(self.parts, pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def scale_everything(self, scale):
+        select(rig(), *self.parts)
+        self.assertEqual(bpy.ops.transform.resize(value=(scale, scale, scale)), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def travel(self, part):
+        """How far the middle of a part's mesh goes between the two ends of its slider."""
+        drive(self.move, 0.0)
+        start = centre(part)
+        drive(self.move, 1.0)
+        end = centre(part)
+        drive(self.move, 0.0)
+        return end - start
+
+    def test_build_and_record_see_no_drag_in_a_model_made_bigger(self):
+        for scale in self.SCALES:
+            with self.subTest(scale=scale):
+                self.make_model()
+                self.scale_everything(scale)
+                for _ in range(2):
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                    self.assertNotIn("put back", rig().rigmoves.report)
+                self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+                self.assertNotIn("moved by hand", rig().rigmoves.report)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertNotIn("put back", rig().rigmoves.report)
+
+    def test_the_travel_of_the_move_is_kept_through_record_and_build(self):
+        for scale in self.SCALES:
+            with self.subTest(scale=scale):
+                self.make_model()
+                self.scale_everything(scale)
+                for _ in range(2):
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                for part in self.parts:
+                    # Each part rose a metre, and the model is `scale` times the size.
+                    gone = self.travel(part) - Vector((0.0, 0.0, scale))
+                    self.assertLess(gone.length, TOLERANCE * scale, part.name)
+
+    def test_a_real_drag_of_a_part_is_still_read_as_one_and_only_that_part(self):
+        for scale, drag in self.SCALES.items():
+            with self.subTest(scale=scale):
+                self.make_model()
+                self.scale_everything(scale)
+                rigmoves.catch_up(rig())
+                dragged = self.parts[1].matrix_world.copy()
+                dragged.translation.z += drag
+                self.parts[1].matrix_world = dragged
+                bpy.context.view_layer.update()
+                self.assertEqual(rigmoves.unrecorded(rig().rigmoves), ["B"])
+                select(self.parts[1])
+                self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="ORIGIN"),
+                                 {"CANCELLED"})
+                self.assertIn("'B' has been moved and not recorded", rig().rigmoves.report)
+
+
+class TestAPartWithAnUnappliedScaleOf200(CopyThatCase):
+    """A door modelled small and given the object scale an import leaves, 200,
+    never applied, and turned 25 degrees: its matrix has entries of 181 and 85,
+    a float there steps by 1.5e-5, and the matrix Build set was a step out of
+    the one kept - the door read as dragged. Set Pivot, Ring and Curve the Path
+    all refused it with "has been moved and not recorded"."""
+
+    def setUp(self):
+        super().setUp()
+        self.door = cube("Door", (3.3, 1.7, 2.1))
+        self.door.data.transform(Matrix.Scale(0.01, 4))
+        self.door.scale = (200.0, 200.0, 200.0)
+        self.door.rotation_euler.z = math.radians(25.0)
+        bpy.context.view_layer.update()
+
+        def pose():
+            self.door.location.z += 1.0
+
+        record_move([self.door], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+        select(self.door)
+
+    def test_the_door_stands_on_its_before(self):
+        self.assertIsNone(rigmoves.hand_moved(self.move.parts["Door"])[1])
+
+    def test_set_pivot_is_not_refused(self):
+        bpy.context.scene.cursor.location = self.door.matrix_world.translation
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_ring_is_not_refused(self):
+        bpy.context.scene.cursor.location = (self.door.matrix_world.translation
+                                             + Vector((4.0, 0.0, 0.0)))
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=3), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+    def test_curve_the_path_is_not_refused(self):
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.assertNotIn("moved and not recorded", rig().rigmoves.report)
+
+
+class TestAVeryThinPartGivenANewOrigin(CopyThatCase):
+    """A rod a hundred metres long and 1 cm across is built, and then given a new
+    origin. The three vertices that tell a part framed another way from one
+    dragged stand all but in a line on a rod this thin, and no frame was fitted
+    on three points that near a line (the sine of their angle under 1e-4): the
+    rod was taken for dragged and put back on its Before, and its mesh ended up
+    where the origin had been moved to."""
+
+    # (radius, length): 1e4 to 1 as long as it is across, and 1e5 to 1.
+    RODS = ((0.005, 100.0), (0.001, 200.0))
+    SAID = "had its origin, scale or rotation changed after it was bound"
+
+    def make_rod(self, radius, length):
+        """The rod and a cube, both lifted a metre, the rod turned too: built."""
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=length, vertices=12,
+                                            location=(0.0, 0.0, length / 2 + 0.1))
+        self.rod = bpy.context.object
+        self.rod.name = "Rod"
+        other = cube("Other", (6.0, 0.0, 0.5))
+
+        def pose():
+            self.rod.location.z += 1.0
+            self.rod.rotation_euler.y = 0.5
+            other.location.z += 1.0
+
+        record_move([self.rod, other], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def seen(self):
+        """Where the rod is at both ends of its slider and half way."""
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            out[share] = world_points(self.rod)
+        drive(self.move, 0.0)
+        return out
+
+    def check_unmoved(self, was):
+        for share, points in was.items():
+            drive(self.move, share)
+            self.assertLess(drift(self.rod, points), TOLERANCE, "{:.0%}".format(share))
+        drive(self.move, 0.0)
+
+    def test_set_origin_to_the_cursor_moves_nothing(self):
+        for radius, length in self.RODS:
+            with self.subTest(radius=radius, length=length):
+                self.make_rod(radius, length)
+                was = self.seen()
+                bpy.context.scene.cursor.location = (self.rod.matrix_world.translation
+                                                     + Vector((0.2, 0.1, 0.3)))
+                select(self.rod)
+                self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+                bpy.context.view_layer.update()
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.check_unmoved(was)
+                self.assertIn(self.SAID, rig().rigmoves.report)
+                self.assertNotIn("put back on its Before", rig().rigmoves.report)
+
+    def test_a_thin_part_dragged_by_hand_is_still_put_back(self):
+        for radius, length in self.RODS:
+            with self.subTest(radius=radius, length=length):
+                self.make_rod(radius, length)
+                was = self.seen()
+                self.rod.location.x += 0.3
+                self.rod.location.z += 0.7
+                bpy.context.view_layer.update()
+                select(self.rod)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertIn("put back on its Before", rig().rigmoves.report)
+                self.assertNotIn(self.SAID, rig().rigmoves.report)
+                self.check_unmoved(was)
+
+    def test_three_points_a_hair_off_a_line_have_a_frame(self):
+        # A rod's marks: 100 m between the ends, and the third 2 mm off the line.
+        then = [Vector((0.0, 0.0, 0.0)), Vector((100.0, 0.0, 0.0)), Vector((50.0, 0.002, 0.0))]
+        move = turn_about(Vector((1.0, 2.0, 3.0)), (0.3, 0.5, 0.8), 37.0)
+        fit, miss = rigmoves.rigid_fit(then, [move @ p for p in then])
+        self.assertIsNotNone(fit)
+        self.assertLess(miss, 1e-4)
+
+
+class TestAChestAndLatchCarriedFarThenBuilt(CopyThatCase):
+    """A chest with a lid hinged on its back edge and a latch on the lid, each
+    turning about a pivot of its own, is carried some tens of metres by G and
+    turned by R, then Built. The pivots had moved by no more than 3e-5, the
+    rounding of a model carried that far, and Build took that for new pivots:
+    "2 turned about a new pivot", and both paths were re-keyed. Nothing visible
+    moved, and nothing had changed."""
+
+    HINGE = Vector((0.0, 0.6, 1.0))
+    LATCH_PIVOT = Vector((0.0, -0.62, 1.1))
+    CARRIES = (30.0, 300.0)
+
+    def make_chest(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.body = cube("Body", (0.0, 0.0, 0.5))
+        self.body.scale = (2.0, 1.2, 1.0)
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        self.latch = cube("Latch", (0.0, -0.62, 0.95))
+        self.latch.scale = (0.3, 0.05, 0.3)
+        bpy.context.view_layer.update()
+        homes = {o.name: o.matrix_world.copy() for o in (self.lid, self.latch)}
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for part, pivot in ((self.lid, self.HINGE), (self.latch, self.LATCH_PIVOT)):
+            bpy.context.scene.cursor.location = pivot
+            select(part)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        swing = turn_about(self.HINGE, "X", -100.0)
+        self.lid.matrix_world = swing @ homes["Lid"]
+        self.latch.matrix_world = swing @ turn_about(self.LATCH_PIVOT, "X", 40.0) @ homes["Latch"]
+        bpy.context.view_layer.update()
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def seen(self):
+        """Where the lid and the latch are at both ends of the slider and half way."""
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            out[share] = {part.name: world_points(part) for part in (self.lid, self.latch)}
+        drive(self.move, 0.0)
+        return out
+
+    def carry_everything(self, distance):
+        """G and then R, the rig and every part selected."""
+        select(rig(), self.body, self.lid, self.latch)
+        self.assertEqual(bpy.ops.transform.translate(value=(distance * 0.8, distance * 0.6, 0.0)),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.transform.rotate(value=math.radians(30.0), orient_axis="Z"),
+                         {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def test_a_carry_is_not_taken_for_new_pivots(self):
+        for distance in self.CARRIES:
+            with self.subTest(distance=distance):
+                self.make_chest()
+                was = self.seen()
+                body = self.body.matrix_world.copy()
+                self.carry_everything(distance)
+                carry = self.body.matrix_world @ body.inverted()
+                with mock.patch.object(rigmoves, "shift_pivot",
+                                       wraps=rigmoves.shift_pivot) as shifted:
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                    self.assertNotIn("new pivot", rig().rigmoves.report)
+                    self.assertEqual(shifted.call_count, 0)
+                # And the lid and latch play what they played, carried.
+                for share, places in was.items():
+                    drive(self.move, share)
+                    for part in (self.lid, self.latch):
+                        self.assertLess(drift(part, [carry @ p for p in places[part.name]]),
+                                        TOLERANCE, "{:s} at {:.0%}".format(part.name, share))
+
+    def test_a_pivot_that_really_moves_still_moves_the_bone(self):
+        for distance in self.CARRIES:
+            with self.subTest(distance=distance):
+                self.make_chest()
+                self.carry_everything(distance)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                part = self.move.parts["Latch"]
+                was = rig().data.bones[part.bone_name].head_local.copy()
+                ends = {}
+                for share in (0.0, 1.0):
+                    drive(self.move, share)
+                    ends[share] = world_points(self.latch)
+                drive(self.move, 0.0)
+                # 5 cm along the world's X from where the latch turns now.
+                bpy.context.scene.cursor.location = (rigmoves.pivot_world(part)
+                                                     + Vector((0.05, 0.0, 0.0)))
+                select(self.latch)
+                with mock.patch.object(rigmoves, "shift_pivot",
+                                       wraps=rigmoves.shift_pivot) as shifted:
+                    self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"),
+                                     {"FINISHED"})
+                    self.assertEqual(shifted.call_count, 1)
+                now = rig().data.bones[part.bone_name].head_local
+                self.assertAlmostEqual((now - was).length, 0.05, places=4)
+                # The poses stay as recorded.
+                for share, places in ends.items():
+                    drive(self.move, share)
+                    self.assertLess(drift(self.latch, places), TOLERANCE, share)
+
+
+class TestGeometryAddedToABuiltPart(ChestCase):
+    """New vertices are added to the mesh of a built lid: a cube made in Edit Mode
+    with Shift+A, or a handle joined to it with Ctrl+J. They are in no vertex
+    group, and the Armature modifier moves only what is in one, so at full share
+    the lid swung open and they stayed where they were, 1.96 m behind it. Build
+    said nothing."""
+
+    SAID = "'Lid' had new geometry; it moves with it now."
+
+    def add_a_cube(self):
+        """Shift+A, Mesh, Cube, in Edit Mode, over the lid."""
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="DESELECT")
+        bpy.ops.mesh.primitive_cube_add(size=0.2, location=(0.0, -0.3, 1.3))
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def join_a_handle(self):
+        """A handle of its own, joined to the lid with Ctrl+J."""
+        handle = cube("Handle", (0.0, -0.3, 1.45))
+        handle.scale = (0.3, 0.1, 0.1)
+        bpy.context.view_layer.update()
+        select(self.lid, handle)
+        self.assertEqual(bpy.ops.object.join(), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def extrude_the_top(self):
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        editing = bmesh.from_edit_mesh(self.lid.data)
+        for face in editing.faces:
+            face.select_set(False)
+        max(editing.faces, key=lambda face: face.calc_center_median().z).select_set(True)
+        bmesh.update_edit_mesh(self.lid.data)
+        self.assertEqual(bpy.ops.mesh.extrude_region_move(
+            TRANSFORM_OT_translate={"value": (0.0, 0.0, 0.5)}), {"FINISHED"})
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def subdivide(self):
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.mesh.subdivide(number_cuts=1), {"FINISHED"})
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+
+    def build_and_check(self):
+        """Build, and the lid, new vertices and all, is the rigid copy of itself
+        that the move plays."""
+        shut = rest_points(self.lid)
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_lid(shut=shut)
+
+    def test_a_cube_added_in_edit_mode_swings_with_the_lid(self):
+        self.add_a_cube()
+        self.assertEqual(len(self.lid.data.vertices), 16)
+        self.build_and_check()
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_a_handle_joined_with_ctrl_j_swings_with_the_lid(self):
+        self.join_a_handle()
+        self.assertEqual(len(self.lid.data.vertices), 16)
+        self.build_and_check()
+        self.assertIn(self.SAID, rig().rigmoves.report)
+
+    def test_it_is_said_once(self):
+        self.add_a_cube()
+        self.build_and_check()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_extruding_and_subdividing_still_work_and_say_nothing(self):
+        # Their new vertices take the weights of the ones they come from.
+        for how in (self.extrude_the_top, self.subdivide):
+            with self.subTest(how=how.__name__):
+                how()
+                self.build_and_check()
+                self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_vertices_in_another_group_are_somebodys_weights_and_are_left(self):
+        self.add_a_cube()
+        other = self.lid.vertex_groups.new(name="Somebody")
+        other.add(range(8, 16), 0.5, "REPLACE")
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        own = self.lid.vertex_groups[self.move.parts["Lid"].bone_name]
+        for vertex in list(self.lid.data.vertices)[8:]:
+            self.assertEqual([g.group for g in vertex.groups], [other.index])
+        self.assertEqual(sum(1 for v in self.lid.data.vertices
+                             if any(g.group == own.index for g in v.groups)), 8)
+        self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_a_lid_in_edit_mode_is_waited_for(self):
+        self.add_a_cube()
+        select(self.lid)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            self.assertEqual(rigmoves.bind_new_geometry(rig().rigmoves), [])
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        self.assertEqual(rigmoves.bind_new_geometry(rig().rigmoves), ["Lid"])
+
+
 if __name__ == "__main__":
     # Inside a Blender binary sys.argv is Blender's own command line; only what
     # follows "--" is meant for the tests.
