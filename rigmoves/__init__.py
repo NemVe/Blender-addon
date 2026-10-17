@@ -1698,6 +1698,12 @@ class RIGMOVES_Rig(bpy.types.PropertyGroup):
     # 0.19.0: Apply and Set Origin on the rig change the object and the bones
     # by the same amount, and the model has not moved.
     seat_on_root: bpy.props.BoolProperty(default=False)
+    # Where the rig object itself stood the last time catch_up looked, beside the
+    # seat above, which is where its Root bone stands. The Root can be edited -
+    # moved, lengthened, rolled, renamed - with the object where it was, and the
+    # model has not moved then: see rig_stayed. All zeros in a file from before
+    # this was kept (0.19.1 and earlier).
+    seat_world: bpy.props.FloatVectorProperty(size=16)
     # The farthest from the world's origin the seat has stood, as far as catch_up
     # has seen it carried. Blender's matrices keep seven digits, so what is carried
     # a few hundred metres off is rounded by the carrying, and keeps that rounding
@@ -2762,6 +2768,25 @@ def seat_of(rig):
 def store_seat(rig, data):
     """Keep where the rig stands now as where what it remembers is true."""
     data.seat, data.seated, data.seat_on_root = flat(seat_of(rig)), True, True
+    data.seat_world = flat(rig.matrix_world)
+
+
+def rig_stayed(rig, data):
+    """Whether the rig object stands where it did the last time catch_up looked,
+    so that the model has not been moved, whatever its Root bone says now.
+
+    The seat is where the Root bone stands, and in Edit Mode the Root can be
+    moved, lengthened, rolled or renamed without a part going anywhere: it
+    deforms nothing. The seat changes by itself then, and was taken for the model
+    having been moved - everything the rig remembers was carried by the edit, and
+    the parts stood that far off. A model that is moved takes its rig object with
+    it; Apply and Set Origin on the rig change the object but not the bone, so
+    neither is this. Not told for a seat kept the old way, or by a version that
+    did not keep the object's matrix: there is nothing to tell it by.
+    """
+    was = as_matrix(data.seat_world)
+    return (data.seat_on_root and not is_singular(was)
+            and same_place(rig.matrix_world, was, rig.matrix_world.translation.length))
 
 
 def moved_since(rig, data):
@@ -2772,7 +2797,7 @@ def moved_since(rig, data):
         return None
     now = seat_of(rig) if data.seat_on_root else rig.matrix_world
     was = as_matrix(data.seat)
-    if is_singular(rig.matrix_world) or is_singular(was):
+    if is_singular(rig.matrix_world) or is_singular(was) or rig_stayed(rig, data):
         return None
     return now @ was.inverted_safe()
 
@@ -2823,7 +2848,8 @@ def catch_up(rig, data=None, reframe=True):
     hand - and the parts go with it, but what is remembered stayed behind: a
     Build then put every part back where the model used to be. Where the rig
     stands is told by its Root bone (seat_of), so that Apply and Set Origin on
-    the rig, which move nothing, are not taken for a move.
+    the rig, which move nothing, are not taken for a move; nor is that bone
+    edited with the rig object where it was (rig_stayed).
     """
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
@@ -2846,6 +2872,12 @@ def catch_up(rig, data=None, reframe=True):
         # stands, and what it remembers is taken to be true of that. So is a seat
         # that was kept as nothing, by 0.19.0: there is nowhere to carry from.
         store_seat(rig, data)
+    elif rig_stayed(rig, data):
+        # The rig object is where it was, so the model has not moved, whatever the
+        # Root bone says: it was edited. Nothing is carried; the seat is kept where
+        # the bone stands now, for a move of the model after this to be measured
+        # from there.
+        store_seat(rig, data)
     else:
         # A seat kept by 0.19.0 is the rig object's matrix: measured against
         # that this once, then kept on the Root bone.
@@ -2860,6 +2892,12 @@ def catch_up(rig, data=None, reframe=True):
             store_seat(rig, data)
         elif not data.seat_on_root:
             store_seat(rig, data)
+        else:
+            # Apply or Set Origin on the rig, or a file from before the object's
+            # matrix was kept: the rig object is somewhere else and the model is
+            # not. Noted, or an edit of the Root bone after this would look like a
+            # move of the model (rig_stayed asks where the object was last).
+            data.seat_world = flat(rig.matrix_world)
     # Before anything is put back: a part whose mesh was edited since, and then
     # given a new origin, is told from a part dragged by marks that fit.
     retake_marks(data)
