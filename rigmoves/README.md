@@ -51,6 +51,26 @@ instead at step 1. The rest is identical.
 That is the whole of the simple case. The five things below are what make it
 worth having over a pair of poses.
 
+### The panel, top to bottom
+
+- **The header** has the gold flower and the name, and under it the line
+  "Record a move. Get a slider.". The rig is on the next line, with how many
+  parts and sliders it holds ("21 parts · 1 slider").
+- **A box for each move.** Its first row is the move's name: the arrow folds
+  the box, a click in the name renames it, and the **x** deletes the move. Under
+  it, once it is built, is the **Play** slider with its key button, big. Then
+  **Before** and **After**, each with its **Record** and the eye, and the **Step**
+  rows between them if there are any; a tick says the pose is recorded. The rest
+  folds away, in the order it is reached for: **PARTS & PIVOT**, **PATH**,
+  **TIMING**, **COPIES**, **CHAINS** and **ANIMATE**. A new move has all of them
+  shut. Click a title to open it. **COPIES** is there once a part can be ringed,
+  **CHAINS** once two parts can be chained, **ANIMATE** once the move is built.
+- **Under the moves:** **Build Sliders**, big, then **Pause** and **To Before**,
+  then **New Move** (and **Combine**, with two moves or more), then the
+  **REPORT**, and last, small, the add-on's name, version and author.
+- **With no rig yet** the panel says what to select; with objects selected
+  there is one big **New Move**.
+
 ### Panel or viewport
 
 Every move gets a **handle in the viewport** by default: an arrow on a rail
@@ -72,15 +92,16 @@ how the move plays. The handle is held to its rail, so it cannot be dragged
 past either end.
 
 Every built move, and every combined control, also has a **Play** slider in
-the panel, 0 to 100%. It plays the whole thing - from the first part to set
-off to the last one to arrive, riders ahead of or behind their leader
+the panel, 0 to 100%, first in its box. It plays the whole thing - from the
+first part to set off to the last one to arrive, riders ahead of or behind their leader
 included - and it is the same control as the handle: drag either and the
 other follows. The key button beside it keyframes the control at the current
 frame, the same key as **I** on the handle.
 
 ### Playing it on the timeline
 
-Under Play, set **Frames** and press **Animate**: the control is keyed to play
+Open **ANIMATE** (a combined control has **Frames** and **Animate** right under
+its Play slider), set **Frames** and press **Animate**: the control is keyed to play
 the whole thing from the current frame, over that many frames, and the scene
 is made long enough to hold it. Pressing it again replaces those keys rather
 than adding to them. The keys are even in time, so the shape of the move is
@@ -98,7 +119,7 @@ from one pose to the next - the poses themselves never change. A lid turning
 about its middle cuts through the box on the way; turning about its hinge, it
 swings open.
 
-Select the parts and press one of the **Pivot** buttons:
+Select the parts, open **PARTS & PIVOT** and press one of the **Pivot** buttons:
 
 - **Origin** - the object's own origin, as before.
 - **Cursor** - wherever the 3D cursor is. Put it on the hinge first: select
@@ -189,13 +210,13 @@ A rider turns about its leader's pivot, carried over to where it stands:
 set the pivot on the leader - its hinge, its base - and every rider swings
 about the same point on itself. No origins need moving.
 
-Riders are listed under **Riding along**, each with a **Lead** slider from -50
-to 50 that says when it moves against its leader. 0 moves with it. Below 0 it
-follows behind: -25 sets off when the leader is half way, -50 only once the
+Riders are listed in **COPIES**, under **Riding along**, each with a **Lead**
+slider from -50 to 50 that says when it moves against its leader. 0 moves with
+it. Below 0 it follows behind: -25 sets off when the leader is half way, -50 only once the
 leader has finished. Above 0 it goes first, and at 50 it has finished before
 the leader starts. Either way it travels at the leader's speed, for as long
 as the leader does - only when changes. Petals at -8, -16, -24 and on round
-the flower open one after another, in a wave. **Spread...** in the header of
+the flower open one after another, in a wave. **Spread...** beside
 **Riding along** fills those in for you, and **Ring** makes the petals as
 well - see below.
 
@@ -240,8 +261,8 @@ not select them all for Ride Along. Either the other copies are not modelled
 yet and Ring makes them, or they are modelled already and Ring picks them up.
 
 *Recipe:* record the part's move, put the 3D cursor on the centre, select the
-part so it is the active object, press **Ring...** (in the move, under **Curve
-the Path**), pick **Use**, set the **Count**, **OK**.
+part so it is the active object, press **Ring...** (in the move's **COPIES**
+section), pick **Use**, set the **Count**, **OK**.
 
 **Use** is one of three:
 
@@ -400,8 +421,8 @@ are kept. A part that follows another is not turned down.
 should go one after the next, a row should topple in a wave - and you do not
 want to type a number into every row.
 
-*Recipe:* press **Spread...** in the header of **Riding along** (Leads) or of
-**Timing** (Delays), pick an **Order**, pick **By**, set the values, **OK**.
+*Recipe:* press **Spread...** beside **Riding along** in **COPIES** (Leads) or in the
+header of **TIMING** (Delays), pick an **Order**, pick **By**, set the values, **OK**.
 
 **By** says how the values are given:
 
@@ -454,7 +475,7 @@ together, and the petal opposite it is the last.
   selecting any joint of a copy selects the copy. **Down a chain** is listed for
   Leads, and refused when you press OK: riders have no Follows chain of their own,
   so there is none to spread down.
-- Delays belong to the parts in the **Timing** list. **Around a ring** and **By
+- Delays belong to the parts in the **TIMING** list. **Around a ring** and **By
   distance** are measured from the active part (or the first one), which is place
   0 and gets Start. **Along an axis** the part lowest along it is place 0; **down
   a chain** the joints at the top are; at **random** no part is, because the places
@@ -477,8 +498,9 @@ together, and the petal opposite it is the last.
 ### Followers: parts that hang from parts
 
 A finger is three segments, each turning at its own knuckle, each carried by
-the one before. Put them in one move and open **Follows**: beside every part
-is a list of the move's other parts. Pick the first segment for the second,
+the one before. Put them in one move and open **CHAINS**: beside every part
+is a dropdown of the move's other parts, the one it follows. Pick the first
+segment for the second,
 and the second for the third - or select the segments and press **Make
 Chain**, below. A follower goes wherever the part it follows
 takes it, and does its own move on top.
@@ -487,7 +509,7 @@ Give each segment its knuckle as its **Pivot** (3D cursor on the joint,
 **Cursor**), so each one turns where a finger bends. Then pose and record as
 usual. Every recorded pose lands exactly where it was put; in between, each
 joint turns about its own knuckle while the joint before carries it, so the
-finger curls instead of its pieces sliding apart. **Timing** still gives each
+finger curls instead of its pieces sliding apart. **TIMING** still gives each
 segment a delay of its own - the tip can wait for the base.
 
 A follower's object hangs from the object it follows, before the first
@@ -498,7 +520,7 @@ follower added to a built move with no After of its own rides along with
 what it follows - the eye on After shows it carried. The bones play the
 move; the objects hanging from one another only keep the dragging honest.
 A file built with 0.14.0 shows "Build to put it into effect" under
-**Follows**: press **Build** once, so the objects hang from one another.
+**CHAINS**: press **Build** once, so the objects hang from one another.
 Changing **Follows** on a built move waits for **Build**, which says so in
 red. A pick that cannot be - the part itself, a rider, a loop - is turned
 down with the reason, and the choice it had stays. Objects already parented
@@ -546,7 +568,7 @@ too, from the next Build.
 each one's **Follows** by hand is the slow part.
 
 *Recipe:* select the parts, with the one the chain starts from the active
-object, and press **Make Chain** at the top of the **Follows** section.
+object, and press **Make Chain** at the top of the **CHAINS** section.
 
 From the first, each next part is found by how joints are built: a joint sits
 at the far end of the part before it. So of the parts not in the chain yet, the
@@ -636,9 +658,9 @@ say it should go some other way round - a hatch that swings clear before it
 slides, a lid that overshoots and settles back, an arm that lifts before it
 reaches.
 
-Press **+ Step in between**, on the row between Before and After. A **Step 1**
-row appears with a Record of its own, and from there it is the same gesture as
-the other two:
+Open **PATH** and press **Step in between**. A **Step 1** row appears between
+Before and After with a Record of its own, and from there it is the same gesture
+as the other two:
 
 1. move the parts to where they should be part way through;
 2. press that step's **Record**.
@@ -680,7 +702,7 @@ Before and After exactly.
 
 ### Who moves when
 
-Open **Timing**. Every part has a **Delay**, as a fraction of the control's
+Open **TIMING**. Every part has a **Delay**, as a fraction of the control's
 travel. Delay 0.2 means that part waits until the control is a fifth of the
 way across before it starts, and then runs to the end. That is what stops a
 machine reading as one rubber object: the parts leave in order, and overlap.
@@ -692,8 +714,8 @@ A combined control has the same box per member.
 
 ### How it gets there
 
-The **Ease** menu shapes the whole move: even speed, smooth, slow start, slow
-stop. It sits on top of whatever path was recorded, so a hand-shaped path with
+The four **Ease** buttons at the top of **PATH** shape the whole move: even
+speed, smooth, slow start, slow stop. The one in use is lit. It sits on top of whatever path was recorded, so a hand-shaped path with
 Smooth on it eases into and out of your own curve.
 
 For exact control of each stretch use the speeds instead, with Ease left on
@@ -702,8 +724,8 @@ Even speed. The two stack, the ease first.
 ### Going round things: curved paths
 
 From A to B a part goes in a straight line, which is no use when something
-is in the way. Select it and press **Curve the Path**: a curve appears along
-the path it has - through its steps, if it has any - with a point in the
+is in the way. Select it and press **Curve the Path** (in **PATH**): a curve
+appears along the path it has - through its steps, if it has any - with a point in the
 middle to take hold of. Press **Edit** beside it (or Tab into it), drag the
 curve round the obstacle, add points if it needs them, and Build. The part's
 pivot now travels along the curve, evenly by distance, and turns from pose to
@@ -717,17 +739,18 @@ along the same curve, carried over to their own place.
 
 ### Seeing the path
 
-**Paths** draws a line through where every part of the move goes, Before to
-After, through the middle of each part: steps, pivots, curves, mirrors and
-all. It is drawn again at every Build, can't be clicked or rendered, and goes
-when Paths is pressed again.
+**Paths**, at the foot of **PATH**, draws a line through where every part of
+the move goes, Before to After, through the middle of each part: steps, pivots,
+curves, mirrors and all. It is drawn again at every Build, can't be clicked or
+rendered, and goes when Paths is pressed again.
 
 ## Everything else on the card
 
 - **Record** either row saves where the parts are standing at that moment. The
   eye icon beside it puts the model back into that pose so you can check it.
-- **Parts** replaces the move's bones with whatever is selected now, keeping
-  the timing of the ones that stay.
+- **Parts**, in **PARTS & PIVOT**, with how many are selected on its button,
+  replaces the move's bones with whatever is selected now, keeping the timing
+  of the ones that stay.
 - **From / To** and **Path length** - what numbers the control's two ends read
   as (0 and 1 by default, 0 and 360 reads better for a spin) and how many
   frames the path is drawn over - are no longer on the panel, but still work
@@ -747,9 +770,12 @@ when Paths is pressed again.
   delete the strip, in the NLA editor, or to remove the driver in the Drivers
   editor, and then to Build.
   Build names them as well, and is a warning, not a success, until they are gone.
-- **The report** at the foot of the panel says what the last button did, and what to
-  do next. It shows nine lines. A longer one ends with "…" and a last line, "(the
-  full report is in the Info editor)", where all of it is.
+- **The REPORT** box, under the buttons, says what the last button did, and what to
+  do next. It is open until you fold it with its arrow. A warning - a button that
+  turned itself down, or a Build that is not a success - gets a warning icon and a
+  red title, so that it is seen even with the box folded. The box shows nine lines.
+  A longer report ends with "…" and a last line, "(the full report is in the Info
+  editor)", where all of it is.
 
 ## What it does underneath
 
