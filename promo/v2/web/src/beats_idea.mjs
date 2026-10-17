@@ -10,7 +10,7 @@ export const Pn = e => new V3(mix(A.x, B.x, e), mix(A.y, B.y, e) + 0.55 * Math.s
 export const setGhost = (g, u) => { g.visible = u > 0.01; g.material.opacity = 0.1 * u; g.userData.edge.material.opacity = 0.85 * u; };
 const pt = ([x, y]) => ({ x, y });
 
-const recRow = (name, ico, k) =>
+export const recRow = (name, ico, k) =>
   row(`<div class="lbl" style="flex:0 0 205px">${I(ico)}<span>${name}</span><span class="ck" id="ck${k}" style="opacity:0"></span><span class="dot" id="dt${k}"></span></div>${btn('Record', { id: 'r' + k, c: 'w3' })}<div class="eye"></div>`);
 const keyBtn = '<div class="btn sm"><i class="key"></i></div>';
 export const sliderRow = (id = 'sl') => row(`${fld('Move 1', '0%', 0, { id, c: 'w3' })}${keyBtn}`, { id: id + 'row' });

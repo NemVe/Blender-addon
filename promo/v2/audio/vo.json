@@ -1,15 +1,19 @@
 {
- "engine": "Kokoro-82M v1.0 (kokoro-onnx), CPU",
- "voice": "am_michael",
- "speed": 0.95,
+ "engine": "Chatterbox (Resemble AI, MIT), local on an RTX 3090",
+ "voice": "the default voice, in continuous passages cut at the word times",
+ "settings": {
+  "exaggeration": 0.65,
+  "cfg_weight": 0.4,
+  "temperature": 0.8
+ },
  "sample_rate": 48000,
  "channels": 1,
  "bit_depth": 16,
- "lufs_per_line": -19.0,
+ "lufs_per_line": -16.0,
+ "processing": "high-pass 70 Hz, +2.5 dB at 3 kHz, 1.6:1 compressor, limiter at -1.5 dBFS",
  "order": [
-  "hook1",
-  "hook2",
-  "hook3",
+  "open_a",
+  "open_b",
   "logo",
   "idea1",
   "idea2",
@@ -31,1147 +35,1208 @@
   "end"
  ],
  "lines": {
-  "hook1": {
-   "beat": "Hook 1",
-   "text": "Rigging takes hours.",
-   "spoken": "Rigging takes hours.",
-   "file": "hook1.wav",
-   "duration": 1.515,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
+  "open_a": {
+   "beat": "open_a",
+   "text": "Let's rig this flower in twelve clicks. Watch this!",
+   "spoken": "Let's rig this flower in twelve clicks. Watch this!",
+   "file": "open_a.wav",
+   "duration": 2.7,
+   "tempo": 1.0,
+   "take": "open_1000",
+   "lufs": -16.1,
    "peak_db": -1.5,
-   "limiter_dip_db": 0.8,
-   "timing": "measured",
+   "limiter_dip_db": 3.7,
    "phrases": [
     {
-     "text": "Rigging takes hours.",
+     "text": "Let's rig this flower in twelve clicks.",
      "start": 0.04,
-     "end": 1.415
+     "end": 1.62
+    },
+    {
+     "text": "Watch this!",
+     "start": 2.04,
+     "end": 2.625
     }
    ],
    "words": [
     {
-     "w": "Rigging",
+     "w": "let's",
      "start": 0.04,
-     "end": 0.34
+     "end": 0.28
     },
     {
-     "w": "takes",
-     "start": 0.34,
-     "end": 0.56
-    },
-    {
-     "w": "hours.",
-     "start": 0.56,
-     "end": 1.415
-    }
-   ],
-   "heard": "Rigging takes hours."
-  },
-  "hook2": {
-   "beat": "Hook 2",
-   "text": "Bones. Constraints. Drivers. Keys.",
-   "spoken": "Bones. Constraints. Drivers. Keys.",
-   "file": "hook2.wav",
-   "duration": 2.585,
-   "speed": 0.95,
-   "max": 2.6,
-   "lufs": -21.1,
-   "peak_db": -1.5,
-   "limiter_dip_db": 2.1,
-   "timing": "estimated",
-   "phrases": [
-    {
-     "text": "Bones.",
-     "start": 0.04,
-     "end": 0.57
-    },
-    {
-     "text": "Constraints.",
-     "start": 0.6,
-     "end": 1.26
-    },
-    {
-     "text": "Drivers.",
-     "start": 1.29,
-     "end": 1.91
-    },
-    {
-     "text": "Keys.",
-     "start": 1.94,
-     "end": 2.485
-    }
-   ],
-   "words": [
-    {
-     "w": "Bones",
-     "start": 0.04,
-     "end": 0.57
-    },
-    {
-     "w": "Constraints",
-     "start": 0.6,
-     "end": 1.26
-    },
-    {
-     "w": "Drivers",
-     "start": 1.29,
-     "end": 1.91
-    },
-    {
-     "w": "Keys",
-     "start": 1.94,
-     "end": 2.485
-    }
-   ],
-   "heard": "Bones Constraint Drivers Keys"
-  },
-  "hook3": {
-   "beat": "Hook 3",
-   "text": "What if you just showed it the move?",
-   "spoken": "What if you just showed it the move?",
-   "file": "hook3.wav",
-   "duration": 1.88,
-   "speed": 0.95,
-   "max": 2.6,
-   "lufs": -20.5,
-   "peak_db": -1.5,
-   "limiter_dip_db": 2.2,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "What if you just showed it the move?",
-     "start": 0.04,
-     "end": 1.78
-    }
-   ],
-   "words": [
-    {
-     "w": "What",
-     "start": 0.04,
-     "end": 0.16
-    },
-    {
-     "w": "if",
-     "start": 0.16,
-     "end": 0.26
-    },
-    {
-     "w": "you",
-     "start": 0.26,
+     "w": "rig",
+     "start": 0.28,
      "end": 0.38
     },
     {
-     "w": "just",
+     "w": "this",
      "start": 0.38,
-     "end": 0.56
+     "end": 0.6
     },
     {
-     "w": "showed",
-     "start": 0.56,
-     "end": 0.84
+     "w": "flower",
+     "start": 0.6,
+     "end": 0.82
     },
     {
-     "w": "it",
-     "start": 0.84,
-     "end": 1.02
+     "w": "in",
+     "start": 0.82,
+     "end": 1.06
     },
     {
-     "w": "the",
-     "start": 1.02,
-     "end": 1.16
+     "w": "twelve",
+     "start": 1.06,
+     "end": 1.3
     },
     {
-     "w": "move?",
-     "start": 1.16,
-     "end": 1.78
+     "w": "clicks",
+     "start": 1.3,
+     "end": 1.62
+    },
+    {
+     "w": "watch",
+     "start": 2.04,
+     "end": 2.16
+    },
+    {
+     "w": "this",
+     "start": 2.16,
+     "end": 2.625
     }
    ],
-   "heard": "What if you just showed it the move?"
+   "heard": "let's rig this flower in twelve clicks watch this"
   },
-  "logo": {
-   "beat": "Logo",
-   "text": "This is CopyThat. Record a move, get a slider.",
-   "spoken": "This is Copy That. Record a move, get a slider.",
-   "file": "logo.wav",
-   "duration": 3.265,
-   "speed": 0.95,
-   "max": null,
-   "lufs": -19.0,
+  "open_b": {
+   "beat": "open_b",
+   "text": "Done! One slider, and it blooms.",
+   "spoken": "Done! One slider, and it blooms.",
+   "file": "open_b.wav",
+   "duration": 1.86,
+   "tempo": 1.0,
+   "take": "open_1000",
+   "lufs": -16.0,
    "peak_db": -1.5,
-   "limiter_dip_db": 2.2,
-   "timing": "measured",
+   "limiter_dip_db": 2.7,
    "phrases": [
     {
-     "text": "This is Copy That.",
-     "start": 0.04,
-     "end": 1.215
+     "text": "Done!",
+     "start": 0.025,
+     "end": 0.2
     },
     {
-     "text": "Record a move, get a slider.",
-     "start": 1.535,
-     "end": 3.165
+     "text": "One slider, and it blooms.",
+     "start": 0.48,
+     "end": 1.76
     }
    ],
    "words": [
     {
-     "w": "This",
-     "start": 0.04,
+     "w": "done",
+     "start": 0.025,
      "end": 0.2
     },
     {
+     "w": "one",
+     "start": 0.48,
+     "end": 0.6
+    },
+    {
+     "w": "slider",
+     "start": 0.6,
+     "end": 0.86
+    },
+    {
+     "w": "and",
+     "start": 0.86,
+     "end": 1.14
+    },
+    {
+     "w": "it",
+     "start": 1.14,
+     "end": 1.26
+    },
+    {
+     "w": "blooms",
+     "start": 1.26,
+     "end": 1.76
+    }
+   ],
+   "heard": "done one slider and it blooms"
+  },
+  "logo": {
+   "beat": "logo",
+   "text": "This is CopyThat: record a move, and get a slider.",
+   "spoken": "This is Copy That: record a move, and get a slider.",
+   "file": "logo.wav",
+   "duration": 2.63,
+   "tempo": 1.0,
+   "take": "idea_1014",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 3.3,
+   "phrases": [
+    {
+     "text": "This is CopyThat:",
+     "start": 0.04,
+     "end": 0.945
+    },
+    {
+     "text": "record a move, and get a slider.",
+     "start": 1.125,
+     "end": 2.53
+    }
+   ],
+   "words": [
+    {
+     "w": "this",
+     "start": 0.04,
+     "end": 0.345
+    },
+    {
      "w": "is",
-     "start": 0.2,
-     "end": 0.34
+     "start": 0.345,
+     "end": 0.505
     },
     {
-     "w": "Copy",
-     "start": 0.34,
-     "end": 0.64
+     "w": "copy",
+     "start": 0.505,
+     "end": 0.685
     },
     {
-     "w": "That.",
-     "start": 0.64,
-     "end": 1.215
+     "w": "that",
+     "start": 0.685,
+     "end": 0.945
     },
     {
-     "w": "Record",
-     "start": 1.535,
-     "end": 1.815
+     "w": "record",
+     "start": 1.125,
+     "end": 1.365
     },
     {
      "w": "a",
-     "start": 1.815,
+     "start": 1.365,
+     "end": 1.525
+    },
+    {
+     "w": "move",
+     "start": 1.525,
+     "end": 1.665
+    },
+    {
+     "w": "and",
+     "start": 1.665,
+     "end": 1.905
+    },
+    {
+     "w": "get",
+     "start": 1.905,
+     "end": 2.005
+    },
+    {
+     "w": "a",
+     "start": 2.005,
+     "end": 2.105
+    },
+    {
+     "w": "slider",
+     "start": 2.105,
+     "end": 2.53
+    }
+   ],
+   "heard": "this is copy that record a move and get a slider"
+  },
+  "idea1": {
+   "beat": "idea1",
+   "text": "Pose your object, and hit Record.",
+   "spoken": "Pose your object, and hit Record.",
+   "file": "idea1.wav",
+   "duration": 1.545,
+   "tempo": 1.0,
+   "take": "idea_1014",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.8,
+   "phrases": [
+    {
+     "text": "Pose your object, and hit Record.",
+     "start": 0.035,
+     "end": 1.485
+    }
+   ],
+   "words": [
+    {
+     "w": "pose",
+     "start": 0.035,
+     "end": 0.175
+    },
+    {
+     "w": "your",
+     "start": 0.175,
+     "end": 0.375
+    },
+    {
+     "w": "object",
+     "start": 0.375,
+     "end": 0.675
+    },
+    {
+     "w": "and",
+     "start": 0.675,
+     "end": 0.895
+    },
+    {
+     "w": "hit",
+     "start": 0.895,
+     "end": 1.015
+    },
+    {
+     "w": "record",
+     "start": 1.015,
+     "end": 1.485
+    }
+   ],
+   "heard": "pose your object and hit record"
+  },
+  "idea2": {
+   "beat": "idea2",
+   "text": "Press Build, and the whole move lives on one slider.",
+   "spoken": "Press Build, and the whole move lives on one slider.",
+   "file": "idea2.wav",
+   "duration": 2.7,
+   "tempo": 1.0,
+   "take": "idea_1014",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 2.8,
+   "phrases": [
+    {
+     "text": "Press Build, and the whole move lives on one slider.",
+     "start": 0.04,
+     "end": 2.645
+    }
+   ],
+   "words": [
+    {
+     "w": "press",
+     "start": 0.04,
+     "end": 0.455
+    },
+    {
+     "w": "build",
+     "start": 0.455,
+     "end": 0.735
+    },
+    {
+     "w": "and",
+     "start": 0.735,
+     "end": 1.035
+    },
+    {
+     "w": "the",
+     "start": 1.035,
+     "end": 1.135
+    },
+    {
+     "w": "whole",
+     "start": 1.135,
+     "end": 1.295
+    },
+    {
+     "w": "move",
+     "start": 1.295,
+     "end": 1.515
+    },
+    {
+     "w": "lives",
+     "start": 1.515,
+     "end": 1.735
+    },
+    {
+     "w": "on",
+     "start": 1.735,
      "end": 1.915
     },
     {
-     "w": "move,",
+     "w": "one",
      "start": 1.915,
      "end": 2.135
     },
     {
-     "w": "get",
-     "start": 2.395,
-     "end": 2.455
-    },
-    {
-     "w": "a",
-     "start": 2.455,
-     "end": 2.535
-    },
-    {
-     "w": "slider.",
-     "start": 2.535,
-     "end": 3.165
-    }
-   ],
-   "heard": "This is Copy That. Record a move, get a slider."
-  },
-  "idea1": {
-   "beat": "Idea 1/3",
-   "text": "Pose it, and record.",
-   "spoken": "Pose it, and record.",
-   "file": "idea1.wav",
-   "duration": 1.315,
-   "speed": 0.95,
-   "max": null,
-   "lufs": -19.0,
-   "peak_db": -1.8,
-   "limiter_dip_db": -0.0,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Pose it, and record.",
-     "start": 0.04,
-     "end": 1.215
-    }
-   ],
-   "words": [
-    {
-     "w": "Pose",
-     "start": 0.04,
-     "end": 0.18
-    },
-    {
-     "w": "it",
-     "start": 0.18,
-     "end": 0.44
-    },
-    {
-     "w": "and",
-     "start": 0.44,
-     "end": 0.6
-    },
-    {
-     "w": "record.",
-     "start": 0.6,
-     "end": 1.215
-    }
-   ],
-   "heard": "Pose it and record."
-  },
-  "idea2": {
-   "beat": "Idea 2/3",
-   "text": "Press Build. One slider plays the move.",
-   "spoken": "Press Build. One slider plays the move.",
-   "file": "idea2.wav",
-   "duration": 2.945,
-   "speed": 0.95,
-   "max": null,
-   "lufs": -19.1,
-   "peak_db": -1.5,
-   "limiter_dip_db": 0.8,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Press Build.",
-     "start": 0.04,
-     "end": 0.85
-    },
-    {
-     "text": "One slider plays the move.",
-     "start": 1.13,
-     "end": 2.845
-    }
-   ],
-   "words": [
-    {
-     "w": "Press",
-     "start": 0.04,
-     "end": 0.22
-    },
-    {
-     "w": "Build.",
-     "start": 0.22,
-     "end": 0.85
-    },
-    {
-     "w": "One",
-     "start": 1.13,
-     "end": 1.27
-    },
-    {
      "w": "slider",
-     "start": 1.27,
-     "end": 1.65
-    },
-    {
-     "w": "plays",
-     "start": 1.65,
-     "end": 2.07
-    },
-    {
-     "w": "the",
-     "start": 2.07,
-     "end": 2.31
-    },
-    {
-     "w": "move.",
-     "start": 2.31,
-     "end": 2.845
+     "start": 2.135,
+     "end": 2.645
     }
    ],
-   "heard": "Press Build. One slider plays the move."
+   "heard": "press build and the whole move lives on one slider"
   },
   "idea3": {
-   "beat": "Idea 3/3",
-   "text": "Select many parts: one move.",
-   "spoken": "Select many parts: one move.",
+   "beat": "idea3",
+   "text": "Select as many parts as you like; they all share one move.",
+   "spoken": "Select as many parts as you like; they all share one move.",
    "file": "idea3.wav",
-   "duration": 2.445,
-   "speed": 0.95,
-   "max": null,
-   "lufs": -20.0,
+   "duration": 2.735,
+   "tempo": 1.0,
+   "take": "idea_1014",
+   "lufs": -16.1,
    "peak_db": -1.5,
-   "limiter_dip_db": 2.1,
-   "timing": "measured",
+   "limiter_dip_db": 2.0,
    "phrases": [
     {
-     "text": "Select many parts:",
+     "text": "Select as many parts as you like;",
      "start": 0.04,
-     "end": 1.285
+     "end": 1.255
     },
     {
-     "text": "one move.",
-     "start": 1.535,
-     "end": 2.345
+     "text": "they all share one move.",
+     "start": 1.375,
+     "end": 2.735
     }
    ],
    "words": [
     {
-     "w": "Select",
+     "w": "select",
      "start": 0.04,
-     "end": 0.32
+     "end": 0.255
+    },
+    {
+     "w": "as",
+     "start": 0.255,
+     "end": 0.395
     },
     {
      "w": "many",
-     "start": 0.32,
-     "end": 0.58
-    },
-    {
-     "w": "parts.",
-     "start": 0.58,
-     "end": 1.285
-    },
-    {
-     "w": "One",
-     "start": 1.535,
-     "end": 1.715
-    },
-    {
-     "w": "move.",
-     "start": 1.715,
-     "end": 2.345
-    }
-   ],
-   "heard": "Select many parts. One move."
-  },
-  "f01": {
-   "beat": "01 Timing",
-   "text": "Give each part its own delay.",
-   "spoken": "Give each part its own delay.",
-   "file": "f01.wav",
-   "duration": 1.94,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.1,
-   "peak_db": -1.5,
-   "limiter_dip_db": 1.0,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Give each part its own delay.",
-     "start": 0.04,
-     "end": 1.84
-    }
-   ],
-   "words": [
-    {
-     "w": "Give",
-     "start": 0.04,
-     "end": 0.18
-    },
-    {
-     "w": "each",
-     "start": 0.18,
-     "end": 0.36
-    },
-    {
-     "w": "part",
-     "start": 0.36,
-     "end": 0.7
-    },
-    {
-     "w": "its",
-     "start": 0.7,
-     "end": 0.98
-    },
-    {
-     "w": "own",
-     "start": 0.98,
-     "end": 1.2
-    },
-    {
-     "w": "delay.",
-     "start": 1.2,
-     "end": 1.84
-    }
-   ],
-   "heard": "Give each part its own delay."
-  },
-  "f02": {
-   "beat": "02 Spread",
-   "text": "Spread the timing into a wave.",
-   "spoken": "Spread the timing into a wave.",
-   "file": "f02.wav",
-   "duration": 1.975,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.1,
-   "peak_db": -1.5,
-   "limiter_dip_db": 0.9,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Spread the timing into a wave.",
-     "start": 0.04,
-     "end": 1.875
-    }
-   ],
-   "words": [
-    {
-     "w": "Spread",
-     "start": 0.04,
-     "end": 0.26
-    },
-    {
-     "w": "the",
-     "start": 0.26,
-     "end": 0.44
-    },
-    {
-     "w": "timing",
-     "start": 0.44,
-     "end": 0.74
-    },
-    {
-     "w": "into",
-     "start": 0.74,
-     "end": 1.1
-    },
-    {
-     "w": "a",
-     "start": 1.1,
-     "end": 1.26
-    },
-    {
-     "w": "wave.",
-     "start": 1.26,
-     "end": 1.875
-    }
-   ],
-   "heard": "Spread the timing into a wave."
-  },
-  "f03": {
-   "beat": "03 Pivot",
-   "text": "Turn about any point.",
-   "spoken": "Turn about any point.",
-   "file": "f03.wav",
-   "duration": 1.47,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -2.1,
-   "limiter_dip_db": -0.0,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Turn about any point.",
-     "start": 0.04,
-     "end": 1.37
-    }
-   ],
-   "words": [
-    {
-     "w": "Turn",
-     "start": 0.04,
-     "end": 0.22
-    },
-    {
-     "w": "about",
-     "start": 0.22,
-     "end": 0.54
-    },
-    {
-     "w": "any",
-     "start": 0.54,
-     "end": 0.74
-    },
-    {
-     "w": "point.",
-     "start": 0.74,
-     "end": 1.37
-    }
-   ],
-   "heard": "Turn about any point."
-  },
-  "f04": {
-   "beat": "04 Steps",
-   "text": "Add steps in between.",
-   "spoken": "Add steps in between.",
-   "file": "f04.wav",
-   "duration": 1.495,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -1.7,
-   "limiter_dip_db": -0.0,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Add steps in between.",
-     "start": 0.04,
-     "end": 1.395
-    }
-   ],
-   "words": [
-    {
-     "w": "Add",
-     "start": 0.04,
-     "end": 0.2
-    },
-    {
-     "w": "steps",
-     "start": 0.2,
-     "end": 0.48
-    },
-    {
-     "w": "in",
-     "start": 0.48,
-     "end": 0.7
-    },
-    {
-     "w": "between.",
-     "start": 0.7,
-     "end": 1.395
-    }
-   ],
-   "heard": "Add steps in between."
-  },
-  "f05": {
-   "beat": "05 Curves",
-   "text": "Curve the path, and edit its curve.",
-   "spoken": "Curve the path, and edit its curve.",
-   "file": "f05.wav",
-   "duration": 2.13,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -1.5,
-   "limiter_dip_db": 1.5,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Curve the path, and edit its curve.",
-     "start": 0.04,
-     "end": 2.03
-    }
-   ],
-   "words": [
-    {
-     "w": "Curve",
-     "start": 0.04,
-     "end": 0.18
-    },
-    {
-     "w": "the",
-     "start": 0.18,
-     "end": 0.36
-    },
-    {
-     "w": "path",
-     "start": 0.36,
-     "end": 0.6
-    },
-    {
-     "w": "and",
-     "start": 0.6,
-     "end": 0.94
-    },
-    {
-     "w": "edit",
-     "start": 0.94,
-     "end": 1.14
-    },
-    {
-     "w": "its",
-     "start": 1.14,
-     "end": 1.4
-    },
-    {
-     "w": "curve.",
-     "start": 1.4,
-     "end": 2.03
-    }
-   ],
-   "heard": "Curve the path and edit its curve."
-  },
-  "f06": {
-   "beat": "06 Speed",
-   "text": "Smooth, or even speed.",
-   "spoken": "Smooth, or even speed.",
-   "file": "f06.wav",
-   "duration": 1.67,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -1.9,
-   "limiter_dip_db": -0.0,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Smooth, or even speed.",
-     "start": 0.04,
-     "end": 1.57
-    }
-   ],
-   "words": [
-    {
-     "w": "Smooth",
-     "start": 0.04,
-     "end": 0.4
-    },
-    {
-     "w": "or",
-     "start": 0.4,
-     "end": 0.62
-    },
-    {
-     "w": "even",
-     "start": 0.62,
-     "end": 0.86
-    },
-    {
-     "w": "speed.",
-     "start": 0.86,
-     "end": 1.57
-    }
-   ],
-   "heard": "Smooth or even speed."
-  },
-  "f07": {
-   "beat": "07 Chain",
-   "text": "Chain parts, so joints follow.",
-   "spoken": "Chain parts, so joints follow.",
-   "file": "f07.wav",
-   "duration": 2.005,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -1.6,
-   "limiter_dip_db": -0.0,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Chain parts, so joints follow.",
-     "start": 0.04,
-     "end": 1.905
-    }
-   ],
-   "words": [
-    {
-     "w": "Chain",
-     "start": 0.04,
-     "end": 0.24
+     "start": 0.395,
+     "end": 0.595
     },
     {
      "w": "parts",
-     "start": 0.24,
-     "end": 0.58
+     "start": 0.595,
+     "end": 0.795
+    },
+    {
+     "w": "as",
+     "start": 0.795,
+     "end": 0.955
+    },
+    {
+     "w": "you",
+     "start": 0.955,
+     "end": 1.055
+    },
+    {
+     "w": "like",
+     "start": 1.055,
+     "end": 1.255
+    },
+    {
+     "w": "they",
+     "start": 1.375,
+     "end": 1.455
+    },
+    {
+     "w": "all",
+     "start": 1.455,
+     "end": 1.635
+    },
+    {
+     "w": "share",
+     "start": 1.635,
+     "end": 1.875
+    },
+    {
+     "w": "one",
+     "start": 1.875,
+     "end": 2.135
+    },
+    {
+     "w": "move",
+     "start": 2.135,
+     "end": 2.735
+    }
+   ],
+   "heard": "select as many parts as you like they all share one move"
+  },
+  "f01": {
+   "beat": "f01",
+   "text": "Give every part its own delay.",
+   "spoken": "Give every part its own delay.",
+   "file": "f01.wav",
+   "duration": 1.74,
+   "tempo": 1.0,
+   "take": "feat_a_1005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 5.3,
+   "phrases": [
+    {
+     "text": "Give every part its own delay.",
+     "start": 0.04,
+     "end": 1.675
+    }
+   ],
+   "words": [
+    {
+     "w": "give",
+     "start": 0.04,
+     "end": 0.23
+    },
+    {
+     "w": "every",
+     "start": 0.23,
+     "end": 0.57
+    },
+    {
+     "w": "part",
+     "start": 0.57,
+     "end": 0.77
+    },
+    {
+     "w": "its",
+     "start": 0.77,
+     "end": 0.99
+    },
+    {
+     "w": "own",
+     "start": 0.99,
+     "end": 1.19
+    },
+    {
+     "w": "delay",
+     "start": 1.19,
+     "end": 1.675
+    }
+   ],
+   "heard": "give every part its own delay"
+  },
+  "f02": {
+   "beat": "f02",
+   "text": "Spread the timing into a wave.",
+   "spoken": "Spread the timing into a wave.",
+   "file": "f02.wav",
+   "duration": 1.53,
+   "tempo": 1.0,
+   "take": "feat_a_1005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.2,
+   "phrases": [
+    {
+     "text": "Spread the timing into a wave.",
+     "start": 0.03,
+     "end": 1.43
+    }
+   ],
+   "words": [
+    {
+     "w": "spread",
+     "start": 0.03,
+     "end": 0.27
+    },
+    {
+     "w": "the",
+     "start": 0.27,
+     "end": 0.41
+    },
+    {
+     "w": "timing",
+     "start": 0.41,
+     "end": 0.63
+    },
+    {
+     "w": "into",
+     "start": 0.63,
+     "end": 0.89
+    },
+    {
+     "w": "a",
+     "start": 0.89,
+     "end": 1.05
+    },
+    {
+     "w": "wave",
+     "start": 1.05,
+     "end": 1.43
+    }
+   ],
+   "heard": "spread the timing into a wave"
+  },
+  "f03": {
+   "beat": "f03",
+   "text": "Turn around any point you want.",
+   "spoken": "Turn around any point you want.",
+   "file": "f03.wav",
+   "duration": 1.435,
+   "tempo": 1.0,
+   "take": "feat_a_1005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 2.7,
+   "phrases": [
+    {
+     "text": "Turn around any point you want.",
+     "start": 0.02,
+     "end": 1.355
+    }
+   ],
+   "words": [
+    {
+     "w": "turn",
+     "start": 0.02,
+     "end": 0.135
+    },
+    {
+     "w": "around",
+     "start": 0.135,
+     "end": 0.395
+    },
+    {
+     "w": "any",
+     "start": 0.395,
+     "end": 0.655
+    },
+    {
+     "w": "point",
+     "start": 0.655,
+     "end": 0.835
+    },
+    {
+     "w": "you",
+     "start": 0.835,
+     "end": 0.975
+    },
+    {
+     "w": "want",
+     "start": 0.975,
+     "end": 1.355
+    }
+   ],
+   "heard": "turn around any point you want"
+  },
+  "f04": {
+   "beat": "f04",
+   "text": "Add steps in between.",
+   "spoken": "Add steps in between.",
+   "file": "f04.wav",
+   "duration": 1.275,
+   "tempo": 1.0,
+   "take": "feat_a_1005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 5.3,
+   "phrases": [
+    {
+     "text": "Add steps in between.",
+     "start": 0.03,
+     "end": 1.24
+    }
+   ],
+   "words": [
+    {
+     "w": "add",
+     "start": 0.03,
+     "end": 0.18
+    },
+    {
+     "w": "steps",
+     "start": 0.18,
+     "end": 0.46
+    },
+    {
+     "w": "in",
+     "start": 0.46,
+     "end": 0.64
+    },
+    {
+     "w": "between",
+     "start": 0.64,
+     "end": 1.24
+    }
+   ],
+   "heard": "add steps in between"
+  },
+  "f05": {
+   "beat": "f05",
+   "text": "Curve the path, then edit the curve.",
+   "spoken": "Curve the path, then edit the curve.",
+   "file": "f05.wav",
+   "duration": 1.775,
+   "tempo": 1.0,
+   "take": "feat_a_1005",
+   "lufs": -16.5,
+   "peak_db": -1.5,
+   "limiter_dip_db": 5.5,
+   "phrases": [
+    {
+     "text": "Curve the path, then edit the curve.",
+     "start": 0.03,
+     "end": 1.705
+    }
+   ],
+   "words": [
+    {
+     "w": "curve",
+     "start": 0.03,
+     "end": 0.185
+    },
+    {
+     "w": "the",
+     "start": 0.185,
+     "end": 0.345
+    },
+    {
+     "w": "path",
+     "start": 0.345,
+     "end": 0.585
+    },
+    {
+     "w": "then",
+     "start": 0.905,
+     "end": 0.945
+    },
+    {
+     "w": "edit",
+     "start": 0.945,
+     "end": 1.185
+    },
+    {
+     "w": "the",
+     "start": 1.185,
+     "end": 1.325
+    },
+    {
+     "w": "curve",
+     "start": 1.325,
+     "end": 1.705
+    }
+   ],
+   "heard": "curve the path then edit the curve"
+  },
+  "f06": {
+   "beat": "f06",
+   "text": "Smooth, or perfectly even.",
+   "spoken": "Smooth, or perfectly even.",
+   "file": "f06.wav",
+   "duration": 1.65,
+   "tempo": 1.0,
+   "take": "feat_a_1005",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.4,
+   "phrases": [
+    {
+     "text": "Smooth, or perfectly even.",
+     "start": 0.025,
+     "end": 1.635
+    }
+   ],
+   "words": [
+    {
+     "w": "smooth",
+     "start": 0.025,
+     "end": 0.31
+    },
+    {
+     "w": "or",
+     "start": 0.31,
+     "end": 0.67
+    },
+    {
+     "w": "perfectly",
+     "start": 0.67,
+     "end": 0.99
+    },
+    {
+     "w": "even",
+     "start": 0.99,
+     "end": 1.635
+    }
+   ],
+   "heard": "smooth or perfectly even"
+  },
+  "f07": {
+   "beat": "f07",
+   "text": "Chain parts, so the joints follow.",
+   "spoken": "Chain parts, so the joints follow.",
+   "file": "f07.wav",
+   "duration": 1.52,
+   "tempo": 1.0,
+   "take": "feat_b_1003",
+   "lufs": -16.6,
+   "peak_db": -1.5,
+   "limiter_dip_db": 5.3,
+   "phrases": [
+    {
+     "text": "Chain parts, so the joints follow.",
+     "start": 0.04,
+     "end": 1.485
+    }
+   ],
+   "words": [
+    {
+     "w": "chain",
+     "start": 0.04,
+     "end": 0.255
+    },
+    {
+     "w": "parts",
+     "start": 0.255,
+     "end": 0.535
     },
     {
      "w": "so",
-     "start": 0.58,
-     "end": 0.92
+     "start": 0.695,
+     "end": 0.835
+    },
+    {
+     "w": "the",
+     "start": 0.835,
+     "end": 0.955
     },
     {
      "w": "joints",
-     "start": 0.92,
-     "end": 1.18
+     "start": 0.955,
+     "end": 1.095
     },
     {
-     "w": "follow.",
-     "start": 1.18,
-     "end": 1.905
+     "w": "follow",
+     "start": 1.095,
+     "end": 1.485
     }
    ],
-   "heard": "Chain parts so joints follow."
+   "heard": "chain parts so the joints follow"
   },
   "f08": {
-   "beat": "08 Curl",
+   "beat": "f08",
    "text": "Curl a whole chain at once.",
    "spoken": "Curl a whole chain at once.",
    "file": "f08.wav",
-   "duration": 1.7,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -2.0,
-   "limiter_dip_db": -0.0,
-   "timing": "measured",
+   "duration": 1.085,
+   "tempo": 1.0,
+   "take": "feat_b_1003",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 0.7,
    "phrases": [
     {
      "text": "Curl a whole chain at once.",
      "start": 0.04,
-     "end": 1.6
+     "end": 1.045
     }
    ],
    "words": [
     {
-     "w": "Curl",
+     "w": "curl",
      "start": 0.04,
-     "end": 0.32
+     "end": 0.21
     },
     {
      "w": "a",
+     "start": 0.21,
+     "end": 0.29
+    },
+    {
+     "w": "whole",
+     "start": 0.29,
+     "end": 0.41
+    },
+    {
+     "w": "chain",
+     "start": 0.41,
+     "end": 0.59
+    },
+    {
+     "w": "at",
+     "start": 0.59,
+     "end": 0.73
+    },
+    {
+     "w": "once",
+     "start": 0.73,
+     "end": 1.045
+    }
+   ],
+   "heard": "curl a whole chain at once"
+  },
+  "f09": {
+   "beat": "f09",
+   "text": "Ring one part into many.",
+   "spoken": "Ring one part into many.",
+   "file": "f09.wav",
+   "duration": 1.06,
+   "tempo": 1.0,
+   "take": "feat_b_1003",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.9,
+   "phrases": [
+    {
+     "text": "Ring one part into many.",
+     "start": 0.02,
+     "end": 1.06
+    }
+   ],
+   "words": [
+    {
+     "w": "ring",
+     "start": 0.02,
+     "end": 0.145
+    },
+    {
+     "w": "one",
+     "start": 0.145,
+     "end": 0.345
+    },
+    {
+     "w": "part",
+     "start": 0.345,
+     "end": 0.505
+    },
+    {
+     "w": "into",
+     "start": 0.505,
+     "end": 0.705
+    },
+    {
+     "w": "many",
+     "start": 0.705,
+     "end": 1.06
+    }
+   ],
+   "heard": "ring one part into many"
+  },
+  "f10": {
+   "beat": "f10",
+   "text": "Mirror the copies.",
+   "spoken": "Mirror the copies.",
+   "file": "f10.wav",
+   "duration": 0.96,
+   "tempo": 1.0,
+   "take": "feat_b_1003",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 2.6,
+   "phrases": [
+    {
+     "text": "Mirror the copies.",
+     "start": 0.0,
+     "end": 0.93
+    }
+   ],
+   "words": [
+    {
+     "w": "mirror",
+     "start": 0.0,
+     "end": 0.185
+    },
+    {
+     "w": "the",
+     "start": 0.185,
+     "end": 0.345
+    },
+    {
+     "w": "copies",
+     "start": 0.345,
+     "end": 0.93
+    }
+   ],
+   "heard": "mirror the copies"
+  },
+  "f11": {
+   "beat": "f11",
+   "text": "Combine moves under one control.",
+   "spoken": "Combine moves under one control.",
+   "file": "f11.wav",
+   "duration": 1.475,
+   "tempo": 1.0,
+   "take": "feat_b_1003",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 0.4,
+   "phrases": [
+    {
+     "text": "Combine moves under one control.",
+     "start": 0.035,
+     "end": 1.475
+    }
+   ],
+   "words": [
+    {
+     "w": "combine",
+     "start": 0.035,
+     "end": 0.285
+    },
+    {
+     "w": "moves",
+     "start": 0.285,
+     "end": 0.585
+    },
+    {
+     "w": "under",
+     "start": 0.585,
+     "end": 0.805
+    },
+    {
+     "w": "one",
+     "start": 0.805,
+     "end": 1.005
+    },
+    {
+     "w": "control",
+     "start": 1.005,
+     "end": 1.475
+    }
+   ],
+   "heard": "combine moves under one control"
+  },
+  "f12": {
+   "beat": "f12",
+   "text": "And animate it all in one click.",
+   "spoken": "And animate it all in one click.",
+   "file": "f12.wav",
+   "duration": 1.485,
+   "tempo": 1.0,
+   "take": "feat_b_1003",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 2.1,
+   "phrases": [
+    {
+     "text": "And animate it all in one click.",
+     "start": 0.0,
+     "end": 1.385
+    }
+   ],
+   "words": [
+    {
+     "w": "and",
+     "start": 0.0,
+     "end": 0.13
+    },
+    {
+     "w": "animate",
+     "start": 0.13,
+     "end": 0.43
+    },
+    {
+     "w": "it",
+     "start": 0.43,
+     "end": 0.57
+    },
+    {
+     "w": "all",
+     "start": 0.57,
+     "end": 0.73
+    },
+    {
+     "w": "in",
+     "start": 0.73,
+     "end": 0.85
+    },
+    {
+     "w": "one",
+     "start": 0.85,
+     "end": 0.99
+    },
+    {
+     "w": "click",
+     "start": 0.99,
+     "end": 1.385
+    }
+   ],
+   "heard": "and animate it all in one click"
+  },
+  "together": {
+   "beat": "together",
+   "text": "Put it all together: twenty-one parts, one slider.",
+   "spoken": "Put it all together: twenty-one parts, one slider.",
+   "file": "together.wav",
+   "duration": 2.76,
+   "tempo": 1.0,
+   "take": "close_1000",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.4,
+   "phrases": [
+    {
+     "text": "Put it all together:",
+     "start": 0.04,
+     "end": 0.68
+    },
+    {
+     "text": "twenty-one parts, one slider.",
+     "start": 1.06,
+     "end": 2.76
+    }
+   ],
+   "words": [
+    {
+     "w": "put",
+     "start": 0.04,
+     "end": 0.14
+    },
+    {
+     "w": "it",
+     "start": 0.14,
+     "end": 0.24
+    },
+    {
+     "w": "all",
+     "start": 0.24,
+     "end": 0.34
+    },
+    {
+     "w": "together",
+     "start": 0.34,
+     "end": 0.68
+    },
+    {
+     "w": "twenty",
+     "start": 1.06,
+     "end": 1.17
+    },
+    {
+     "w": "one",
+     "start": 1.17,
+     "end": 1.28
+    },
+    {
+     "w": "parts",
+     "start": 1.28,
+     "end": 1.78
+    },
+    {
+     "w": "one",
+     "start": 1.78,
+     "end": 1.78
+    },
+    {
+     "w": "slider",
+     "start": 2.18,
+     "end": 2.76
+    }
+   ],
+   "heard": "put it all together twenty one parts one slider"
+  },
+  "real": {
+   "beat": "real",
+   "text": "And it all happens right in Blender's sidebar.",
+   "spoken": "And it all happens right in Blender's sidebar.",
+   "file": "real.wav",
+   "duration": 2.25,
+   "tempo": 1.0,
+   "take": "close_1000",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.7,
+   "phrases": [
+    {
+     "text": "And it all happens right in Blender's sidebar.",
+     "start": 0.0,
+     "end": 2.23
+    }
+   ],
+   "words": [
+    {
+     "w": "and",
+     "start": 0.0,
+     "end": 0.32
+    },
+    {
+     "w": "it",
      "start": 0.32,
      "end": 0.4
     },
     {
-     "w": "whole",
+     "w": "all",
      "start": 0.4,
-     "end": 0.56
+     "end": 0.54
     },
     {
-     "w": "chain",
-     "start": 0.56,
-     "end": 0.88
-    },
-    {
-     "w": "at",
-     "start": 0.88,
-     "end": 1.08
-    },
-    {
-     "w": "once.",
-     "start": 1.08,
-     "end": 1.6
-    }
-   ],
-   "heard": "Curl a whole chain at once."
-  },
-  "f09": {
-   "beat": "09 Ring",
-   "text": "Ring one part into many.",
-   "spoken": "Ring one part into many.",
-   "file": "f09.wav",
-   "duration": 1.705,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.1,
-   "peak_db": -1.5,
-   "limiter_dip_db": 1.1,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Ring one part into many.",
-     "start": 0.04,
-     "end": 1.605
-    }
-   ],
-   "words": [
-    {
-     "w": "Ring",
-     "start": 0.04,
-     "end": 0.18
-    },
-    {
-     "w": "one",
-     "start": 0.18,
-     "end": 0.44
-    },
-    {
-     "w": "part",
-     "start": 0.44,
-     "end": 0.82
-    },
-    {
-     "w": "into",
-     "start": 0.82,
-     "end": 1.1
-    },
-    {
-     "w": "many.",
-     "start": 1.1,
-     "end": 1.605
-    }
-   ],
-   "heard": "Ring one part into many."
-  },
-  "f10": {
-   "beat": "10 Mirror",
-   "text": "Mirror the copies.",
-   "spoken": "Mirror the copies.",
-   "file": "f10.wav",
-   "duration": 1.275,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -1.8,
-   "limiter_dip_db": -0.0,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Mirror the copies.",
-     "start": 0.04,
-     "end": 1.175
-    }
-   ],
-   "words": [
-    {
-     "w": "Mirror",
-     "start": 0.04,
-     "end": 0.3
-    },
-    {
-     "w": "the",
-     "start": 0.3,
-     "end": 0.46
-    },
-    {
-     "w": "copies.",
-     "start": 0.46,
-     "end": 1.175
-    }
-   ],
-   "heard": "Mirror the copies."
-  },
-  "f11": {
-   "beat": "11 Combine",
-   "text": "Combine moves under one control.",
-   "spoken": "Combine moves under one control.",
-   "file": "f11.wav",
-   "duration": 2.205,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.5,
-   "peak_db": -1.5,
-   "limiter_dip_db": 2.4,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Combine moves under one control.",
-     "start": 0.04,
-     "end": 2.105
-    }
-   ],
-   "words": [
-    {
-     "w": "Combine",
-     "start": 0.04,
-     "end": 0.36
-    },
-    {
-     "w": "moves",
-     "start": 0.36,
-     "end": 0.78
-    },
-    {
-     "w": "under",
-     "start": 0.78,
-     "end": 1.14
-    },
-    {
-     "w": "one",
-     "start": 1.14,
-     "end": 1.38
-    },
-    {
-     "w": "control.",
-     "start": 1.38,
-     "end": 2.105
-    }
-   ],
-   "heard": "Combine moves under one control."
-  },
-  "f12": {
-   "beat": "12 Animate",
-   "text": "Animate it in one click.",
-   "spoken": "Animate it in one click.",
-   "file": "f12.wav",
-   "duration": 1.705,
-   "speed": 0.95,
-   "max": 2.5,
-   "lufs": -19.0,
-   "peak_db": -1.5,
-   "limiter_dip_db": 0.4,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Animate it in one click.",
-     "start": 0.04,
-     "end": 1.605
-    }
-   ],
-   "words": [
-    {
-     "w": "Animate",
-     "start": 0.04,
-     "end": 0.38
-    },
-    {
-     "w": "it",
-     "start": 0.38,
-     "end": 0.62
-    },
-    {
-     "w": "in",
-     "start": 0.62,
-     "end": 0.8
-    },
-    {
-     "w": "one",
-     "start": 0.8,
-     "end": 1.0
-    },
-    {
-     "w": "click.",
-     "start": 1.0,
-     "end": 1.605
-    }
-   ],
-   "heard": "Animate it in one click."
-  },
-  "together": {
-   "beat": "Put it together",
-   "text": "Put it together: twenty-one parts, one slider.",
-   "spoken": "Put it together: twenty-one parts, one slider.",
-   "file": "together.wav",
-   "duration": 3.715,
-   "speed": 0.95,
-   "max": null,
-   "lufs": -19.1,
-   "peak_db": -1.5,
-   "limiter_dip_db": 1.7,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "Put it together:",
-     "start": 0.04,
-     "end": 1.005
-    },
-    {
-     "text": "twenty-one parts,",
-     "start": 1.305,
-     "end": 2.475
-    },
-    {
-     "text": "one slider.",
-     "start": 2.695,
-     "end": 3.615
-    }
-   ],
-   "words": [
-    {
-     "w": "Put",
-     "start": 0.04,
-     "end": 0.16
-    },
-    {
-     "w": "it",
-     "start": 0.16,
-     "end": 0.28
-    },
-    {
-     "w": "together.",
-     "start": 0.28,
-     "end": 1.005
-    },
-    {
-     "w": "21",
-     "start": 1.305,
-     "end": 1.645
-    },
-    {
-     "w": "Parts",
-     "start": 1.645,
-     "end": 2.475
-    },
-    {
-     "w": "One",
-     "start": 2.695,
-     "end": 2.875
-    },
-    {
-     "w": "slider.",
-     "start": 2.875,
-     "end": 3.615
-    }
-   ],
-   "heard": "Put it together. 21 Parts One slider."
-  },
-  "real": {
-   "beat": "Real Blender",
-   "text": "All right in Blender's sidebar.",
-   "spoken": "All right in Blender's sidebar.",
-   "file": "real.wav",
-   "duration": 2.065,
-   "speed": 0.95,
-   "max": 2.6,
-   "lufs": -19.0,
-   "peak_db": -1.5,
-   "limiter_dip_db": 0.6,
-   "timing": "measured",
-   "phrases": [
-    {
-     "text": "All right in Blender's sidebar.",
-     "start": 0.04,
-     "end": 1.965
-    }
-   ],
-   "words": [
-    {
-     "w": "All",
-     "start": 0.04,
-     "end": 0.18
+     "w": "happens",
+     "start": 0.54,
+     "end": 0.86
     },
     {
      "w": "right",
-     "start": 0.18,
-     "end": 0.42
+     "start": 0.86,
+     "end": 1.14
     },
     {
      "w": "in",
-     "start": 0.42,
-     "end": 0.72
+     "start": 1.14,
+     "end": 1.32
     },
     {
-     "w": "Blender's",
-     "start": 0.72,
-     "end": 1.26
+     "w": "blender's",
+     "start": 1.32,
+     "end": 1.68
     },
     {
-     "w": "sidebar.",
-     "start": 1.26,
-     "end": 1.965
+     "w": "sidebar",
+     "start": 1.68,
+     "end": 2.23
     }
    ],
-   "heard": "All right in Blender's sidebar."
+   "heard": "and it all happens right in blender's sidebar"
   },
   "end": {
-   "beat": "End card",
-   "text": "CopyThat. Now on Superhive.",
-   "spoken": "Copy That. Now on Superhive.",
+   "beat": "end",
+   "text": "CopyThat. Now on Superhive!",
+   "spoken": "Copy That. Now on Superhive!",
    "file": "end.wav",
-   "duration": 2.62,
-   "speed": 0.95,
-   "max": null,
-   "lufs": -19.1,
+   "duration": 1.99,
+   "tempo": 1.0,
+   "take": "close_1000",
+   "lufs": -16.0,
    "peak_db": -1.5,
-   "limiter_dip_db": 1.2,
-   "timing": "measured",
+   "limiter_dip_db": 3.1,
    "phrases": [
     {
-     "text": "Copy That.",
-     "start": 0.04,
-     "end": 0.84
+     "text": "CopyThat.",
+     "start": 0.025,
+     "end": 0.53
     },
     {
-     "text": "Now on Superhive.",
-     "start": 1.2,
-     "end": 2.52
+     "text": "Now on Superhive!",
+     "start": 0.87,
+     "end": 1.91
     }
    ],
    "words": [
     {
-     "w": "Copy",
-     "start": 0.04,
-     "end": 0.34
+     "w": "copy",
+     "start": 0.025,
+     "end": 0.21
     },
     {
-     "w": "that.",
-     "start": 0.34,
-     "end": 0.84
+     "w": "that",
+     "start": 0.21,
+     "end": 0.53
     },
     {
-     "w": "Now",
-     "start": 1.2,
-     "end": 1.4
+     "w": "now",
+     "start": 0.87,
+     "end": 1.07
     },
     {
      "w": "on",
-     "start": 1.4,
-     "end": 1.62
+     "start": 1.07,
+     "end": 1.29
     },
     {
-     "w": "SuperHive.",
-     "start": 1.62,
-     "end": 2.52
+     "w": "super",
+     "start": 1.29,
+     "end": 1.52
+    },
+    {
+     "w": "hive",
+     "start": 1.52,
+     "end": 1.91
     }
    ],
-   "heard": "Copy that. Now on SuperHive."
+   "heard": "copy that now on super hive"
   }
  },
- "total": 45.625
+ "total": 38.16
 }

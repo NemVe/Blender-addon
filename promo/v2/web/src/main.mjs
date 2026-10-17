@@ -3,6 +3,7 @@
 import * as ui from './ui.mjs';
 import { K as K3, loadFlower, render, THREE } from './stage3d.mjs';
 import { clamp, ramp } from './lib.mjs';
+import openBeats from './beats_open.mjs';
 import hookBeats from './beats_hook.mjs';
 import ideaBeats from './beats_idea.mjs';
 import featBeats from './beats_feat.mjs';
@@ -35,7 +36,7 @@ const ready = (async () => {
   g.putImageData(d, 0, 0);
   document.getElementById('grain').style.backgroundImage = `url(${c.toDataURL()})`;
 
-  const factories = [...hookBeats, ...ideaBeats, ...featBeats, ...endBeats];
+  const factories = [...openBeats, ...hookBeats, ...ideaBeats, ...featBeats, ...endBeats];
   const byId = Object.fromEntries(factories.map(f => [f.id, f]));
   ctx.beats = ctx.T.beats.map((tb, i) => {
     const f = byId[tb.id];

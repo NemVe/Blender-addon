@@ -90,8 +90,9 @@ export function cursor(lt, keys, clicks = [], hold = 0.35) {
   cur.style.opacity = vis.toFixed(3);
   cur.style.transform = `translate(${(x - 3).toFixed(1)}px,${(y - 3).toFixed(1)}px) scale(${s.toFixed(3)})`;
   rips.forEach((r, i) => {
-    const c = clicks[i];
-    if (!c || lt < c.t) { r.style.opacity = 0; return; }
+    let c = null;                                  // a ripple takes every 4th click in turn, so a beat may hold many (the opening has 16)
+    for (let k = i; k < clicks.length && clicks[k].t <= lt; k += rips.length) c = clicks[k];
+    if (!c || c.soft) { r.style.opacity = 0; return; }     // a soft click (a pose drag, not counted) makes no ripple
     const u = ramp(lt, c.t, c.t + 0.6);
     const [px, py] = pathPos(keys, c.t);
     r.style.opacity = ((1 - u) * 0.9 * vis).toFixed(3);

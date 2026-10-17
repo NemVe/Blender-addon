@@ -1,5 +1,8 @@
 """The voiceover of promo v2.1: every line spoken by Kokoro, trimmed, at 48 kHz.
 
+v2.2 speaks passages with Chatterbox instead (gen_vo.py, cut_vo.py, vo_script.py); this stays as the fallback engine
+(the plan: am_puck or af_bella, speed 1.08) and as the home of the audio helpers cut_vo.py uses. Its LINES are v2.1's.
+
     python make_vo.py --models <folder with kokoro-v1.0.onnx and voices-v1.0.bin>
                       [--voice am_michael] [--speed 0.95] [--only f05,end]
 

@@ -1,4 +1,4 @@
-"""Audio mix, captions and the final film of promo v2.1.
+"""Audio mix, captions and the final film of promo v2.2.
 
     python promo/v2/build/finish.py audio     vo.wav, sfx.wav (stems, no music) and the mix, about -14 LUFS, true peak -1 dB
     python promo/v2/build/finish.py srt       captions.srt
@@ -26,6 +26,11 @@ OUT = os.path.join(REPO, "dist", "promo", "v2")
 AUDIO = os.path.join(V2, "audio")
 SR = 48000
 TARGET_LUFS, CEILING_DB = -14.0, -1.8          # the limiter's ceiling leaves room for inter-sample peaks under -1 dBTP
+# v2.2: the voice lines are levelled to -16 LUFS (v2.1's were -19) and compressed, which puts the mix gain 4.8 dB below v2.1's (measured on
+# the two finished mixes). The clicks, ticks and pops are lifted by that much, so they come out as loud as they did; the whooshes then sit
+# 9 dB below that: quiet, under the voice.
+FX = 10 ** (4.9 / 20)
+WHOOSH = 10 ** (-9.0 / 20)
 
 
 def load(path):
@@ -53,13 +58,13 @@ def stems(T):
         place(vo, load(os.path.join(V2, line["file"])), line["start"])
     fx = {k: load(os.path.join(V2, p)) for k, p in T["sfx_files"].items()}
     for w in T["wipes"]:
-        place(sfx, fx["whoosh"], w["whoosh"], 0.9)
+        place(sfx, fx["whoosh"], w["whoosh"], 0.9 * FX * WHOOSH)
     for tk in T["ticks"]:
-        place(sfx, fx["tick"], tk["t"], 1.0)
+        place(sfx, fx["tick"], tk["t"], FX)
     for c in T["clicks"]:
-        place(sfx, fx[{"click": "click", "down": "click_down", "up": "click_up"}[c["kind"]]], c["t"], 1.0)
+        place(sfx, fx[{"click": "click", "down": "click_down", "up": "click_up"}[c["kind"]]], c["t"], FX)
     for p in T.get("pops", []):
-        place(sfx, fx[p["name"]], p["t"], 0.9)
+        place(sfx, fx[p["name"]], p["t"], 0.9 * FX)
     return vo, sfx
 
 

@@ -2,7 +2,7 @@
 //
 //   "C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\AfterFX.exe" -r <this file>
 //
-// One composition, 2560x1440 at 60 fps, 76 s: the 22 beats as layers (dist/promo/v2/segments), the voiceover and the
+// One composition, 2560x1440 at 60 fps (the length of timeline.json): the beats as layers (dist/promo/v2/segments), the voiceover and the
 // sound effects as two audio layers (dist/promo/v2/vo.wav, sfx.wav; no music, add yours), and a marker for every beat
 // and every voiceover line, taken from promo/v2/timeline.json. Run it again after a re-render.
 // Nothing is shown in a dialog: everything that goes wrong is written, with its line, to dist/promo/v2/ae_build_log.txt.
@@ -52,7 +52,7 @@ function build() {
 
     var segFolder = app.project.items.addFolder("Rendered segments");
     var audioFolder = app.project.items.addFolder("Audio stems");
-    var main = app.project.items.addComp("CopyThat promo v2.1", W, H, 1, T.duration, FPS);
+    var main = app.project.items.addComp("CopyThat promo v2.2", W, H, 1, T.duration, FPS);
     main.bgColor = [0.04, 0.04, 0.05];
 
     // one layer per beat, in order, each at its start time

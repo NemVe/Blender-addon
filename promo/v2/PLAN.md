@@ -310,3 +310,17 @@ Keep them under the voice. The ticks and pops stay as they are.
 4. The After Effects project, rebuilt with its script.
 5. A new contact sheet and stills for the opening, in
    `promo_v2_review/v22/`.
+
+## v2.2 as built
+- **The opening** is `web/src/beats_open.mjs`; its cursor schedule is `OPEN_STEPS` in `make_timeline.py`, which places it after the
+  first line of the voice and ends the beat after the second (11.27 s). v2.1's three hooks are gone from `beats_hook.mjs`.
+- **N = 12**, the buttons and dialog OKs of `FLOWER_FAST.md` that the film shows: New Move, Make Chain, Record After, Ring... and OK
+  three times (outer petals, inner petals, the leaf), Spread... and OK, Build Sliders. New Move records Before by itself, so there is no
+  Record Before click. Selecting parts, typing numbers, the four pose drags and the final slider drag are not counted; the drags are
+  tagged "drags, not clicks" on screen.
+- **The voice** is Chatterbox 0.1.7 (exaggeration 0.65, cfg 0.4, temperature 0.8) in five continuous passages (`audio/vo_script.py`,
+  `gen_vo.py`); `cut_vo.py` picks the take Whisper hears best line by line, cuts it at the quietest moments, and levels each line to
+  -16 LUFS. No line needed stretching, and none was nudged.
+- **The whooshes** are 9 dB below v2.1's in the finished mix (measured: -8.9 dB); the clicks, ticks and pops are as loud as before.
+- **Re-rendered:** the opening and the logo (its glow follows the word "slider"). The other segments are v2.1's, renamed to their new
+  numbers (`dist/promo/v2/segments_v21/` keeps the old set).

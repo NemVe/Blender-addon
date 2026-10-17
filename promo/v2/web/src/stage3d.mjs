@@ -170,15 +170,16 @@ export function instFlower(F, { material = null } = {}) {
   const core = (() => { let m = null; root.traverse(o => { if (o.isMesh && o.material && /core glow/i.test(o.material.name)) m = o.material; }); return m; })();
   return {
     root, parts, names, core, coreScale: 1,
+    part(n, f) {                                    // one moving part at frame f (the opening poses its leaders one by one)
+      const node = parts[n]; if (!node) return;
+      const c = Math.max(0, Math.min(150, f)), i0 = Math.floor(c), i1 = Math.min(150, i0 + 1), u = c - i0;
+      const a = F.motion.motion[n][i0], b = F.motion.motion[n][i1];
+      node.position.set(mix(a[0], b[0], u), mix(a[1], b[1], u), mix(a[2], b[2], u));
+      node.quaternion.slerpQuaternions(_q0.set(a[3], a[4], a[5], a[6]), _q1.set(b[3], b[4], b[5], b[6]), u);
+      node.scale.set(mix(a[7], b[7], u), mix(a[8], b[8], u), mix(a[9], b[9], u));
+    },
     pose(f) {                                       // f: frame index from 0 to 150 (fractional is fine)
-      const i0 = Math.floor(Math.max(0, Math.min(150, f))), i1 = Math.min(150, i0 + 1), u = Math.max(0, Math.min(150, f)) - i0;
-      for (const n of names) {
-        const node = parts[n]; if (!node) continue;
-        const a = F.motion.motion[n][i0], b = F.motion.motion[n][i1];
-        node.position.set(mix(a[0], b[0], u), mix(a[1], b[1], u), mix(a[2], b[2], u));
-        node.quaternion.slerpQuaternions(_q0.set(a[3], a[4], a[5], a[6]), _q1.set(b[3], b[4], b[5], b[6]), u);
-        node.scale.set(mix(a[7], b[7], u), mix(a[8], b[8], u), mix(a[9], b[9], u));
-      }
+      for (const n of names) this.part(n, f);
       if (core) {
         const g = F.motion.core_glow, v = g.values;
         const ii = Math.floor(Math.max(0, Math.min(v.length - 1, f)));

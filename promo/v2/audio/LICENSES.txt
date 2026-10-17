@@ -1,22 +1,23 @@
-Voice and sound of promo v2.1: where each comes from, and under what licence.
+Voice and sound of promo v2.2: where each comes from, and under what licence.
 
-Voiceover (hook1.wav ... end.wav, vo.json)
-  Spoken by Kokoro-82M v1.0, voice am_michael: model and voice packs are
-  Apache-2.0 (https://huggingface.co/hexgrad/Kokoro-82M). It ran on the CPU
-  through kokoro-onnx (MIT, https://github.com/thewh1teagle/kokoro-onnx) with
-  the ONNX model and voices of that project's model-files-v1.0 release.
-  espeak-ng (GPL-3.0, inside espeakng-loader) turns the text into phonemes; it
-  is a tool here, and the audio is not a derivative of it.
+Voiceover (open_a.wav ... end.wav, vo.json)
+  Spoken by Chatterbox (Resemble AI, MIT, https://github.com/resemble-ai/chatterbox,
+  chatterbox-tts 0.1.7, the ResembleAI/chatterbox weights, MIT) with its default
+  voice, on the GPU, in a few continuous passages (vo_script.py), exaggeration 0.65,
+  cfg 0.4, temperature 0.8. Its output carries Resemble's Perth watermark, which is
+  inaudible. The passages are cut into lines at the word times (cut_vo.py).
   The audio is generated: no person's recording is in it, and it needs no credit.
-  The word times in vo.json were measured with faster-whisper (MIT) and the
-  OpenAI Whisper base.en model (MIT); see align_vo.py.
+  The take of each passage and the word times were chosen and measured with
+  faster-whisper (MIT) and the OpenAI Whisper small.en model (MIT).
+  v2.1's voice was Kokoro-82M (Apache-2.0) through kokoro-onnx (MIT); make_vo.py is
+  kept as the fallback and for the audio helpers cut_vo.py uses.
 
 Sound effects (click*.wav, whoosh.wav, pop*.wav, tick.wav, sfx.json)
   Made by make_sfx.py from numpy noise and sine waves. Nothing is sampled from
   a recording or a sound pack, so they are CC0 1.0 (public domain): use them
   anywhere, no credit needed.
 
-Rebuild:  python make_vo.py --models <folder with kokoro-v1.0.onnx and voices-v1.0.bin>
-          python align_vo.py
+Rebuild:  <python 3.11 venv with chatterbox-tts> gen_vo.py --out <takes folder>
+          python cut_vo.py --takes <takes folder> --cache <folder for the Whisper model>
           python make_sfx.py
           python ../make_timeline.py
