@@ -1,4 +1,4 @@
-# CopyThat - v0.20.0
+# CopyThat - v0.20.1
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -20,7 +20,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 CopyThat is a Blender extension, and it needs Blender 4.5 or newer: Blender
 will not install it on an older one. First, if an older RigMoves or CopyThat
 is listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
-the two cannot be on at once. Then drag `CopyThat-0.20.0.zip` into Blender,
+the two cannot be on at once. Then drag `CopyThat-0.20.1.zip` into Blender,
 or use Edit > Preferences > **Get Extensions** > the drop-down at the top
 right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
 **CopyThat**. Files made with older versions keep working.
@@ -1687,6 +1687,11 @@ and one lifted 1 m:
 - **On an Alt+D copy of a whole model, bending its curve - with Edit the Curve,
   or with Tab - bent the original's curve too.** The copy's curves are its own
   as soon as the copy is made.
+
+- **Installed from the zip, 0.20.0's panel raised an error each time it was
+  drawn** ("name 'bl_info' is not defined"), and its last line, the version,
+  was missing. Blender takes that information away from an extension once it
+  is loaded; the panel keeps its own copy of the version now.
 
 ## Known rough edges
 

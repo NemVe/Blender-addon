@@ -42,7 +42,7 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 20, 0),
+    "version": (0, 20, 1),
     "blender": (4, 5, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -53,6 +53,10 @@ bl_info = {
     "doc_url": "https://creators.sa/nemve",
     "category": "Rigging",
 }
+
+# Blender takes bl_info away from an extension once it is loaded (the manifest
+# stands in for it), so the version the panel shows is kept here as well.
+VERSION = ".".join(str(number) for number in bl_info["version"])
 
 # Everything this add-on makes is named with these, so its own work can always
 # be told from somebody else's on the same bone.
@@ -10037,8 +10041,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         row.alignment = "CENTER"
         row.enabled = False
         row.scale_y = 0.8
-        row.label(text="CopyThat {:s} · NemVe3D".format(
-            ".".join(str(number) for number in bl_info["version"])))
+        row.label(text="CopyThat {:s} · NemVe3D".format(VERSION))
 
     def _draw_own_keys(self, layout, context, rig, data):
         """The one fault that makes a correct rig play the wrong move.

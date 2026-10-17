@@ -10231,6 +10231,21 @@ class TestPanelStates(CopyThatCase):
             self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
         return rig().rigmoves.moves[0]
 
+    # -- installed as an extension -------------------------------------------
+
+    def test_footer_without_bl_info(self):
+        """Blender deletes bl_info from an extension once it is loaded. 0.20.0's
+        footer read it, so the panel raised NameError at every redraw."""
+        footer = self.footer()
+        kept = rigmoves.bl_info
+        del rigmoves.bl_info
+        try:
+            self.two_parts()
+            said = self.said(drawn_panel())
+        finally:
+            rigmoves.bl_info = kept
+        self.assertEqual(said[-1], footer)
+
     # -- no rig yet ---------------------------------------------------------
 
     def test_nothing_selected_says_what_to_select(self):
