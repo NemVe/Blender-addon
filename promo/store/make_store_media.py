@@ -8,6 +8,11 @@ Writes into dist/store/:
   gifs/<name>.gif    the same loops as GIFs, for Superhive's description (it shows GIFs, not videos)
   images/<name>.jpg  2400x1200 gallery images: Superhive wants five or more at 2:1, at least 1200 px wide
   film_preview.mp4   the whole film at 960x540 with its sound, under 15 MB
+  description.html   the product description to paste into Superhive's editor (its code view), with a yellow
+                     box where each GIF goes: the editor's video button takes only links (YouTube and the
+                     like), so the loops go in as GIFs through its picture button
+  documentation.html the full user guide, for the page's documentation
+(description and documentation need `pip install markdown`)
 
 The segments are dist/promo/v2/segments/NN_<beat>.mp4 (2560x1440, 60 fps), made by promo/v2/build/finish.py.
 """
@@ -21,29 +26,30 @@ SEGMENTS = os.path.join(ROOT, "dist", "promo", "v2", "segments")
 FILM = os.path.join(ROOT, "dist", "promo", "v2", "CopyThat_promo_v2_1440p60.mp4")
 OUT = os.path.join(ROOT, "dist", "store")
 
-# name -> (segment, start s, end s or None for the whole segment, gif fps)
+# name -> (segment, start s, end s or None for the whole segment, gif fps, gif width). The long walkthrough
+# loops are lighter (fewer frames, narrower): Superhive shows the description's media as GIFs, all on one page.
 CLIPS = {
-    "rig_select": ("01_open", 2.8, 9.6, 12),
-    "rig_pose": ("01_open", 26.0, 34.4, 12),
-    "rig_ring": ("01_open", 34.8, 44.0, 12),
-    "rig_spread": ("01_open", 61.0, 69.6, 12),
-    "rig_build_bloom": ("01_open", 70.0, 78.15, 12),
-    "idea_record": ("03_idea1", 0.0, None, 15),
-    "idea_build": ("04_idea2", 0.0, None, 15),
-    "idea_many": ("05_idea3", 0.0, None, 15),
-    "f01_delays": ("06_f01", 0.0, None, 15),
-    "f02_spread": ("07_f02", 0.0, None, 15),
-    "f03_pivot": ("08_f03", 0.0, None, 15),
-    "f04_steps": ("09_f04", 0.0, None, 15),
-    "f05_curves": ("10_f05", 0.0, None, 15),
-    "f06_speed": ("11_f06", 0.0, None, 15),
-    "f07_chain": ("12_f07", 0.0, None, 15),
-    "f08_curl": ("13_f08", 0.0, None, 15),
-    "f09_ring": ("14_f09", 0.0, None, 15),
-    "f10_mirror": ("15_f10", 0.0, None, 15),
-    "f11_combine": ("16_f11", 0.0, None, 15),
-    "f12_animate": ("17_f12", 0.0, None, 15),
-    "together": ("18_together", 2.0, 8.0, 12),
+    "rig_select": ("01_open", 2.8, 9.6, 10, 800),
+    "rig_pose": ("01_open", 26.0, 34.4, 10, 800),
+    "rig_ring": ("01_open", 34.8, 44.0, 10, 800),
+    "rig_spread": ("01_open", 61.0, 69.6, 10, 800),
+    "rig_build_bloom": ("01_open", 70.0, 78.15, 10, 800),
+    "idea_record": ("03_idea1", 0.0, None, 15, 960),
+    "idea_build": ("04_idea2", 0.0, None, 15, 960),
+    "idea_many": ("05_idea3", 0.0, None, 15, 960),
+    "f01_delays": ("06_f01", 0.0, None, 15, 960),
+    "f02_spread": ("07_f02", 0.0, None, 15, 960),
+    "f03_pivot": ("08_f03", 0.0, None, 15, 960),
+    "f04_steps": ("09_f04", 0.0, None, 15, 960),
+    "f05_curves": ("10_f05", 0.0, None, 15, 960),
+    "f06_speed": ("11_f06", 0.0, None, 15, 960),
+    "f07_chain": ("12_f07", 0.0, None, 15, 960),
+    "f08_curl": ("13_f08", 0.0, None, 15, 960),
+    "f09_ring": ("14_f09", 0.0, None, 15, 960),
+    "f10_mirror": ("15_f10", 0.0, None, 15, 960),
+    "f11_combine": ("16_f11", 0.0, None, 15, 960),
+    "f12_animate": ("17_f12", 0.0, None, 15, 960),
+    "together": ("18_together", 2.0, 8.0, 10, 800),
 }
 
 # name -> (segment, time s, top of the 2:1 window in the 1440-high frame). The window keeps
@@ -72,7 +78,7 @@ def span(start, end):
 
 
 def clip(name):
-    seg, start, end, fps = CLIPS[name]
+    seg, start, end, fps, width = CLIPS[name]
     src = segment(seg)
     mp4 = os.path.join(OUT, "clips", name + ".mp4")
     run(span(start, end) + ["-i", src, "-an", "-vf", "scale=1280:720:flags=lanczos,fps=30",
@@ -86,8 +92,8 @@ def clip(name):
          "-vf", "scale=1280:720:flags=lanczos", "-q:v", "4", os.path.join(OUT, "clips", name + ".jpg")])
     gif = os.path.join(OUT, "gifs", name + ".gif")
     # One palette for the whole loop, from what changes: the UI's greys and the gold stay clean.
-    graph = ("fps={:d},scale=960:540:flags=lanczos,split[a][b];[a]palettegen=max_colors=192:stats_mode=diff[p];"
-             "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle").format(fps)
+    graph = ("fps={:d},scale={:d}:-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=160:stats_mode=diff[p];"
+             "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle").format(fps, width)
     run(span(start, end) + ["-i", src, "-filter_complex", graph, "-loop", "0", gif])
     return mp4, gif
 
@@ -110,6 +116,36 @@ def image(name):
         picture.paste(picture.crop((x, y - h, x + w, y)), (x, y))
         picture.save(jpg, quality=93)
     return jpg
+
+
+def descriptions():
+    import re
+    import markdown
+
+    def to_html(text):
+        return markdown.markdown(text, extensions=["tables", "sane_lists"])
+
+    listing = open(os.path.join(ROOT, "docs", "SUPERHIVE_LISTING.md"), encoding="utf-8").read()
+    body = listing[listing.index("# Record a move. Get a slider."):]
+    # One level down: the store's page has the product's name as its title.
+    body = re.sub(r"^## ", "### ", body, flags=re.M)
+    body = re.sub(r"^# ", "## ", body, flags=re.M)
+    box = '<p style="background:#fff3b0;padding:8px 12px;border:2px dashed #c9a76a">{}</p>'
+
+    def marker(match):
+        name = os.path.splitext(os.path.basename(match.group(2)))[0]
+        said = "<b>GIF HERE: {}.gif</b> - the picture button, from dist/store/gifs ({})".format(
+            name, match.group(1))
+        return "\n\n" + box.format(said) + "\n\n"
+
+    body = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", marker, body)
+    body = body.replace("▶ Watch the film: VIDEO_URL", box.format(
+        "<b>YOUTUBE HERE</b> - the film's YouTube link, through the video button"))
+    out = os.path.join(OUT, "description.html")
+    open(out, "w", encoding="utf-8").write(to_html(body))
+    guide = open(os.path.join(ROOT, "docs", "SUPERHIVE_PAGE.md"), encoding="utf-8").read()
+    open(os.path.join(OUT, "documentation.html"), "w", encoding="utf-8").write(to_html(guide))
+    return out
 
 
 def film():
@@ -137,6 +173,9 @@ def main():
         if not only or name in only:
             jpg = image(name)
             print("{:18s} jpg {:6.2f} MB".format(name, os.path.getsize(jpg) / 1e6), flush=True)
+    if not only or "description" in only:
+        out = descriptions()
+        print("description.html   {:d} GIF boxes".format(open(out, encoding="utf-8").read().count("GIF HERE")), flush=True)
     if not only or "film" in only:
         out = film()
         print("film_preview       mp4 {:6.2f} MB".format(os.path.getsize(out) / 1e6), flush=True)
