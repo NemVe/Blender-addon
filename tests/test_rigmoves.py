@@ -147,10 +147,16 @@ class Sketch:
     """A stand-in for a panel layout that notes what is drawn, and where.
 
     The panel cannot be drawn without a window, but its code can run against
-    this: every row, column and sub-panel is another sketch, and every button
-    is logged with the path of sub-panels it was put in. So is every label,
-    and every row that is told how to align: those say how much of the width
-    something takes, and what a person reads on the row.
+    this: every row, column and box is another sketch, and every button is
+    logged with the path of rows it was put in. So is every label, every flag
+    a section is folded by, and every row that is told how to align: those say
+    how much of the width something takes, and what a person reads on the row.
+
+    Every call is also checked against Blender's own description of the
+    layout: a keyword that the function does not take, or a property that a
+    layout does not have, is an error here as it would be in a window, which a
+    run with no window cannot draw. Blender 4.5, 5.0 and 5.2 each answer for
+    their own.
     """
 
     def __init__(self, log, where=()):
@@ -159,31 +165,62 @@ class Sketch:
     def child(self, name):
         return Sketch(self.log, self.where + (name,))
 
-    def row(self, **_kwargs):
+    @staticmethod
+    def check(name, kwargs):
+        function = bpy.types.UILayout.bl_rna.functions.get(name)
+        assert function is not None, "UILayout has no {:s}".format(name)
+        unknown = set(kwargs) - set(function.parameters.keys())
+        assert not unknown, "UILayout.{:s} takes no {:s}".format(name, ", ".join(sorted(unknown)))
+
+    def row(self, **kwargs):
+        self.check("row", kwargs)
         return self.child("row")
 
-    column = split = box = row
+    def column(self, **kwargs):
+        self.check("column", kwargs)
+        return self.child("column")
 
-    def panel_prop(self, _data, prop):
-        return self.child("head:" + prop), self.child("body:" + prop)
+    def split(self, **kwargs):
+        self.check("split", kwargs)
+        return self.child("split")
 
-    def operator(self, idname, text="", **_kwargs):
+    def box(self, **kwargs):
+        self.check("box", kwargs)
+        return self.child("box")
+
+    def grid_flow(self, **kwargs):
+        self.check("grid_flow", kwargs)
+        return self.child("grid")
+
+    def operator(self, idname, text="", **kwargs):
+        self.check("operator", kwargs)
         self.log.append((self.where, idname, text))
         return types.SimpleNamespace()
 
-    def label(self, text="", icon="NONE", **_kwargs):
+    def label(self, text="", icon="NONE", **kwargs):
+        self.check("label", kwargs)
         self.log.append((self.where, "label:" + icon, text))
 
+    def prop(self, _data, prop, text="", **kwargs):
+        self.check("prop", kwargs)
+        self.log.append((self.where, "prop:" + prop, text))
+
     def __setattr__(self, name, value):
-        if name == "alignment":
-            self.log.append((self.where, "alignment", value))
+        if name in ("log", "where"):
+            return super().__setattr__(name, value)
+        assert name in bpy.types.UILayout.bl_rna.properties, "UILayout has no {:s}".format(name)
+        if name in ("alignment", "alert"):
+            self.log.append((self.where, name, value))
         super().__setattr__(name, value)
 
     def __getattr__(self, name):
-        # prop, separator and the rest: nothing to note.
+        # separator, prop_search and the rest: nothing to note but the check.
         if name.startswith("__"):
             raise AttributeError(name)
-        return lambda *args, **kwargs: None
+
+        def call(*_args, **kwargs):
+            self.check(name, kwargs)
+        return call
 
 
 def drawn_panel(context=None):
@@ -2345,26 +2382,34 @@ class TestSpread(CopyThatCase):
 
     # -- the panel ----------------------------------------------------------
 
-    def test_spread_buttons_sit_in_the_headers_of_riding_along_and_timing(self):
+    def test_spread_buttons_sit_with_riding_along_and_in_the_timing_header(self):
         self.ring_of_riders(count=4)
-        found = [(where, text, idname) for where, idname, text in drawn_buttons()
-                 if idname == "rigmoves.spread"]
-        self.assertEqual(sorted(found), sorted([
-            (("head:show_riders", "row"), "Spread…", "rigmoves.spread"),
-            (("head:show_timing", "row"), "Spread…", "rigmoves.spread")]))
+        move = rig().rigmoves.moves[0]
+        spread = lambda: [text for _where, idname, text in drawn_buttons()  # noqa: E731
+                          if idname == "rigmoves.spread"]
+        # Delays: in the header of TIMING, which is on show whether it is open or not.
+        move.show_timing, move.show_riders = False, False
+        self.assertEqual(spread(), ["Spread…"])
+        # Leads: with the riders, in COPIES, once it is open.
+        move.show_riders = True
+        self.assertEqual(spread(), ["Spread…", "Spread…"])
+        headers = [text for _where, kind, text in drawn_panel()
+                   if kind in ("prop:show_timing", "prop:show_riders") and text]
+        self.assertEqual(headers, ["TIMING", "COPIES"])
 
-    def test_the_spread_buttons_take_only_their_own_width_in_the_headers(self):
-        # Set straight in a header, the button and the label share it half and
+    def test_the_spread_buttons_take_only_their_own_width(self):
+        # Set straight in a row, the button and the label share it half and
         # half, and "Riding along (7)" was cut to "Riding alon…". In a row of
         # its own, aligned right, the button takes what it needs and the label
         # keeps the rest.
         self.ring_of_riders(count=4)
+        rig().rigmoves.moves[0].show_riders = True
         log = drawn_panel()
-        spread = sorted(where for where, kind, _text in log if kind == "rigmoves.spread")
-        aligned = sorted(where for where, kind, text in log
-                         if kind == "alignment" and text == "RIGHT")
-        self.assertEqual(spread, [("head:show_riders", "row"), ("head:show_timing", "row")])
-        self.assertEqual(aligned, spread)
+        spread = [where for where, kind, _text in log if kind == "rigmoves.spread"]
+        aligned = {where for where, kind, text in log
+                   if kind == "alignment" and text == "RIGHT"}
+        self.assertEqual(len(spread), 2)
+        self.assertTrue(set(spread) <= aligned, (spread, aligned))
 
 
 class TestMakeChain(CopyThatCase):
@@ -2591,10 +2636,16 @@ class TestMakeChain(CopyThatCase):
         undo_once()
         self.assertEqual({p.follows for p in rig().rigmoves.moves[0].parts}, {""})
 
-    def test_the_button_is_in_the_follows_section(self):
-        found = [(where, text) for where, idname, text in drawn_buttons()
-                 if idname == "rigmoves.make_chain"]
-        self.assertEqual(found, [(("body:show_chain", "row"), "Make Chain")])
+    def test_the_button_is_in_the_chains_section(self):
+        move = rig().rigmoves.moves[0]
+        found = lambda: [text for _where, idname, text in drawn_buttons()  # noqa: E731
+                         if idname == "rigmoves.make_chain"]
+        move.show_chain = False
+        self.assertEqual(found(), [])
+        move.show_chain = True
+        self.assertEqual(found(), ["Make Chain"])
+        self.assertEqual([text for _where, kind, text in drawn_panel()
+                          if kind == "prop:show_chain" and text], ["CHAINS"])
 
 
 class TestCurl(CopyThatCase):
@@ -2912,9 +2963,12 @@ class TestCurl(CopyThatCase):
                             number)
 
     def test_the_button_sits_beside_make_chain(self):
+        rig().rigmoves.moves[0].show_chain = True
         found = [(where, text) for where, idname, text in drawn_buttons()
-                 if idname == "rigmoves.curl"]
-        self.assertEqual(found, [(("body:show_chain", "row"), "Curl")])
+                 if idname in ("rigmoves.curl", "rigmoves.make_chain")]
+        # Two buttons of one row, Make Chain first.
+        self.assertEqual([text for _where, text in found], ["Make Chain", "Curl"])
+        self.assertEqual(found[0][0], found[1][0])
 
 
 class TestTheFirstFrameOfAGrowIn(CopyThatCase):
@@ -3679,10 +3733,16 @@ class TestRing(CopyThatCase):
         self.assertEqual(self.stock(), stock)
         self.assertEqual([g.name for g in bpy.data.objects["Blade"].vertex_groups], ["Blade"])
 
-    def test_the_button_is_in_the_moves_body(self):
-        found = [(where, text) for where, idname, text in drawn_buttons()
-                 if idname == "rigmoves.ring"]
-        self.assertEqual(found, [(("body:expanded", "row"), "Ring…")])
+    def test_the_button_is_in_the_copies_section(self):
+        move = rig().rigmoves.moves[0]
+        found = lambda: [text for _where, idname, text in drawn_buttons()  # noqa: E731
+                         if idname == "rigmoves.ring"]
+        move.show_riders = False
+        self.assertEqual(found(), [])
+        move.show_riders = True
+        self.assertEqual(found(), ["Ring…"])
+        self.assertEqual([text for _where, kind, text in drawn_panel()
+                          if kind == "prop:show_riders" and text], ["COPIES"])
 
 
 class TestRingAroundAFarHub(CopyThatCase):
@@ -8749,41 +8809,32 @@ class TestRingReports(RingFlows):
     # -- the panel's box ----------------------------------------------------
 
     @staticmethod
-    def drawn_report(text):
-        lines = []
+    def drawn_report(text, open_box=True):
+        log = []
+        data = types.SimpleNamespace(report=text, show_report=open_box)
+        rigmoves.RIGMOVES_PT_panel._draw_report(None, Sketch(log), data)
+        return [line for _where, kind, line in log if kind.startswith("label")]
 
-        class Column:
-            enabled = True
-
-            def label(self, text="", **_kwargs):
-                lines.append(text)
-
-        class Box:
-            def column(self, **_kwargs):
-                return Column()
-
-        class Layout:
-            def box(self):
-                return Box()
-
-        rigmoves.RIGMOVES_PT_panel._draw_report(None, Layout(), types.SimpleNamespace(report=text))
-        return lines
+    @staticmethod
+    def whole(text):
+        return rigmoves.wrapped(text, width=rigmoves.REPORT_WIDTH, most=1000)
 
     def test_a_report_the_box_has_room_for_is_shown_whole(self):
         text = "Spread the Leads of 11 riders in steps of -3 from 0, round the ring."
-        self.assertEqual(self.drawn_report(text), rigmoves.wrapped(text))
-        # Seven words of four letters fill a line, so sixty-three are nine lines.
-        nine = " ".join(["word"] * 63)
-        self.assertEqual(len(rigmoves.wrapped(nine, most=1000)), 9)
-        self.assertEqual(self.drawn_report(nine), rigmoves.wrapped(nine, most=1000))
-        ten = " ".join(["word"] * 64)
-        self.assertEqual(len(rigmoves.wrapped(ten, most=1000)), 10)
+        self.assertEqual(self.drawn_report(text), self.whole(text))
+        # As many words of four letters as fill a line, nine lines of them.
+        per_line = (rigmoves.REPORT_WIDTH + 1) // 5
+        nine = " ".join(["word"] * (9 * per_line))
+        self.assertEqual(len(self.whole(nine)), 9)
+        self.assertEqual(self.drawn_report(nine), self.whole(nine))
+        ten = " ".join(["word"] * (9 * per_line + 1))
+        self.assertEqual(len(self.whole(ten)), 10)
         self.assertEqual(len(self.drawn_report(ten)), 10)
         self.assertEqual(self.drawn_report(ten)[-1], "(the full report is in the Info editor)")
 
     def test_a_longer_report_ends_with_a_sign_and_says_where_the_rest_is(self):
         text = " ".join("word{:d}".format(n) for n in range(80))
-        whole = rigmoves.wrapped(text, most=1000)
+        whole = self.whole(text)
         self.assertGreater(len(whole), 9)
         lines = self.drawn_report(text)
         self.assertEqual(len(lines), 10)
@@ -8791,7 +8842,12 @@ class TestRingReports(RingFlows):
         self.assertTrue(whole[8].startswith(lines[8][:-1].rstrip()), (whole[8], lines[8]))
         self.assertEqual(lines[:8], whole[:8])
         self.assertEqual(lines[9], "(the full report is in the Info editor)")
-        self.assertLessEqual(len(lines[8]), 34)
+        self.assertLessEqual(len(lines[8]), rigmoves.REPORT_WIDTH)
+
+    def test_a_shut_report_shows_its_title_only(self):
+        self.assertEqual(self.drawn_report("Something was done.", open_box=False), [])
+        self.assertEqual(self.drawn_report("Something was done."), ["Something was done."])
+        self.assertEqual(self.drawn_report(""), [])
 
     # -- a half made with Ctrl+M that is not the same on both sides ---------
 
@@ -9241,11 +9297,12 @@ class TestNamesBesideControls(CopyThatCase):
             self.skipTest("this Blender has no font to measure text with here")
 
     @staticmethod
-    def room(width, share=0.42, scale=1.0):
+    def room(width, share=0.42, scale=1.0, inset=0.0):
         """What a label may take of a sidebar this wide: the rows are the
         region less 53 px, and the label loses 32 px of its share to its icon
-        and its padding (both measured in a real window)."""
-        return share * (width - 53.0 * scale) - 32.0 * scale
+        and its padding (both measured in a real window). Inside a box, the
+        box takes `inset` more."""
+        return share * (width - (53.0 + inset) * scale) - 32.0 * scale
 
     def test_a_long_name_is_cut_from_the_front_only_as_far_as_it_must(self):
         got = rigmoves.fitted(Sidebar(280), self.NAME, 0.42)
@@ -9300,15 +9357,17 @@ class TestNamesBesideControls(CopyThatCase):
         record_move([leader], lambda: setattr(leader, "location", (3.0, 0.0, 1.0)))
         select(leader)
         self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=8), {"FINISHED"})
+        rig().rigmoves.moves[0].show_riders = True
         rows = [text for where, kind, text in drawn_panel(Sidebar(280))
-                if kind == "label:OBJECT_DATA" and where[:1] == ("body:show_riders",)]
+                if kind == "label:OBJECT_DATA"]
         self.assertEqual(len(rows), 7)
         self.assertEqual(len(set(rows)), 7, rows)
         for number, row in zip(range(2, 9), rows):
             self.assertTrue(row.endswith(" {:d}".format(number)), row)
             # What Blender draws is what fits: a longer label is cut at its
-            # end, which is where the number is.
-            self.assertLessEqual(text_width(row), self.room(280), row)
+            # end, which is where the number is. The rows are in the box of
+            # the move, which takes some of the width.
+            self.assertLessEqual(text_width(row), self.room(280, inset=rigmoves.INSET), row)
 
 
 class ChestCase(CopyThatCase):
@@ -10066,6 +10125,292 @@ class TestAPartNextToAnotherModel(ChestCase):
                                            for p in handle_points]), TOLERANCE, share)
 
 
+class TestPanelIcons(CopyThatCase):
+    """The panel's own icons, gold line drawings in icons/: the files are
+    there and load, and where one is not, a built-in icon stands in for it."""
+
+    def test_every_icon_has_a_file_that_is_a_64_pixel_gold_png_on_transparent(self):
+        folder = os.path.join(os.path.dirname(os.path.abspath(rigmoves.__file__)), "icons")
+        for name in rigmoves.ICON_FILES:
+            path = os.path.join(folder, name + ".png")
+            self.assertTrue(os.path.isfile(path), name)
+            image = bpy.data.images.load(path)
+            try:
+                self.assertEqual(tuple(image.size), (64, 64), name)
+                self.assertEqual(image.channels, 4, name)
+                pixels = image.pixels[:]
+                alphas = pixels[3::4]
+                self.assertGreater(max(alphas), 0.99, name)
+                self.assertLess(min(alphas), 0.01, name)
+                for red, green, blue, alpha in zip(*[iter(pixels)] * 4):
+                    if alpha > 0.99:
+                        self.assertTrue(red > green > blue, (name, red, green, blue))
+                        break
+            finally:
+                bpy.data.images.remove(image)
+
+    def test_they_load_into_one_collection_that_unregister_gives_back(self):
+        for name in rigmoves.ICON_FILES:
+            self.assertIn("icon_value", rigmoves.icon(name), name)
+            if not bpy.app.background:
+                # Blender hands out no icon numbers when it has no window.
+                self.assertGreater(rigmoves.icon(name)["icon_value"], 0, name)
+        collection = rigmoves.ICONS["previews"]
+        self.assertIsNotNone(collection)
+        self.assertEqual(sorted(collection.keys()), sorted(rigmoves.ICON_FILES))
+        rigmoves.free_icons()
+        try:
+            self.assertIsNone(rigmoves.ICONS["previews"])
+        finally:
+            rigmoves.load_icons()
+        self.assertIsNotNone(rigmoves.ICONS["previews"])
+
+    def test_without_the_files_the_built_in_icons_stand_in(self):
+        rigmoves.free_icons()
+        try:
+            for name, built_in in rigmoves.ICON_FILES.items():
+                self.assertEqual(rigmoves.icon(name), {"icon": built_in})
+        finally:
+            rigmoves.load_icons()
+
+    def test_one_file_gone_costs_one_icon(self):
+        real = os.path.isfile
+        with mock.patch("os.path.isfile",
+                        side_effect=lambda path: False if path.endswith("ring.png") else real(path)):
+            rigmoves.load_icons()
+        try:
+            self.assertEqual(rigmoves.icon("ring"), {"icon": rigmoves.ICON_FILES["ring"]})
+            self.assertIn("icon_value", rigmoves.icon("chain"))
+        finally:
+            rigmoves.load_icons()
+
+    def test_the_built_in_ones_are_icons_this_blender_has(self):
+        known = bpy.types.UILayout.bl_rna.functions["label"].parameters["icon"].enum_items.keys()
+        for name, built_in in rigmoves.ICON_FILES.items():
+            self.assertIn(built_in, known, name)
+
+
+class TestPanelStates(CopyThatCase):
+    """The panel draws, with no call Blender would refuse, in every state it
+    can be in, and says in each what it should. (The Sketch checks every call
+    against Blender's own layout.)"""
+
+    TAGLINE = "Record a move. Get a slider."
+    SECTIONS = ("show_parts", "show_path", "show_timing", "show_riders", "show_chain",
+                "show_animate")
+
+    @staticmethod
+    def said(log):
+        return [text for _where, kind, text in log if kind.startswith("label") and text]
+
+    @staticmethod
+    def pressed(log):
+        return [text for _where, idname, text in log if "." in idname and text]
+
+    def footer(self):
+        return "CopyThat {:s} · NemVe3D".format(
+            ".".join(str(number) for number in rigmoves.bl_info["version"]))
+
+    def branded(self, log):
+        """The tagline first and the footer last, whatever the state."""
+        said = self.said(log)
+        self.assertEqual(said[0], self.TAGLINE)
+        self.assertEqual(said[-1], self.footer())
+        return said
+
+    def two_parts(self, build=True):
+        self.lid = cube("Lid", (0.0, 0.0, 1.0))
+        self.arm = cube("Arm", (3.0, 0.0, 1.0))
+
+        def pose():
+            self.lid.rotation_euler.x = math.radians(90.0)
+            self.arm.location.z += 1.0
+
+        record_move([self.lid, self.arm], pose)
+        if build:
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        return rig().rigmoves.moves[0]
+
+    # -- no rig yet ---------------------------------------------------------
+
+    def test_nothing_selected_says_what_to_select(self):
+        log = drawn_panel()
+        said = self.branded(log)
+        self.assertIn("Select the objects that move.", said)
+        self.assertEqual(self.pressed(log), [])
+
+    def test_objects_selected_offer_the_one_big_button(self):
+        select(cube("Lid", (0.0, 0.0, 1.0)))
+        log = drawn_panel()
+        self.assertIn("1 object selected.", self.branded(log))
+        self.assertEqual(self.pressed(log), ["New Move"])
+        select(cube("Arm", (3.0, 0.0, 1.0)), bpy.data.objects["Lid"])
+        self.assertIn("2 objects selected.", self.said(drawn_panel()))
+
+    def test_an_armature_with_nothing_selected_is_offered_to_work_on(self):
+        bpy.ops.object.armature_add()
+        bpy.context.object.name = "Skeleton"
+        for obj in bpy.context.view_layer.objects:
+            obj.select_set(False)
+        bpy.context.view_layer.objects.active = None
+        log = drawn_panel()
+        self.assertIn("Pick the rig to work on:", self.branded(log))
+        self.assertEqual(self.pressed(log), ["Skeleton"])
+
+    # -- a rig ---------------------------------------------------------------
+
+    def test_a_rig_with_no_move_says_so_and_offers_the_one_big_button(self):
+        self.two_parts(build=False)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        select(rig())
+        log = drawn_panel()
+        said = self.branded(log)
+        self.assertIn("Select the parts that move.", said)
+        self.assertIn(rig().name, said)
+        self.assertEqual(self.pressed(log), ["New Move"])
+
+    def test_one_move_not_built_yet(self):
+        self.two_parts(build=False)
+        log = drawn_panel()
+        said = self.branded(log)
+        self.assertEqual(said[1:3], [rig().name, "2 parts"])
+        # Spread is the one button in a header, so it is there with TIMING shut.
+        self.assertEqual(self.pressed(log), ["Record", "Record", "Spread…", "Build Sliders",
+                                              "Pause", "To Before", "New Move"])
+        # No slider yet, and no Frames: there is nothing built to play.
+        self.assertNotIn("prop:play", [kind for _where, kind, _text in log])
+
+    def test_one_move_built(self):
+        self.two_parts()
+        log = drawn_panel()
+        said = self.branded(log)
+        self.assertEqual(said[1:3], [rig().name, "2 parts · 1 slider"])
+        kinds = [kind for _where, kind, _text in log]
+        # The slider comes before Before and After.
+        texts = [text for _where, _kind, text in log]
+        self.assertLess(kinds.index("prop:play"), texts.index("Before"))
+        self.assertLess(texts.index("Before"), texts.index("After"))
+        self.assertEqual([text for _where, kind, text in log if kind == "prop:play"],
+                         ["Move 1"])
+        self.assertIn("rigmoves.key_control", kinds)
+
+    def test_the_sections_are_shut_and_the_report_is_open_to_begin_with(self):
+        move = self.two_parts()
+        for flag in self.SECTIONS:
+            self.assertFalse(getattr(move, flag), flag)
+        self.assertTrue(rig().rigmoves.show_report)
+        titles = [text for _where, kind, text in drawn_panel()
+                  if kind.startswith("prop:show_") and text]
+        self.assertEqual(titles, ["PARTS & PIVOT", "PATH", "TIMING", "COPIES", "CHAINS",
+                                  "ANIMATE", "REPORT"])
+        self.assertEqual(titles[:-1], [title.upper() for title in titles[:-1]])
+
+    def test_each_section_shows_what_is_in_it_when_it_is_open_and_not_when_shut(self):
+        move = self.two_parts()
+        for flag, button in (("show_parts", "rigmoves.use_selected"),
+                             ("show_path", "rigmoves.add_step"),
+                             ("show_timing", "rigmoves.pick_part"),
+                             ("show_riders", "rigmoves.ring"),
+                             ("show_chain", "rigmoves.make_chain"),
+                             ("show_animate", "rigmoves.animate")):
+            for opened in (False, True, False):
+                setattr(move, flag, opened)
+                found = button in [idname for _where, idname, _text in drawn_buttons()]
+                self.assertEqual(found, opened, (flag, button))
+
+    def test_a_move_folded_shows_its_name_and_nothing_under_it(self):
+        move = self.two_parts()
+        move.expanded = False
+        log = drawn_panel()
+        self.assertEqual(self.pressed(log)[:1], ["Build Sliders"])
+        self.assertNotIn("prop:play", [kind for _where, kind, _text in log])
+
+    def test_all_open_after_a_ring_with_riders_and_delays(self):
+        move = self.two_parts()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.ring(index=0, count=4), {"FINISHED"})
+        for part in move.parts:
+            if not part.leader:
+                part.start = 0.1
+        for flag in self.SECTIONS:
+            setattr(move, flag, True)
+        select(self.lid)
+        log = drawn_panel(Sidebar(280))
+        said = self.branded(log)
+        self.assertIn("Riding along (3)", said)
+        self.assertIn("5 parts · 1 slider", said)
+        self.assertEqual(self.pressed(log).count("Spread…"), 2)
+        # Now at the largest UI scale, in the narrowest sidebar.
+        drawn_panel(Sidebar(200, scale=2.0))
+
+    def test_a_chain_that_waits_for_a_build_says_so(self):
+        move = self.two_parts()
+        move.show_chain = True
+        self.assertNotIn("Build to put it into effect", self.said(drawn_panel()))
+        with mock.patch.object(rigmoves, "parent_pending", return_value=True):
+            self.assertIn("Build to put it into effect", self.said(drawn_panel()))
+
+    def test_paused_says_so(self):
+        self.two_parts()
+        self.assertEqual(self.pressed(drawn_panel())[-3:], ["Pause", "To Before", "New Move"])
+        rig().rigmoves.posing = True
+        self.assertIn("Paused", self.pressed(drawn_panel()))
+
+    # -- what the loud boxes say --------------------------------------------
+
+    def test_auto_keying_on_and_a_newcomer(self):
+        self.two_parts()
+        bpy.context.scene.tool_settings.use_keyframe_insert_auto = True
+        select(cube("Newcomer", (6.0, 0.0, 1.0)))
+        said = self.said(drawn_panel())
+        self.assertIn("Auto Keying is on", said)
+        self.assertIn("'Newcomer' not in this rig", said)
+
+    def test_a_combined_control_has_its_own_box(self):
+        one = cube("One", (0.0, 0.0, 1.0))
+        two = cube("Two", (3.0, 0.0, 1.0))
+        record_move([one], lambda: setattr(one, "location", (0.0, 0.0, 2.0)))
+        record_move([two], lambda: setattr(two, "location", (3.0, 0.0, 2.0)))
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.combine(), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        log = drawn_panel()
+        self.assertIn("plays these, each after its own delay", self.said(log))
+        self.assertIn("Combine", self.pressed(log))
+        self.assertIn("Animate", self.pressed(log))
+        kinds = [kind for _where, kind, _text in log]
+        self.assertEqual(kinds.count("prop:play"), 3)
+
+    # -- the report -----------------------------------------------------------
+
+    def test_a_refusal_is_a_warning_and_the_next_success_is_not(self):
+        move = self.two_parts(build=False)
+        self.assertFalse(rigmoves.warned(rig().rigmoves))
+        self.assertEqual(bpy.ops.rigmoves.curl(index=0), {"CANCELLED"})
+        self.assertTrue(rig().rigmoves.report)
+        self.assertTrue(rigmoves.warned(rig().rigmoves))
+        alerts = [value for _where, kind, value in drawn_panel() if kind == "alert"]
+        self.assertIn(True, alerts)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertFalse(rigmoves.warned(rig().rigmoves))
+        alerts = [value for _where, kind, value in drawn_panel() if kind == "alert"]
+        self.assertNotIn(True, alerts)
+        self.assertTrue(move.built)
+
+    def test_say_keeps_the_kind_and_a_build_adding_to_it_does_not_lose_it(self):
+        heard = []
+        stand_in = types.SimpleNamespace(report=lambda kinds, text: heard.append((kinds, text)))
+        rigmoves.say(stand_in, {"WARNING"}, "Nothing is selected.")
+        self.assertEqual(heard, [({"WARNING"}, "Nothing is selected.")])
+        self.assertTrue(rigmoves.warned(types.SimpleNamespace(report="Nothing is selected.")))
+        self.assertTrue(rigmoves.warned(
+            types.SimpleNamespace(report="Nothing is selected. 2 part(s) caught up.")))
+        self.assertFalse(rigmoves.warned(types.SimpleNamespace(report="Something else.")))
+        rigmoves.say(stand_in, {"INFO"}, "Done.")
+        self.assertFalse(rigmoves.warned(types.SimpleNamespace(report="Done.")))
+        self.assertFalse(rigmoves.warned(types.SimpleNamespace(report="")))
+
+
 class TestRegistration(unittest.TestCase):
 
     def test_reload_registers_again(self):
@@ -10102,6 +10447,30 @@ class TestManifest(unittest.TestCase):
         # but the copy in the tree must not be left behind either.
         self.assertEqual(self.manifest_line("version"),
                          ".".join(map(str, rigmoves.bl_info["version"])))
+
+
+class TestTheZip(unittest.TestCase):
+    """What the build script packs is what Blender installs."""
+
+    def test_the_zip_ships_the_icons_the_panel_loads(self):
+        import importlib.util
+        import pathlib
+        import zipfile
+        root = pathlib.Path(rigmoves.__file__).resolve().parent.parent
+        spec = importlib.util.spec_from_file_location("build_zip", root / "tools" / "build_zip.py")
+        build = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build)
+        with tempfile.TemporaryDirectory() as folder:
+            # Its output and its licence are in a folder of their own; the
+            # add-on it packs is the real one.
+            build.ROOT = pathlib.Path(folder)
+            (build.ROOT / "LICENSE").write_text("licence", encoding="utf-8")
+            build.main()
+            with zipfile.ZipFile(next((build.ROOT / "dist").glob("*.zip"))) as archive:
+                names = set(archive.namelist())
+        for name in rigmoves.ICON_FILES:
+            self.assertIn("icons/{:s}.png".format(name), names)
+        self.assertTrue({"__init__.py", "README.md", "blender_manifest.toml", "LICENSE"} <= names)
 
 
 class TestTheMarksAMeshIsToldBy(CopyThatCase):
