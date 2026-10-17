@@ -28,9 +28,11 @@ hand-built rig can be given a slider without being taken apart first.
 import functools
 import json
 import math
+import os
 import random
 
 import bpy
+import bpy.utils.previews
 import bmesh  # after bpy: as a module, bpy is what makes bmesh importable
 from mathutils import Euler, Matrix, Quaternion, Vector
 from mathutils.bvhtree import BVHTree
@@ -1687,9 +1689,23 @@ class RIGMOVES_Move(bpy.types.PropertyGroup):
         name="Frames", default=48, min=1, max=100000, description=FRAMES_HELP)
     built: bpy.props.BoolProperty(default=False)
     expanded: bpy.props.BoolProperty(default=True)
-    show_timing: bpy.props.BoolProperty(default=False)
-    show_riders: bpy.props.BoolProperty(default=True)
-    show_chain: bpy.props.BoolProperty(default=True)
+    # Which sections of the move's box in the panel are open. They are kept on
+    # the move because the panel is drawn afresh every time, and Blender has
+    # nowhere else to remember what was folded. Shut to begin with, so a new
+    # move reads as Before, After and Build, and the rest is one click away. (Files
+    # from before 0.20 keep the Riding along and Follows they left open.)
+    show_parts: bpy.props.BoolProperty(
+        default=False, description="Show or fold the parts of the move and their pivot")
+    show_path: bpy.props.BoolProperty(
+        default=False, description="Show or fold the ease, the curves and the steps")
+    show_timing: bpy.props.BoolProperty(
+        default=False, description="Show or fold the delay of every part")
+    show_riders: bpy.props.BoolProperty(
+        default=False, description="Show or fold Ring and the parts riding along")
+    show_chain: bpy.props.BoolProperty(
+        default=False, description="Show or fold Make Chain, Curl and Follows")
+    show_animate: bpy.props.BoolProperty(
+        default=False, description="Show or fold Frames and Animate")
     # The line drawn through where every part goes, while it is shown.
     show_paths: bpy.props.BoolProperty(default=False)
     # Held by pointer, not by name: a name freed by one rig's deleted line
@@ -1752,6 +1768,10 @@ class RIGMOVES_Rig(bpy.types.PropertyGroup):
     active: bpy.props.IntProperty(default=0)
     report: bpy.props.StringProperty()
     posing: bpy.props.BoolProperty(default=False)
+    # Whether the REPORT box in the panel is open. Open to begin with: what
+    # the last button did, and what to do next, is the answer to every press.
+    show_report: bpy.props.BoolProperty(
+        default=True, description="Show or fold what the last button did")
     # While a path is open in the timeline: which move, and what the rig was
     # playing before, so it can be handed back untouched.
     editing: bpy.props.IntProperty(default=-1)
@@ -2417,6 +2437,25 @@ def reseat_bound(data, move=None):
     return count
 
 
+# The last thing an operator reported, and whether it was a warning. Blender
+# hands a report to the Info editor and the status bar and keeps no kind of it
+# for a script to ask, and the panel's REPORT box wants to show a warning
+# differently from a note.
+SAID = {"text": "", "warning": False}
+
+
+def say(operator, kinds, text):
+    """operator.report, remembering the kind for the panel (see warned)."""
+    SAID["text"], SAID["warning"] = text, bool({"WARNING", "ERROR"} & set(kinds))
+    operator.report(kinds, text)
+
+
+def warned(data):
+    """Whether what the rig's report says now was said as a warning. A report
+    that Build has added to afterwards still begins with it."""
+    return bool(SAID["warning"] and SAID["text"] and data.report.startswith(SAID["text"]))
+
+
 # What catch_up did for the operator that is running. Said once, when the
 # outermost operator is done: an operator writes its own report over whatever
 # was said before it, and a Build that another operator runs is not the one
@@ -3030,7 +3069,7 @@ def has_no_size(operator, rig, data):
     data.report = ("'{:s}' is scaled to nothing at this frame, so there is no telling "
                    "where its parts stand: go to a frame where it has a size, and press "
                    "this again.".format(short(rig.name, 24)))
-    operator.report({"WARNING"}, data.report)
+    say(operator, {"WARNING"}, data.report)
     return True
 
 
@@ -3138,7 +3177,7 @@ def cannot_edit(operator, context, rig):
     why = unavailable(context, rig)
     if why:
         rig.rigmoves.report = why
-        operator.report({"WARNING"}, why)
+        say(operator, {"WARNING"}, why)
     return bool(why)
 
 
@@ -3149,7 +3188,7 @@ def ready(operator, rig, data, reframe=True):
     if not refusal:
         return True
     data.report = refusal
-    operator.report({"WARNING"}, refusal)
+    say(operator, {"WARNING"}, refusal)
     return False
 
 
@@ -5862,7 +5901,7 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
         if held and not chosen_objects and not chosen_bones:
             owner = next(iter(held.values())).id_data
             owner.rigmoves.report = said
-            self.report({"WARNING"}, said)
+            say(self, {"WARNING"}, said)
             return {"CANCELLED"}
         if chosen_bones:
             rig = rig_of(context)
@@ -5911,7 +5950,7 @@ class RIGMOVES_OT_new_move(bpy.types.Operator):
         behind = left_behind(chosen_objects, chosen_objects)
         if behind:
             data.report += " " + left_behind_words(behind)
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6143,7 +6182,7 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
         fresh = [o for o in newcomers(context, rig) if o not in held]
         if not fresh:
             data.report = said or "Nothing selected that is not already in this rig."
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         # Joining a group on another rig moves the panel over to it, or the
         # next thing the user presses would land back on the rig they left.
@@ -6175,7 +6214,7 @@ class RIGMOVES_OT_add_to_move(bpy.types.Operator):
         behind = left_behind(fresh, fresh)
         if behind:
             data.report += " " + left_behind_words(behind)
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6248,7 +6287,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
         fresh = [o for o in fresh if o not in held]
         if not fresh:
             data.report = left_out or "Select the objects to ride along, then the part they follow."
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         if move.built and not keeps_drags(self, data):
             return {"CANCELLED"}
@@ -6336,7 +6375,7 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             data.report = "{:s}. Record its After, then Build.".format(", and ".join(told))
         if left_out:
             data.report += " " + left_out
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6376,7 +6415,7 @@ class RIGMOVES_OT_set_mirror(bpy.types.Operator):
         data.report = ("'{:s}' mirrors its leader across {:s}.".format(
             short(rider.name, 18), self.axis) if self.axis != "NONE" else
             "'{:s}' copies its leader unmirrored.".format(short(rider.name, 18)))
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6460,7 +6499,7 @@ class RIGMOVES_OT_drop_rider(bpy.types.Operator):
                        if len(names) == 1 else
                        "'{:s}' and the {:d} joint(s) riding on it no longer ride along."
                        .format(short(names[0], 18), len(names) - 1))
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6493,7 +6532,7 @@ class RIGMOVES_OT_pick_part(bpy.types.Operator):
             if context.mode != "POSE":
                 data.report = "Go into pose mode on the rig to pick '{:s}'.".format(
                     short(part.name, 20))
-                self.report({"WARNING"}, data.report)
+                say(self, {"WARNING"}, data.report)
                 return {"CANCELLED"}
             for pose_bone in rig.pose.bones:
                 picked = pose_bone.name == part_bone(part)
@@ -6509,13 +6548,13 @@ class RIGMOVES_OT_pick_part(bpy.types.Operator):
         if context.mode != "OBJECT":
             data.report = "Leave pose mode to pick '{:s}'.".format(
                 short(part.name, 20))
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         obj = part_object(part)
         if obj is None or obj.name not in context.view_layer.objects:
             data.report = "'{:s}' is not in this scene any more.".format(
                 short(part.name, 24))
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         for other in context.selected_objects:
             other.select_set(False)
@@ -6550,10 +6589,10 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
         if not (objects or bones):
             if refusal:
                 data.report = refusal
-                self.report({"WARNING"}, refusal)
+                say(self, {"WARNING"}, refusal)
             else:
                 data.report = "Nothing is carrying stray keyframes."
-                self.report({"INFO"}, data.report)
+                say(self, {"INFO"}, data.report)
             return {"CANCELLED"}
 
         # With the keys gone the rest can finally be put where it belongs - but
@@ -6573,7 +6612,7 @@ class RIGMOVES_OT_free_keys(bpy.types.Operator):
             data.report += " " + refusal
         else:
             data.report += " Build to finish."
-        self.report({"WARNING"} if refusal else {"INFO"}, data.report)
+        say(self, {"WARNING"} if refusal else {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6643,7 +6682,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
             return {"CANCELLED"}
         if not len(move.parts):
             data.report = "'{:s}': no parts yet.".format(move.name)
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
 
         # What is on screen, read before anything is paused or put back: every
@@ -6776,7 +6815,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
                 data.report = ("Nothing was moved, so there is nothing to save "
                                "for this step. Drag the parts where they should "
                                "be part way through, then press Record.")
-                self.report({"WARNING"}, data.report)
+                say(self, {"WARNING"}, data.report)
                 return {"CANCELLED"}
             step.done = True
 
@@ -6794,7 +6833,7 @@ class RIGMOVES_OT_record(bpy.types.Operator):
                             .format(kept))
         if paused:
             data.report += " Sliders paused while you pose - Build puts them back."
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6921,7 +6960,7 @@ class RIGMOVES_OT_add_step(bpy.types.Operator):
         data.report = ("'{:s}': step {:d} added. Put the parts where they "
                        "should be part way through, then press its Record."
                        .format(move.name, len(move.steps)))
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6951,7 +6990,7 @@ class RIGMOVES_OT_drop_step(bpy.types.Operator):
         # One stretch fewer, so the speeds are shared out again.
         refresh_drivers(rig, data, move)
         data.report = "Step removed from '{:s}'. Build to play it.".format(move.name)
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -6967,9 +7006,9 @@ class RIGMOVES_OT_build(bpy.types.Operator):
         rig = rig_of(context)
         if not here(context, rig):
             if rig is not None:
-                self.report({"WARNING"},
-                            "'{:s}' is not in this scene any more. Select the "
-                            "objects and start a new move.".format(rig.name))
+                say(self, {"WARNING"},
+                    "'{:s}' is not in this scene any more. Select the "
+                    "objects and start a new move.".format(rig.name))
             return {"CANCELLED"}
         data = rig.rigmoves
         if not len(data.moves):
@@ -7154,7 +7193,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
 
         if not made:
             data.report = "Nothing recorded yet. Record Before and After, then Build."
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"FINISHED"}
         data.report = "{:d} part(s) on {:d} slider(s).".format(made, len(data.moves))
         if bound:
@@ -7238,7 +7277,7 @@ class RIGMOVES_OT_build(bpy.types.Operator):
                             "speed, on this move."
                             .format(", ".join(sorted(set(cramped))[:3])))
             warn = True
-        self.report({"WARNING"} if warn else {"INFO"}, data.report)
+        say(self, {"WARNING"} if warn else {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -7272,7 +7311,7 @@ def keeps_drags(operator, data):
     data.report = ("'{:s}' has been moved and not recorded. Record it first - "
                    "this would Build, and Build puts it back.".format(
                        short(dragged[0], 18)))
-    operator.report({"WARNING"}, data.report)
+    say(operator, {"WARNING"}, data.report)
     return False
 
 
@@ -7311,7 +7350,7 @@ class RIGMOVES_OT_set_pivot(bpy.types.Operator):
         parts = [p for p in chosen_parts(context, move) if p.has_before]
         if not parts:
             data.report = "Select the parts to set a pivot for."
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         # A rig scaled to nothing is asked first: every part of it looks moved
         # there, and "moved and not recorded" is not why this cannot go ahead.
@@ -7341,7 +7380,7 @@ class RIGMOVES_OT_set_pivot(bpy.types.Operator):
         else:
             data.report = "{:s} will turn about: {:s}, from the first Build.".format(
                 said, label)
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -7366,7 +7405,7 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
             data.report = ("'{:s}' follows '{:s}' and goes where it is carried: "
                            "curve the path of the part it follows instead.".format(
                                short(chosen[0].name, 16), short(chosen[0].follows, 16)))
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         chosen = [p for p in chosen if not p.follows]
         parts = [p for p in chosen if not curve_alive(p.path_curve)]
@@ -7374,7 +7413,7 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
             data.report = ("'{:s}' has a curve already: press Edit beside it.".format(
                 short(chosen[0].name, 18)) if chosen else
                 "Select the parts to give a curved path.")
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         if not keeps_drags(self, data):
             return {"CANCELLED"}
@@ -7383,7 +7422,7 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
         if any(not p.bone_name for p in parts):
             if not all(p.has_after for p in parts):
                 data.report = "Record After first: a curve runs from Before to After."
-                self.report({"WARNING"}, data.report)
+                say(self, {"WARNING"}, data.report)
                 return {"CANCELLED"}
             bpy.ops.rigmoves.build()
         names = [p.name for p in parts]
@@ -7399,7 +7438,7 @@ class RIGMOVES_OT_curve_path(bpy.types.Operator):
         data.report = ("{:d} curve(s) made along the path. Bend one in edit mode "
                        "(Tab), then Build; its ends stay on Before and After."
                        .format(made))
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -7504,7 +7543,7 @@ class RIGMOVES_OT_show_paths(bpy.types.Operator):
             data.report = ("Nothing to draw yet: record Before and After, then Build."
                            if any(p.kind == "OBJECT" for p in move.parts) else
                            "Paths are drawn for objects, and this move has none.")
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
         return {"FINISHED"}
 
 
@@ -7661,7 +7700,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
                                "press Ride Along first.".format(move.name)
                                if self.what == "LEAD" else
                                "'{:s}' has no parts to give a Delay.".format(move.name))
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return None
         return rig, data, move, groups
 
@@ -7731,7 +7770,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
         if self.what == "LEAD" and self.order == "CHAIN":
             data.report = ("Riders have no Follows chain of their own, so there is "
                            "no chain to spread down. Pick another order.")
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         parts = [part for _ahead, group in groups for part in group]
         if self.by == "STEP":
@@ -7767,7 +7806,7 @@ class RIGMOVES_OT_spread(bpy.types.Operator):
             data.report += " A copied finger takes its first joint's Lead, joints in step."
         if cramped:
             data.report += " " + cramped
-        self.report({"WARNING"} if cramped else {"INFO"}, data.report)
+        say(self, {"WARNING"} if cramped else {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -7859,7 +7898,7 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
 
     def refuse(self, data, said):
         data.report = said
-        self.report({"WARNING"}, said)
+        say(self, {"WARNING"}, said)
         return {"CANCELLED"}
 
     @mentioning
@@ -7944,7 +7983,7 @@ class RIGMOVES_OT_make_chain(bpy.types.Operator):
         if notes:
             said += ". " + " ".join(notes)
         data.report = said
-        self.report({"WARNING"} if stopped else {"INFO"}, said)
+        say(self, {"WARNING"} if stopped else {"INFO"}, said)
         return {"FINISHED"}
 
 
@@ -8046,7 +8085,7 @@ class RIGMOVES_OT_curl(bpy.types.Operator):
 
     def refuse(self, data, said):
         data.report = said
-        self.report({"WARNING"}, said)
+        say(self, {"WARNING"}, said)
         return {"CANCELLED"}
 
     @mentioning
@@ -8134,7 +8173,7 @@ class RIGMOVES_OT_curl(bpy.types.Operator):
         else:
             said += ". Record After, or a Step, to keep it."
         data.report = said
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -8922,7 +8961,7 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
 
     def refuse(self, data, said):
         data.report = said
-        self.report({"WARNING"}, said)
+        say(self, {"WARNING"}, said)
         return None
 
     def plan(self, context):
@@ -9283,7 +9322,7 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
             return take_back("Ring could not be finished: {:s}. Nothing was changed.".format(
                 why if len(why) <= 70 else why[:69] + "…"))
         data.report = said
-        self.report({"INFO"}, said)
+        say(self, {"INFO"}, said)
         return {"FINISHED"}
 
     def first_sentence(self, name, joints, taken, made):
@@ -9358,7 +9397,7 @@ class RIGMOVES_OT_animate(bpy.types.Operator):
         owner, path, index = control_channel(carrier)
         if owner is None:
             data.report = "Build first: there is no control to animate yet."
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         # The keys go into the rig's own Action, which no button has made its
         # own yet on a rig that was just copied with Alt+D: written there, they
@@ -9388,7 +9427,7 @@ class RIGMOVES_OT_animate(bpy.types.Operator):
             scene.frame_end = end
         data.report = "'{:s}' plays over frames {:d} to {:d}.".format(
             carrier.name, start, end)
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -9424,7 +9463,7 @@ class RIGMOVES_OT_key_control(bpy.types.Operator):
             return {"CANCELLED"}
         data.report = "'{:s}' keyed at {:.0f}% on frame {:d}.".format(
             carrier.name, carrier.play, frame)
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -9602,7 +9641,7 @@ class RIGMOVES_OT_combine(bpy.types.Operator):
         spare = [m for m in data.moves if group_of(data, m)[0] is None]
         if len(spare) < 2:
             data.report = "Every move is already in a combined control."
-            self.report({"WARNING"}, data.report)
+            say(self, {"WARNING"}, data.report)
             return {"CANCELLED"}
         group = data.groups.add()
         group.name = ("Together" if len(data.groups) == 1
@@ -9618,7 +9657,7 @@ class RIGMOVES_OT_combine(bpy.types.Operator):
         data.report = ("'{:s}' plays {:d} move(s), one after another. Change the "
                        "delays to overlap them, then Build."
                        .format(group.name, len(spare)))
-        self.report({"INFO"}, data.report)
+        say(self, {"INFO"}, data.report)
         return {"FINISHED"}
 
 
@@ -9689,10 +9728,10 @@ class RIGMOVES_OT_pick_rig(bpy.types.Operator):
             rig.hide_set(False)
             rig.select_set(True)
         except RuntimeError:
-            self.report({"WARNING"}, "That rig is not in this view layer.")
+            say(self, {"WARNING"}, "That rig is not in this view layer.")
             return {"CANCELLED"}
         if not activate(context, rig):
-            self.report({"WARNING"}, "That rig is not in this view layer.")
+            say(self, {"WARNING"}, "That rig is not in this view layer.")
             return {"CANCELLED"}
         try:
             bpy.ops.object.mode_set(mode="POSE")
@@ -9719,7 +9758,15 @@ def short(name, keep=15):
     return name if len(name) <= keep else "…" + name[-(keep - 1):]
 
 
-def fitted(context, name, share, tail=""):
+# What the box of a move takes of the width of a row in it, both sides
+# together, in pixels at a UI scale of 1 (measured in a real window).
+INSET = 16.0
+
+# How many letters of the report fit on a line of its box.
+REPORT_WIDTH = 32
+
+
+def fitted(context, name, share, tail="", inset=0.0):
     """A name as it fits beside a row's controls, cut from the front only as
     far as it has to be, with the tail after it kept whole.
 
@@ -9732,7 +9779,8 @@ def fitted(context, name, share, tail=""):
     name measured against it in the panel's own font.
 
     `share` is how much of the row the label has (the factor of its split),
-    `tail` something that must show whole, such as a copied finger's " +2".
+    `tail` something that must show whole, such as a copied finger's " +2",
+    `inset` what a box round the row takes of its width, in pixels.
     """
     region = getattr(context, "region", None)
     if region is None or region.width <= 1:
@@ -9743,7 +9791,7 @@ def fitted(context, name, share, tail=""):
     # Measured in a real window: the panel's rows are the region less about
     # 53 px, and a label loses about 32 px of its share to its icon and its
     # padding.
-    room = share * (region.width - 53.0 * scale) - 32.0 * scale
+    room = share * (region.width - (53.0 + inset) * scale) - 32.0 * scale
     blf.size(0, context.preferences.ui_styles[0].widget.points * scale)
 
     def width(text):
@@ -9773,6 +9821,97 @@ def wrapped(text, width=34, most=6):
     return out[:most]
 
 
+# ---------------------------------------------------------------------------
+# the panel's icons: gold line icons of our own (icons/, drawn by
+# tools/make_icons.py), each with a built-in one to stand in for it, so that a
+# file that is not there costs the panel its looks and not its buttons
+
+ICON_FILES = {
+    "logo": "ARMATURE_DATA",
+    "new_move": "ADD",
+    "record_before": "FRAME_PREV",
+    "record_after": "FRAME_NEXT",
+    "build": "PLAY",
+    "slider": "IPO_LINEAR",
+    "ring": "MESH_CIRCLE",
+    "spread": "SORTTIME",
+    "chain": "LINKED",
+    "curl": "MOD_SIMPLEDEFORM",
+    "curve": "CURVE_BEZCURVE",
+    "steps": "KEYFRAME",
+    "mirror": "MOD_MIRROR",
+    "combine": "LINKED",
+    "animate": "KEYFRAME_HLT",
+    "timing": "TIME",
+    "pivot": "PIVOT_CURSOR",
+}
+ICONS = {"previews": None}
+
+
+def load_icons():
+    """Load the icons into one collection, which free_icons gives back."""
+    free_icons()
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+    collection = bpy.utils.previews.new()
+    for name in ICON_FILES:
+        path = os.path.join(folder, name + ".png")
+        if os.path.isfile(path):
+            collection.load(name, path, "IMAGE")
+    ICONS["previews"] = collection
+
+
+def free_icons():
+    collection, ICONS["previews"] = ICONS["previews"], None
+    if collection is not None:
+        bpy.utils.previews.remove(collection)
+
+
+def icon(name):
+    """What to hand a button or a label to put one of our icons on it: the
+    gold one, or the built-in one it stands in for when its file is missing.
+    Used as `layout.label(text="Ring", **icon("ring"))`."""
+    collection = ICONS["previews"]
+    if collection is not None and name in collection:
+        return {"icon_value": collection[name].icon_id}
+    return {"icon": ICON_FILES[name]}
+
+
+def chevron(layout, holder, prop):
+    """The arrow of a row that folds: a button that flips the flag `prop` of
+    `holder`, pointing down while it is open.
+
+    Made by hand and not with Blender's own layout panels, because those cannot
+    be nested in a box: the box is drawn round the header of a panel in it and
+    not round its body, so a section opened inside a move would stand outside
+    the move.
+    """
+    layout.prop(holder, prop, text="", emboss=False,
+                icon="TRIA_DOWN" if getattr(holder, prop) else "TRIA_RIGHT")
+
+
+def section(layout, holder, prop, title, icon_name):
+    """A row of a move's box that folds: the arrow, then its title in capitals
+    beside its icon, open or shut as the flag `prop` of `holder` says.
+
+    Returns the header, for what belongs at the right of the title, and the
+    body, which is None while the section is shut.
+    """
+    head = layout.row(align=True)
+    left = head.row(align=True)
+    left.alignment = "LEFT"
+    chevron(left, holder, prop)
+    left.prop(holder, prop, text=title, emboss=False, **icon(icon_name))
+    return head, (layout.column() if getattr(holder, prop) else None)
+
+
+def playable(carrier):
+    """Whether a move or a combined control has something to play now: it is
+    built and its control is still there to read and write."""
+    handle, bone = control_of(carrier)
+    return carrier.built and not (handle is None and (
+        bone is None or carrier.prop not in bone.keys()))
+
+
 class RIGMOVES_PT_panel(bpy.types.Panel):
     bl_idname = "RIGMOVES_PT_panel"
     bl_label = "CopyThat"
@@ -9784,67 +9923,121 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
     # clicked reads as the add-on being broken, and the one moment somebody
     # needs to be told "pick the armature" is the moment it would be gone.
 
+    def draw_header(self, context):
+        self._draw_logo(self.layout)
+
+    def _draw_logo(self, layout):
+        """The flower, in gold, before the name: where the panel says whose
+        it is."""
+        layout.label(text="", **icon("logo"))
+
     def draw(self, context):
         layout = self.layout
         layout.use_property_decorate = False
+        tagline = layout.row()
+        tagline.enabled = False
+        tagline.label(text="Record a move. Get a slider.")
         rig = rig_of(context)
         if rig is None:
             self._draw_no_rig(layout, context)
-            return
+        else:
+            self._draw_rig(layout, context, rig)
+        self._draw_footer(layout)
+
+    def _draw_rig(self, layout, context, rig):
         data = rig.rigmoves
-        layout.label(text=rig.name, icon="ARMATURE_DATA")
+        self._draw_rig_line(layout, rig, data)
         self._draw_own_keys(layout, context, rig, data)
         self._draw_newcomers(layout, context, rig, data)
 
+        if not len(data.moves):
+            self._draw_first_move(layout)
         for index, move in enumerate(data.moves):
             self._draw_move(layout, context, rig, move, index)
-
         for index, group in enumerate(data.groups):
             self._draw_group(layout, context, rig, data, group, index)
-
-        layout.separator(factor=0.5)
-        row = layout.row(align=True)
-        row.operator(RIGMOVES_OT_new_move.bl_idname, text="New Move", icon="ADD")
-        if len(data.moves) >= 2:
-            row.operator(RIGMOVES_OT_combine.bl_idname, text="Combine", icon="LINKED")
         if len(data.moves):
-            run = layout.row()
-            run.scale_y = 1.6
-            run.operator(RIGMOVES_OT_build.bl_idname, text="Build Sliders", icon="PLAY")
-            tools = layout.row(align=True)
-            if data.posing:
-                tools.alert = True
-                tools.operator(RIGMOVES_OT_pause.bl_idname,
-                               text="Paused", icon="PAUSE").off = False
-            else:
-                tools.operator(RIGMOVES_OT_pause.bl_idname,
-                               text="Pause", icon="PAUSE").off = True
-            tools.operator(RIGMOVES_OT_reset.bl_idname, text="To Before",
-                           icon="LOOP_BACK")
+            self._draw_actions(layout, data)
         self._draw_report(layout, data)
 
+    def _draw_rig_line(self, layout, rig, data):
+        """The rig and what it holds, on one line."""
+        parts = sum(len(move.parts) for move in data.moves)
+        sliders = (sum(1 for move in data.moves if move.built)
+                   + sum(1 for group in data.groups if group.built))
+        row = layout.row()
+        row.label(text=rig.name, icon="ARMATURE_DATA")
+        if parts:
+            # In a row of its own, aligned right, so that it takes only its
+            # own width and the name keeps the rest.
+            side = row.row()
+            side.alignment = "RIGHT"
+            side.enabled = False
+            side.label(text=counted(parts, "part")
+                       + (" · " + counted(sliders, "slider") if sliders else ""))
+
+    def _draw_first_move(self, layout):
+        """A rig with no move in it: the one thing to do."""
+        layout.separator(factor=0.5)
+        said = layout.row()
+        said.enabled = False
+        said.label(text="Select the parts that move.")
+        run = layout.row()
+        run.scale_y = 1.5
+        run.operator(RIGMOVES_OT_new_move.bl_idname, text="New Move", **icon("new_move"))
+
     def _draw_no_rig(self, layout, context):
+        layout.separator(factor=0.5)
         chosen = [o for o in context.selected_objects if o.type == "MESH"]
         if chosen:
-            box = layout.box().column(align=True)
-            box.label(text="{:d} object(s) selected.".format(len(chosen)), icon="INFO")
-            for line in wrapped("Record them where they are, move them, record "
-                                "again, and the rig is made for you."):
-                box.label(text=line)
+            said = layout.row()
+            said.enabled = False
+            said.label(text="{:s} selected.".format(counted(len(chosen), "object")))
             run = layout.row()
-            run.scale_y = 1.6
-            run.operator(RIGMOVES_OT_new_move.bl_idname, text="New Move", icon="ADD")
+            run.scale_y = 1.5
+            run.operator(RIGMOVES_OT_new_move.bl_idname, text="New Move",
+                         **icon("new_move"))
             return
         found = armatures_in(context)
-        box = layout.box().column(align=True)
-        if found:
-            box.label(text="Pick the rig to work on:", icon="INFO")
-        else:
-            box.label(text="Select the objects that move,", icon="INFO")
-            box.label(text="or an armature to work on.")
+        said = layout.row()
+        said.enabled = False
+        said.label(text="Pick the rig to work on:" if found
+                   else "Select the objects that move.")
         for armature in found[:8]:
             layout.operator(RIGMOVES_OT_pick_rig.bl_idname, text=armature.name,
                             icon="ARMATURE_DATA").name = armature.name
+
+    def _draw_actions(self, layout, data):
+        """What is pressed once the moves are recorded: Build, big, with the
+        two that go with it under it, and the way to a next move."""
+        layout.separator(factor=0.5)
+        run = layout.row()
+        run.scale_y = 1.6
+        run.operator(RIGMOVES_OT_build.bl_idname, text="Build Sliders", **icon("build"))
+        tools = layout.row(align=True)
+        if data.posing:
+            tools.alert = True
+            tools.operator(RIGMOVES_OT_pause.bl_idname,
+                           text="Paused", icon="PAUSE").off = False
+        else:
+            tools.operator(RIGMOVES_OT_pause.bl_idname,
+                           text="Pause", icon="PAUSE").off = True
+        tools.operator(RIGMOVES_OT_reset.bl_idname, text="To Before",
+                       icon="LOOP_BACK")
+        layout.separator(factor=0.5)
+        row = layout.row(align=True)
+        row.operator(RIGMOVES_OT_new_move.bl_idname, text="New Move", **icon("new_move"))
+        if len(data.moves) >= 2:
+            row.operator(RIGMOVES_OT_combine.bl_idname, text="Combine", **icon("combine"))
+
+    def _draw_footer(self, layout):
+        layout.separator(factor=0.5)
+        row = layout.row()
+        row.alignment = "CENTER"
+        row.enabled = False
+        row.scale_y = 0.8
+        row.label(text="CopyThat {:s} · NemVe3D".format(
+            ".".join(str(number) for number in bl_info["version"])))
 
     def _draw_own_keys(self, layout, context, rig, data):
         """The one fault that makes a correct rig play the wrong move.
@@ -9976,27 +10169,32 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                      text="New Rig", icon="ARMATURE_DATA").fresh = True
 
     def _draw_move(self, layout, context, rig, move, index):
-        header, body = layout.panel_prop(move, "expanded")
+        layout.separator(factor=0.5)
+        box = layout.box()
+        header = box.row(align=True)
+        chevron(header, move, "expanded")
         header.prop(move, "name", text="")
         header.operator(RIGMOVES_OT_remove.bl_idname, text="", icon="X",
                         emboss=False).index = index
-        if body is None:
+        if not move.expanded:
             return
+        body = box.column()
 
         before = recorded(move, "BEFORE")
         after = recorded(move, "AFTER")
-
         objects = len(loose_parts(move))
-        row = body.split(factor=0.4, align=True)
-        row.label(text="Parts", icon="OBJECT_DATA" if objects else "BONE_DATA")
-        row.operator(RIGMOVES_OT_use_selected.bl_idname,
-                     text="{:d} selected".format(len(move.parts)),
-                     icon="CHECKMARK" if len(move.parts) else "ADD").index = index
-        self._draw_pivot(body, context, move, index)
 
+        # The slider first, once there is one: it is what the animator
+        # reaches for, and everything under it is in aid of it.
+        if playable(move):
+            self._draw_play(body, move, index, False)
+            body.separator(factor=0.3)
+
+        # Before, the poses in between, After: one gesture each, Record, and
+        # the eye to look at what was recorded.
         row = body.split(factor=0.4, align=True)
         row.scale_y = 1.15
-        row.label(text="Before", icon="CHECKMARK" if before else "DOT")
+        self._draw_pose_name(row, "Before", "record_before", before)
         row = row.row(align=True)
         press = row.operator(RIGMOVES_OT_record.bl_idname, text="Record")
         press.index, press.which = index, "BEFORE"
@@ -10005,16 +10203,15 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             look.index, look.which = index, "BEFORE"
 
         # The poses in between, each with a Record of its own. A step is put
-        # up empty by the + below and filled in afterwards, which is the whole
-        # of it: the same gesture as Before and After, one row further in.
+        # up empty by Step in between, under PATH, and filled in afterwards,
+        # which is the whole of it: the same gesture as Before and After, one
+        # row further in.
         for position, step in enumerate(move.steps):
             self._draw_speed(body, step, "speed")
             row = body.split(factor=0.4, align=True)
             row.scale_y = 1.15
-            gap = row.row(align=True)
-            gap.label(text="", icon="BLANK1")
-            gap.label(text="Step {:d}".format(position + 1),
-                      icon="CHECKMARK" if step.done else "DOT")
+            self._draw_pose_name(row, "Step {:d}".format(position + 1), "steps",
+                                 step.done, indent=True)
             row = row.row(align=True)
             press = row.operator(RIGMOVES_OT_record.bl_idname, text="Record")
             press.index, press.which, press.step = index, "STEP", position
@@ -10024,19 +10221,12 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 look.index, look.which, look.step = index, "STEP", position
             away = row.operator(RIGMOVES_OT_drop_step.bl_idname, text="", icon="X")
             away.index, away.step = index, position
-
-        # Only once the parts have bones and a path of their own, which the
-        # first build gives them - until then there is nothing to key onto.
-        add = body.row(align=True)
-        add.enabled = bool(before and after and not objects)
-        add.operator(RIGMOVES_OT_add_step.bl_idname,
-                     text="Step in between", icon="ADD").index = index
         if len(move.steps):
             self._draw_speed(body, move, "speed_after")
 
         row = body.split(factor=0.4, align=True)
         row.scale_y = 1.15
-        row.label(text="After", icon="CHECKMARK" if after else "DOT")
+        self._draw_pose_name(row, "After", "record_after", after)
         row = row.row(align=True)
         press = row.operator(RIGMOVES_OT_record.bl_idname, text="Record")
         press.index, press.which = index, "AFTER"
@@ -10046,14 +10236,96 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             look = row.operator(RIGMOVES_OT_show.bl_idname, text="", icon="HIDE_OFF")
             look.index, look.which = index, "AFTER"
 
-        if not len(move.steps) and before and after and not objects:
-            said = body.row()
-            said.enabled = False
-            said.label(text="+ adds a pose in between, for a path that bends")
-        body.prop(move, "ease", text="")
-        self._draw_path(body, context, move, index)
-        self._draw_ring(body, context, move, index)
+        # The rest folds away, in the order it is reached for.
+        body.separator(factor=0.5)
+        self._draw_parts_section(body, context, move, index)
+        self._draw_path_section(body, context, move, index, before and after, objects)
+        self._draw_timing_section(body, context, move, index)
+        self._draw_copies_section(body, context, move, index)
+        self._draw_chains_section(body, rig, move, index)
+        self._draw_animate_section(body, move, index)
 
+    def _draw_pose_name(self, row, title, name, done, indent=False):
+        """A pose's name beside its icon, and after it whether it is recorded."""
+        left = row.row(align=True)
+        left.alignment = "LEFT"
+        if indent:
+            left.label(text="", icon="BLANK1")
+        left.label(text=title, **icon(name))
+        left.label(text="", icon="CHECKMARK" if done else "DOT")
+
+    def _draw_parts_section(self, body, context, move, index):
+        _head, inner = section(body, move, "show_parts", "PARTS & PIVOT", "pivot")
+        if inner is None:
+            return
+        objects = len(loose_parts(move))
+        row = inner.split(factor=0.4, align=True)
+        row.label(text="Parts", icon="OBJECT_DATA" if objects else "BONE_DATA")
+        row.operator(RIGMOVES_OT_use_selected.bl_idname,
+                     text="{:d} selected".format(len(move.parts)),
+                     icon="CHECKMARK" if len(move.parts) else "ADD").index = index
+        self._draw_pivot(inner, context, move, index)
+
+    def _draw_path_section(self, body, context, move, index, recorded_both, objects):
+        _head, inner = section(body, move, "show_path", "PATH", "curve")
+        if inner is None:
+            return
+        # Four choices that are all on show, the one in use lit: two and two,
+        # for the names do not fit four to a row.
+        grid = inner.grid_flow(row_major=True, columns=2, even_columns=True,
+                               even_rows=True, align=True)
+        grid.prop(move, "ease", expand=True)
+        self._draw_path(inner, context, move, index)
+        # Only once the parts have bones and a path of their own, which the
+        # first build gives them - until then there is nothing to key onto.
+        add = inner.row(align=True)
+        add.enabled = bool(recorded_both and not objects)
+        add.operator(RIGMOVES_OT_add_step.bl_idname, text="Step in between",
+                     **icon("steps")).index = index
+        if move.built and any(p.kind == "OBJECT" for p in move.parts):
+            shown = inner.row(align=True).operator(
+                RIGMOVES_OT_show_paths.bl_idname, text="Paths", icon="IPO_LINEAR",
+                depress=move.show_paths)
+            shown.index, shown.show = index, not move.show_paths
+
+    def _draw_timing_section(self, body, context, move, index):
+        # Who moves when. The reason a machine reads as built rather than
+        # animated: the parts do not all leave at once.
+        head, timing = section(body, move, "show_timing", "TIMING", "timing")
+        # In a row of its own, so that the button takes only its own width: set
+        # straight in the header it shares it with the title half and half.
+        side = head.row()
+        side.alignment = "RIGHT"
+        spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…",
+                                  **icon("spread"))
+        spreading.index, spreading.what = index, "DELAY"
+        if timing is None:
+            return
+        note = timing.row()
+        note.enabled = False
+        note.label(text="how long each one waits before it starts")
+        lit = held(context, move)
+        if lit:
+            said = timing.row()
+            said.enabled = False
+            said.label(text="lit: what you have selected", icon="RESTRICT_SELECT_OFF")
+        for position, part in enumerate(move.parts):
+            if part.leader:
+                continue
+            line = timing.split(factor=0.45, align=True)
+            # Everything else goes quiet rather than the chosen one being
+            # shouted: the eye lands on the one row still at full strength.
+            line.active = part.name in lit or not lit
+            name = line.row(align=True)
+            pick = name.operator(
+                RIGMOVES_OT_pick_part.bl_idname, text="", emboss=False,
+                icon="RESTRICT_SELECT_OFF" if part.name in lit
+                else ("OBJECT_DATA" if part.kind == "OBJECT" else "BONE_DATA"))
+            pick.index, pick.part = index, position
+            name.label(text=short(part.name))
+            line.prop(part, "start", text="")
+
+    def _draw_copies_section(self, body, context, move, index):
         # Riders have no delay of their own: each is placed against its
         # leader instead, ahead or behind, and travels at the leader's speed.
         # A copied finger is one row, its first joint's: the joints riding on
@@ -10061,114 +10333,93 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         riders = sorted([(i, p) for i, p in riders_of(move)
                          if copy_root(move, p).name == p.name],
                         key=lambda row: row[1].leader)
-        if riders:
-            head, listed = layout.panel_prop(move, "show_riders")
-            head.label(text="Riding along ({:d})".format(len(riders)), icon="LINKED")
-            # The button in a row of its own, aligned right, so that it takes
-            # only its own width: set straight in the header it shares it with
-            # the label half and half, and at the sidebar's usual width the
-            # count was the first thing cut off.
-            side = head.row()
-            side.alignment = "RIGHT"
-            spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
-            spreading.index, spreading.what = index, "LEAD"
-            if listed is not None:
-                note = listed.row()
-                note.enabled = False
-                note.label(text="lead: below 0 behind, above 0 ahead")
-                shown = None
-                for position, part in riders:
-                    if part.leader != shown:
-                        shown = part.leader
-                        said = listed.row()
-                        said.enabled = False
-                        said.label(text="with '{:s}'".format(short(part.leader, 22)))
-                    joints = len(copy_of(move, part)) - 1
-                    # The copies of a petal are named alike but for the number
-                    # at the end, so that is what the name is cut to keep.
-                    share = 0.42
-                    line = listed.split(factor=share, align=True)
-                    line.label(text=fitted(context, part.name, share,
-                                           " +{:d}".format(joints) if joints else ""),
-                               icon="OBJECT_DATA")
-                    right = line.row(align=True)
-                    right.prop(part, "lead", text="Lead", slider=True)
-                    # One button that steps through the choices: a mirror
-                    # moves the rider's bone, so each one is a Build.
-                    labels = [label for _key, label, _description in MIRRORS]
-                    keys = [key for key, _label, _description in MIRRORS]
-                    step = right.operator(RIGMOVES_OT_set_mirror.bl_idname,
-                                          text=labels[keys.index(part.mirror)],
-                                          icon="MOD_MIRROR",
-                                          depress=part.mirror != "NONE")
-                    step.index, step.part = index, position
-                    step.axis = keys[(keys.index(part.mirror) + 1) % len(keys)]
-                    drop = right.operator(RIGMOVES_OT_drop_rider.bl_idname, text="",
-                                          icon="X", emboss=False)
-                    drop.index, drop.part = index, position
+        if not riders and not any(p.kind == "OBJECT" and not p.leader
+                                  for p in move.parts):
+            return
+        _head, copies = section(body, move, "show_riders", "COPIES", "ring")
+        if copies is None:
+            return
+        self._draw_ring(copies, context, move, index)
+        if not riders:
+            return
+        title = copies.row()
+        title.label(text="Riding along ({:d})".format(len(riders)))
+        # The button in a row of its own, aligned right, so that it takes
+        # only its own width: set straight in the row it shares it with the
+        # label half and half, and at the sidebar's usual width the count was
+        # the first thing cut off.
+        side = title.row()
+        side.alignment = "RIGHT"
+        spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…",
+                                  **icon("spread"))
+        spreading.index, spreading.what = index, "LEAD"
+        note = copies.row()
+        note.enabled = False
+        note.label(text="lead: below 0 behind, above 0 ahead")
+        shown = None
+        for position, part in riders:
+            if part.leader != shown:
+                shown = part.leader
+                said = copies.row()
+                said.enabled = False
+                said.label(text="with '{:s}'".format(short(part.leader, 22)))
+            joints = len(copy_of(move, part)) - 1
+            # The copies of a petal are named alike but for the number
+            # at the end, so that is what the name is cut to keep.
+            share = 0.42
+            line = copies.split(factor=share, align=True)
+            line.label(text=fitted(context, part.name, share,
+                                   " +{:d}".format(joints) if joints else "", INSET),
+                       icon="OBJECT_DATA")
+            right = line.row(align=True)
+            right.prop(part, "lead", text="Lead", slider=True)
+            # One button that steps through the choices: a mirror
+            # moves the rider's bone, so each one is a Build.
+            labels = [label for _key, label, _description in MIRRORS]
+            keys = [key for key, _label, _description in MIRRORS]
+            step = right.operator(RIGMOVES_OT_set_mirror.bl_idname,
+                                  text=labels[keys.index(part.mirror)],
+                                  depress=part.mirror != "NONE", **icon("mirror"))
+            step.index, step.part = index, position
+            step.axis = keys[(keys.index(part.mirror) + 1) % len(keys)]
+            drop = right.operator(RIGMOVES_OT_drop_rider.bl_idname, text="",
+                                  icon="X", emboss=False)
+            drop.index, drop.part = index, position
 
+    def _draw_chains_section(self, body, rig, move, index):
         # Which part hangs from which: a dropdown beside every part, listing
         # the move's parts to follow.
         chain = [p for p in move.parts if p.kind == "OBJECT" and not p.leader]
-        if len(chain) >= 2:
-            head, listed = layout.panel_prop(move, "show_chain")
-            head.label(text="Follows", icon="CONSTRAINT_BONE")
-            if listed is not None:
-                note = listed.row()
-                note.enabled = False
-                note.label(text="moves with the part it follows")
-                # Two tools for the whole chain at once: the dropdowns set
-                # down a line, and the first joint's bend repeated down it.
-                tools = listed.row(align=True)
-                tools.operator(RIGMOVES_OT_make_chain.bl_idname, text="Make Chain",
-                               icon="LINKED").index = index
-                tools.operator(RIGMOVES_OT_curl.bl_idname, text="Curl",
-                               icon="MOD_SIMPLEDEFORM").index = index
-                for part in chain:
-                    line = listed.split(factor=0.42, align=True)
-                    line.label(text=short(part.name, 13), icon="OBJECT_DATA")
-                    line.prop_search(part, "follows", move, "parts", text="",
-                                     icon="LINKED")
-                if move.built and parent_pending(rig, rig.rigmoves, move):
-                    waiting = listed.row()
-                    waiting.alert = True
-                    waiting.label(text="Build to put it into effect", icon="INFO")
+        if len(chain) < 2:
+            return
+        _head, listed = section(body, move, "show_chain", "CHAINS", "chain")
+        if listed is None:
+            return
+        # Two tools for the whole chain at once: the dropdowns set
+        # down a line, and the first joint's bend repeated down it.
+        tools = listed.row(align=True)
+        tools.operator(RIGMOVES_OT_make_chain.bl_idname, text="Make Chain",
+                       **icon("chain")).index = index
+        tools.operator(RIGMOVES_OT_curl.bl_idname, text="Curl",
+                       **icon("curl")).index = index
+        note = listed.row()
+        note.enabled = False
+        note.label(text="moves with the part it follows")
+        for part in chain:
+            line = listed.split(factor=0.42, align=True)
+            line.label(text=short(part.name, 13), icon="OBJECT_DATA")
+            line.prop_search(part, "follows", move, "parts", text="", icon="LINKED")
+        if move.built and parent_pending(rig, rig.rigmoves, move):
+            waiting = listed.row()
+            waiting.alert = True
+            waiting.label(text="Build to put it into effect", icon="INFO")
 
-        # Who moves when. The reason a machine reads as built rather than
-        # animated: the parts do not all leave at once.
-        head, timing = layout.panel_prop(move, "show_timing")
-        head.label(text="Timing", icon="TIME")
-        # In a row of its own, as in the header of Riding along.
-        side = head.row()
-        side.alignment = "RIGHT"
-        spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…")
-        spreading.index, spreading.what = index, "DELAY"
-        if timing is not None:
-            note = timing.row()
-            note.enabled = False
-            note.label(text="how long each one waits before it starts")
-            lit = held(context, move)
-            if lit:
-                said = timing.row()
-                said.enabled = False
-                said.label(text="lit: what you have selected", icon="RESTRICT_SELECT_OFF")
-            for position, part in enumerate(move.parts):
-                if part.leader:
-                    continue
-                line = timing.split(factor=0.45, align=True)
-                # Everything else goes quiet rather than the chosen one being
-                # shouted: the eye lands on the one row still at full strength.
-                line.active = part.name in lit or not lit
-                name = line.row(align=True)
-                pick = name.operator(
-                    RIGMOVES_OT_pick_part.bl_idname, text="", emboss=False,
-                    icon="RESTRICT_SELECT_OFF" if part.name in lit
-                    else ("OBJECT_DATA" if part.kind == "OBJECT" else "BONE_DATA"))
-                pick.index, pick.part = index, position
-                name.label(text=short(part.name))
-                line.prop(part, "start", text="")
-
-        self._draw_play(body, move, index, False)
+    def _draw_animate_section(self, body, move, index):
+        if not playable(move):
+            return
+        _head, inner = section(body, move, "show_animate", "ANIMATE", "animate")
+        if inner is not None:
+            self._draw_frames(inner, move, index, False)
 
     def _draw_play(self, body, carrier, index, combined):
         """What the animator actually reaches for: one slider that plays the
@@ -10178,22 +10429,20 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         the same place, so dragging either moves both. A key button beside
         it, since the slider itself is not something Blender can key.
         """
-        handle, bone = control_of(carrier)
-        if not carrier.built or (handle is None and (
-                bone is None or carrier.prop not in bone.keys())):
-            return
         row = body.row(align=True)
-        row.scale_y = 1.4
+        row.scale_y = 1.35
         row.prop(carrier, "play", text=carrier.name, slider=True)
         key = row.operator(RIGMOVES_OT_key_control.bl_idname, text="",
                            icon="DECORATE_KEYFRAME")
         key.index, key.combined = index, combined
+
+    def _draw_frames(self, body, carrier, index, combined):
         # Keys the whole of it from the current frame, so nobody has to key
         # the start and the end by hand to get it playing.
         row = body.row(align=True)
         row.prop(carrier, "play_frames", text="Frames")
         run = row.operator(RIGMOVES_OT_animate.bl_idname, text="Animate",
-                           icon="PLAY")
+                           **icon("animate"))
         run.index, run.combined = index, combined
 
     def _draw_pivot(self, body, context, move, index):
@@ -10227,20 +10476,14 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         row = body.row(align=True)
         row.enabled = bool(part is not None and part.kind == "OBJECT" and not part.leader)
         row.operator(RIGMOVES_OT_ring.bl_idname, text="Ring…",
-                     icon="MESH_CIRCLE").index = index
+                     **icon("ring")).index = index
 
     def _draw_path(self, body, context, move, index):
-        """Curving the path, and the line that shows where it goes."""
-        row = body.row(align=True)
+        """Curving the path: the button, and a row for each curve there is."""
         if any(p.kind == "OBJECT" and not p.leader for p in move.parts):
-            run = row.operator(RIGMOVES_OT_curve_path.bl_idname,
-                               text="Curve the Path", icon="CURVE_BEZCURVE")
+            run = body.row(align=True).operator(
+                RIGMOVES_OT_curve_path.bl_idname, text="Curve the Path", **icon("curve"))
             run.index = index
-        if move.built and any(p.kind == "OBJECT" for p in move.parts):
-            shown = row.operator(RIGMOVES_OT_show_paths.bl_idname,
-                                 text="Paths", icon="IPO_LINEAR",
-                                 depress=move.show_paths)
-            shown.index, shown.show = index, not move.show_paths
         curved = [(i, p) for i, p in enumerate(move.parts) if curve_alive(p.path_curve)]
         for position, part in curved:
             line = body.split(factor=0.55, align=True)
@@ -10272,13 +10515,20 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         row.prop(holder, prop, text="Speed", slider=True)
 
     def _draw_group(self, layout, context, rig, data, group, index):
-        header, body = layout.panel_prop(group, "expanded")
-        header.label(text="", icon="LINKED")
+        layout.separator(factor=0.5)
+        box = layout.box()
+        header = box.row(align=True)
+        chevron(header, group, "expanded")
+        header.label(text="", **icon("combine"))
         header.prop(group, "name", text="")
         header.operator(RIGMOVES_OT_remove_group.bl_idname, text="", icon="X",
                         emboss=False).index = index
-        if body is None:
+        if not group.expanded:
             return
+        body = box.column()
+        if playable(group):
+            self._draw_play(body, group, index, True)
+            body.separator(factor=0.3)
         note = body.row()
         note.enabled = False
         note.label(text="plays these, each after its own delay")
@@ -10294,21 +10544,36 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             drop = line.operator(RIGMOVES_OT_drop_member.bl_idname, text="",
                                  icon="X", emboss=False)
             drop.group_index, drop.member_index = index, position
-
-        self._draw_play(body, group, index, True)
+        if playable(group):
+            body.separator(factor=0.3)
+            self._draw_frames(body, group, index, True)
 
     def _draw_report(self, layout, data):
         if not data.report:
             return
-        note = layout.box().column(align=True)
-        note.enabled = False
+        layout.separator(factor=0.5)
+        warning = warned(data)
+        box = layout.box()
+        head = box.row(align=True)
+        # A warning is red even with the box shut, so that it is not missed.
+        head.alert = warning
+        left = head.row(align=True)
+        left.alignment = "LEFT"
+        chevron(left, data, "show_report")
+        left.prop(data, "show_report", text="REPORT", emboss=False,
+                  icon="ERROR" if warning else "INFO")
+        if not data.show_report:
+            return
+        # What was only said goes quiet; a warning is read at full strength.
+        note = box.column(align=True)
+        note.enabled = warning
         # Room for the names of what a ring left out. A report longer than that
         # is cut, and what was cut can be what to do next: it is said to be cut,
         # and where the rest is - the Info editor has it all.
-        lines = wrapped(data.report, most=1000)
+        lines = wrapped(data.report, width=REPORT_WIDTH, most=1000)
         if len(lines) > 9:
             lines = lines[:9]
-            lines[-1] = lines[-1][:33].rstrip() + "…"
+            lines[-1] = lines[-1][:REPORT_WIDTH - 1].rstrip() + "…"
             lines.append("(the full report is in the Info editor)")
         for line in lines:
             note.label(text=line)
@@ -10391,12 +10656,14 @@ def take_down():
                 bpy.utils.unregister_class(existing)
             except RuntimeError:
                 pass
+    free_icons()
 
 
 def register():
     # A script reload registers again without unregistering first, so a
     # copy may still be there.
     take_down()
+    load_icons()
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Object.rigmoves = bpy.props.PointerProperty(type=RIGMOVES_Rig)
