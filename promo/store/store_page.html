@@ -1,0 +1,542 @@
+<title>CopyThat Store Page</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* A long product scroll, in the film's dark and gold: a reading column for the words, wide plates for the
+     clips, and mono labels like the field names in Blender's own panels. One deliberate dark theme. */
+  :root {
+    --ground: #0e0d0b;
+    --plate: #171511;
+    --raise: #221f1a;
+    --line: #342f27;
+    --ink: #efe9dd;
+    --muted: #a49c8f;
+    --gold: #c9a76a;
+    --gold-ink: #e3c690;
+    --select: #4772b3;
+    --display: "Archivo", "Arial Narrow", "Helvetica Neue", system-ui, sans-serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 16px/1.6 var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .page { max-width: 1120px; margin: 0 auto; padding-block: 20px 96px; display: grid; gap: 88px; }
+  .read { max-width: 680px; }
+  a { color: var(--gold-ink); }
+  a:focus-visible, summary:focus-visible, video:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+  h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; font-stretch: 112%; line-height: 1.05; letter-spacing: -0.01em; }
+  h3 { font-size: 21px; font-weight: 700; font-stretch: 105%; line-height: 1.2; }
+  p { margin: 0; }
+  .kicker {
+    font: 500 12px/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold);
+  }
+  .muted { color: var(--muted); }
+  .gold { color: var(--gold); }
+  .stack { display: grid; gap: 14px; }
+  .plate { background: var(--plate); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .plate video, .plate img { display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; background: var(--plate); }
+  .plate.wide img { aspect-ratio: 2 / 1; }
+  .chip {
+    display: inline-block; font: 500 12.5px/1.5 var(--mono); color: var(--ink); background: var(--raise);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 8px; white-space: nowrap;
+  }
+
+  /* draft strip */
+  .draft { font: 400 12.5px/1.5 var(--mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+
+  /* hero */
+  .hero { display: grid; gap: 28px; }
+  .hero-body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+  .hero h1 { font-size: clamp(52px, 9vw, 104px); font-weight: 900; font-stretch: 118%; line-height: 0.92; letter-spacing: -0.02em; }
+  .hero .promise { font: 600 clamp(22px, 3vw, 30px)/1.25 var(--display); font-stretch: 105%; }
+  .hero .pitch { font-size: 18px; color: var(--ink); max-width: 560px; }
+  .pillars { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .pillars li { display: grid; gap: 2px; padding-left: 16px; border-left: 2px solid var(--gold); }
+  .pillars b { font-weight: 600; }
+  .spec { background: var(--plate); border: 1px solid var(--line); border-radius: 10px; padding: 22px; display: grid; gap: 14px; }
+  .spec dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 15px; }
+  .spec dt { color: var(--muted); font: 400 13px/1.7 var(--mono); }
+  .spec dd { margin: 0; }
+  .tiers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tier { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 2px; }
+  .tier .price { font: 800 26px/1.1 var(--display); font-stretch: 110%; color: var(--gold-ink); font-variant-numeric: tabular-nums; }
+  .tier small { color: var(--muted); font-size: 13px; }
+
+  /* the slider: what CopyThat hands back */
+  .slider { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+  .slider .bar {
+    position: relative; height: 34px; border-radius: 5px; background: #3a3a3a; overflow: hidden;
+    font: 500 14px/34px var(--mono); color: #f4f4f4;
+  }
+  .slider .fill { position: absolute; inset: 0 auto 0 0; width: 100%; background: var(--select); animation: fill 2.6s cubic-bezier(.45,.05,.25,1) 0.4s both; }
+  .slider .label { position: relative; display: flex; justify-content: space-between; padding-inline: 12px; }
+  .slider .key { width: 34px; height: 34px; border-radius: 5px; background: #3a3a3a; display: grid; place-items: center; }
+  .slider .key i { width: 11px; height: 11px; background: #eee; transform: rotate(45deg); display: block; }
+  @keyframes fill { from { width: 0%; } to { width: 100%; } }
+
+  /* sections */
+  .section { display: grid; gap: 28px; }
+  .section-head { display: grid; gap: 10px; }
+  .statline { display: flex; flex-wrap: wrap; gap: 8px; }
+  .timer { font: 900 clamp(64px, 11vw, 132px)/0.9 var(--display); font-stretch: 112%; color: var(--gold); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 36px; align-items: center; }
+
+  .steps3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; counter-reset: step; }
+  .steps3 article { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  .num { font: 800 15px/1 var(--mono); color: var(--ground); background: var(--gold); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; }
+
+  .walk { display: grid; gap: 40px; }
+  .walk article { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); gap: 32px; align-items: center; }
+  .walk article:nth-child(even) .walk-text { order: 2; }
+  .walk-text { display: grid; gap: 10px; min-width: 0; }
+  .walk-text .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; min-width: 640px; }
+  th, td { text-align: left; vertical-align: top; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+  thead th { font: 500 12px/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); background: var(--plate); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td:first-child { color: var(--muted); width: 22%; }
+  td:last-child { color: var(--gold-ink); }
+
+  .features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px 32px; }
+  .feature { display: grid; gap: 12px; align-content: start; min-width: 0; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px 32px; }
+  .grid3 > div { display: grid; gap: 6px; align-content: start; min-width: 0; }
+  .grid3 h3 { font-size: 18px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+  .tags span { border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 15px; }
+
+  ol.install { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+  ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+
+  .versions { display: grid; gap: 14px; }
+  .versions div { display: grid; grid-template-columns: 80px 1fr; gap: 16px; }
+  .versions b { font: 500 14px/1.7 var(--mono); color: var(--gold); }
+
+  details { border-bottom: 1px solid var(--line); padding-block: 14px; }
+  details:first-of-type { border-top: 1px solid var(--line); }
+  summary { cursor: pointer; font-weight: 600; font-size: 17px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font: 500 18px/1 var(--mono); color: var(--gold); }
+  details[open] summary::after { content: "−"; }
+  details p { margin-top: 10px; color: var(--ink); }
+
+  .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .gallery figure { margin: 0; display: grid; gap: 8px; min-width: 0; }
+  .gallery figcaption { font: 400 12.5px/1.5 var(--mono); color: var(--muted); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 22px; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; color: var(--muted); font-size: 14px; }
+
+  @media (max-width: 860px) {
+    .hero-body, .split, .walk article { grid-template-columns: minmax(0, 1fr); }
+    .walk article:nth-child(even) .walk-text { order: 0; }
+    .steps3, .grid3 { grid-template-columns: minmax(0, 1fr); }
+    .features, .gallery { grid-template-columns: minmax(0, 1fr); }
+    .page { gap: 64px; }
+  }
+  @media (max-width: 420px) {
+    .tiers { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .slider .fill { animation: none; }
+  }
+</style>
+
+<div class="page">
+
+  <div class="draft">
+    <span>Draft of the Superhive page · CopyThat 0.20.2</span>
+    <span>Prices are suggestions</span>
+  </div>
+
+  <!-- Hero: what the store shows first -->
+  <header class="hero">
+    <div class="plate wide"><img src="images/01_featured.jpg" alt="CopyThat: a mechanical flower in bloom, gold and white petals on a black pedestal, with the words Record a move. Get a slider." width="2400" height="1200"></div>
+    <div class="hero-body">
+      <div class="stack" style="gap:22px">
+        <div class="kicker">Blender add-on · Animation and rigging</div>
+        <h1>CopyThat</h1>
+        <p class="promise">Record a move. Get a <span class="gold">slider</span>.</p>
+        <p class="pitch">Pose your parts where they start and where they end, and press Build. CopyThat makes the rig for you and gives back one slider that plays the whole move, with every part on its own timing.</p>
+        <div class="slider" aria-label="The slider CopyThat makes: Move 1 at 100 percent">
+          <div class="bar"><div class="fill"></div><div class="label"><span>Move 1</span><span>100%</span></div></div>
+          <div class="key" title="Key the slider"><i></i></div>
+        </div>
+        <ul class="pillars">
+          <li><b>No rig to build</b><span class="muted">Works on loose objects. CopyThat adds the bones, binds the parts and wires the slider.</span></li>
+          <li><b>Timing per part</b><span class="muted">A delay for each part, so they leave in order and overlap like a real machine.</span></li>
+          <li><b>Copies that follow</b><span class="muted">Ring one petal, blade or bolt into many. Every copy rides along with the one you posed.</span></li>
+        </ul>
+      </div>
+      <aside class="spec" aria-label="Product details">
+        <div class="kicker">One-slider rigs for machines and mechanical models</div>
+        <div class="tiers">
+          <div class="tier"><span class="muted">Personal</span><span class="price">$24</span><small>1 seat</small></div>
+          <div class="tier"><span class="muted">Studio</span><span class="price">$79</span><small>5 seats and more</small></div>
+        </div>
+        <dl>
+          <dt>Version</dt><dd>0.20.2</dd>
+          <dt>Blender</dt><dd>4.5 LTS to 5.2</dd>
+          <dt>Systems</dt><dd>Windows, macOS, Linux</dd>
+          <dt>Render</dt><dd>Any engine</dd>
+          <dt>Licence</dt><dd>GPL-3.0-or-later</dd>
+          <dt>Includes</dt><dd>The flower file and its guide</dd>
+        </dl>
+      </aside>
+    </div>
+    <div class="plate"><video data-loop src="clips/rig_build_bloom.mp4" poster="clips/rig_build_bloom.jpg" muted loop playsinline preload="none" aria-label="Build Sliders is pressed, the timer stops at 1:10, and one slider blooms the flower"></video></div>
+  </header>
+
+  <!-- The film -->
+  <section class="section" id="film">
+    <div class="split">
+      <div class="stack">
+        <div class="kicker">The film</div>
+        <h2>Rig this flower in</h2>
+        <div class="timer">1:10</div>
+        <div class="statline"><span class="chip">21 parts</span><span class="chip">42 clicks</span><span class="chip">16 typed values</span><span class="chip">1 slider</span></div>
+        <p>The film shows every click at a normal pace, and the flower file comes with the add-on, so you can do the same.</p>
+      </div>
+      <div class="plate"><video src="film_preview.mp4" poster="images/02_rigged_in_1m10.jpg" controls preload="none" playsinline aria-label="The CopyThat film, 2 minutes 25 seconds, with sound"></video></div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">How it works</div>
+      <h2>Two poses and one button</h2>
+    </div>
+    <div class="steps3">
+      <article>
+        <div class="plate"><video data-loop src="clips/idea_record.mp4" poster="clips/idea_record.jpg" muted loop playsinline preload="none" aria-label="A block is posed and Record is pressed"></video></div>
+        <span class="num">1</span>
+        <h3>Pose it, record it</h3>
+        <p class="muted">Select the parts and press New Move: where they stand is Before. Move them and press Record on After.</p>
+      </article>
+      <article>
+        <div class="plate"><video data-loop src="clips/idea_build.mp4" poster="clips/idea_build.jpg" muted loop playsinline preload="none" aria-label="Build is pressed and one slider plays the move"></video></div>
+        <span class="num">2</span>
+        <h3>Build: one slider</h3>
+        <p class="muted">Build Sliders makes the bones, binds the parts and puts the move on one slider, in the panel and as a handle in the viewport.</p>
+      </article>
+      <article>
+        <div class="plate"><video data-loop src="clips/idea_many.mp4" poster="clips/idea_many.jpg" muted loop playsinline preload="none" aria-label="Several blocks share one move"></video></div>
+        <span class="num">3</span>
+        <h3>As many parts as you like</h3>
+        <p class="muted">Every selected part shares the move, and each one can wait its turn.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- The flower, step by step -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">The flower, step by step</div>
+      <h2>Every action is one you can repeat</h2>
+      <p class="muted">These are the film's own steps, with the included file and the values from its guide.</p>
+    </div>
+    <div class="walk">
+      <article>
+        <div class="walk-text">
+          <h3>Select the six parts, New Move</h3>
+          <p class="muted">Click in the Outliner, Ctrl+click the rest, press New Move.</p>
+          <div class="chips"><span class="chip">6 parts</span><span class="chip">Before ✓</span></div>
+        </div>
+        <div class="plate"><video data-loop src="clips/rig_select.mp4" poster="clips/rig_select.jpg" muted loop playsinline preload="none" aria-label="Six parts are selected in the Outliner and New Move is pressed"></video></div>
+      </article>
+      <article>
+        <div class="walk-text">
+          <h3>Pose it open, one value at a time</h3>
+          <p class="muted">Type each rotation into the Properties editor. The leaf's three joints are three edits, then Record on After.</p>
+          <div class="chips"><span class="chip">Rotation X 28°</span><span class="chip">−145°</span><span class="chip">172°</span></div>
+        </div>
+        <div class="plate"><video data-loop src="clips/rig_pose.mp4" poster="clips/rig_pose.jpg" muted loop playsinline preload="none" aria-label="Rotation values are typed one at a time and After is recorded"></video></div>
+      </article>
+      <article>
+        <div class="walk-text">
+          <h3>Ring the petals</h3>
+          <p class="muted">One petal becomes eight. The copies open in a wave round the stem.</p>
+          <div class="chips"><span class="chip">Count 8</span><span class="chip">World Origin</span><span class="chip">Lead step 9</span></div>
+        </div>
+        <div class="plate"><video data-loop src="clips/rig_ring.mp4" poster="clips/rig_ring.jpg" muted loop playsinline preload="none" aria-label="The Ring dialog is filled in and seven petals appear"></video></div>
+      </article>
+      <article>
+        <div class="walk-text">
+          <h3>Spread the timing</h3>
+          <p class="muted">Delays down the leaf in one dialog, then two typed delays for the inner petals and the core.</p>
+          <div class="chips"><span class="chip">Down a chain</span><span class="chip">0.10 · 0.15</span><span class="chip">0.34</span><span class="chip">0.40</span></div>
+        </div>
+        <div class="plate"><video data-loop src="clips/rig_spread.mp4" poster="clips/rig_spread.jpg" muted loop playsinline preload="none" aria-label="The Spread dialog sets the leaf's delays and two delays are typed"></video></div>
+      </article>
+      <article>
+        <div class="walk-text">
+          <h3>Build, and drag</h3>
+          <p class="muted">Smooth, Build Sliders, and one slider blooms all 21 parts.</p>
+          <div class="chips"><span class="chip">21 parts · 1 slider</span></div>
+        </div>
+        <div class="plate"><video data-loop src="clips/rig_build_bloom.mp4" poster="clips/rig_build_bloom.jpg" muted loop playsinline preload="none" aria-label="Build Sliders, then the slider is dragged and the flower blooms"></video></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- By hand or with CopyThat -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">By hand, or with CopyThat</div>
+      <h2>The same flower, the two ways</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>The flower's 21 parts</th><th>By hand</th><th>With CopyThat</th></tr></thead>
+        <tbody>
+          <tr><td>Bones</td><td>Add, place and parent 21 bones; bind every part</td><td>New Move makes them</td></tr>
+          <tr><td>One control</td><td>Add a control bone and a driver for every bone</td><td>Build Sliders: one slider and a viewport handle</td></tr>
+          <tr><td>Staggered timing</td><td>Offset 21 sets of keys</td><td>A Delay per part, filled in by Spread</td></tr>
+          <tr><td>12 more petals and a second leaf</td><td>Duplicate, rig and key each one</td><td>Ring: copies ride along with their leader</td></tr>
+          <tr><td>Leaf joints</td><td>Parent the chain, rotate each joint</td><td>Make Chain, Curl</td></tr>
+          <tr><td>Change it later</td><td>Re-key everything</td><td>Pause or record again, then Build</td></tr>
+          <tr><td>Send the file</td><td>Hope they have the same tools</td><td>It plays and renders with nothing installed</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Twelve tools -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">Twelve tools</div>
+      <h2>For the moves machines make</h2>
+    </div>
+    <div class="features">
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f01_delays.mp4" poster="clips/f01_delays.jpg" muted loop playsinline preload="none" aria-label="Parts leave one after another"></video></div>
+        <div class="kicker">01 · Timing</div>
+        <h3>Give every part its own delay</h3>
+        <p class="muted">A Delay says how long a part waits before it starts. Parts leave in order and overlap, so a machine reads as built instead of as one rubber object.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f02_spread.mp4" poster="clips/f02_spread.jpg" muted loop playsinline preload="none" aria-label="Spread fills the delays in a wave"></video></div>
+        <div class="kicker">02 · Spread</div>
+        <h3>Spread the timing into a wave</h3>
+        <p class="muted">One dialog fills every Delay, or every copy's Lead: round a ring, down a chain, along an axis, by distance or at random.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f03_pivot.mp4" poster="clips/f03_pivot.jpg" muted loop playsinline preload="none" aria-label="A part turns about a chosen pivot"></video></div>
+        <div class="kicker">03 · Pivot</div>
+        <h3>Turn around any point you want</h3>
+        <p class="muted">Each part turns about its origin, the 3D cursor or its base. The poses stay as recorded; the way between them swings about the pivot.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f04_steps.mp4" poster="clips/f04_steps.jpg" muted loop playsinline preload="none" aria-label="A step is added in the middle of the move"></video></div>
+        <div class="kicker">04 · Steps</div>
+        <h3>Add steps in between</h3>
+        <p class="muted">Pose the middle of the move as well. Each stretch between two poses gets its own speed.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f05_curves.mp4" poster="clips/f05_curves.jpg" muted loop playsinline preload="none" aria-label="A part follows a curve that is bent"></video></div>
+        <div class="kicker">05 · Curves</div>
+        <h3>Curve the path, then edit the curve</h3>
+        <p class="muted">A part follows a curve you bend in edit mode. Its two ends always stay on Before and After.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f06_speed.mp4" poster="clips/f06_speed.jpg" muted loop playsinline preload="none" aria-label="Even speed and Smooth side by side"></video></div>
+        <div class="kicker">06 · Speed</div>
+        <h3>Smooth, or perfectly even</h3>
+        <p class="muted">Even speed, Smooth, Slow start or Slow stop, for each move.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f07_chain.mp4" poster="clips/f07_chain.jpg" muted loop playsinline preload="none" aria-label="Segments chained so the joints follow"></video></div>
+        <div class="kicker">07 · Chain</div>
+        <h3>Chain parts, so the joints follow</h3>
+        <p class="muted">Make Chain hangs each segment from the one before it in one click: a finger, a leaf, a crane arm.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f08_curl.mp4" poster="clips/f08_curl.jpg" muted loop playsinline preload="none" aria-label="A whole chain curls from its first joint"></video></div>
+        <div class="kicker">08 · Curl</div>
+        <h3>Curl a whole chain at once</h3>
+        <p class="muted">Bend the first joint, and Curl repeats the bend down the chain.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f09_ring.mp4" poster="clips/f09_ring.jpg" muted loop playsinline preload="none" aria-label="One part becomes a ring of copies"></video></div>
+        <div class="kicker">09 · Ring</div>
+        <h3>Ring one part into many</h3>
+        <p class="muted">Copies round a centre ride along with the part, each moving from its own place. Fill the gaps keeps the copies you already modelled.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f10_mirror.mp4" poster="clips/f10_mirror.jpg" muted loop playsinline preload="none" aria-label="Copies mirror their leader's move"></video></div>
+        <div class="kicker">10 · Mirror</div>
+        <h3>Mirror the copies</h3>
+        <p class="muted">A copy can mirror its leader's move across its own X, Y or Z: the leader's left becomes the copy's right.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f11_combine.mp4" poster="clips/f11_combine.jpg" muted loop playsinline preload="none" aria-label="Two moves play from one control"></video></div>
+        <div class="kicker">11 · Combine</div>
+        <h3>Combine moves under one control</h3>
+        <p class="muted">Play several moves one after another from a single slider, or overlap them with a delay.</p>
+      </article>
+      <article class="feature">
+        <div class="plate"><video data-loop src="clips/f12_animate.mp4" poster="clips/f12_animate.jpg" muted loop playsinline preload="none" aria-label="Animate keys the slider over the frames"></video></div>
+        <div class="kicker">12 · Animate</div>
+        <h3>And animate it all in one click</h3>
+        <p class="muted">Set the frames and press Animate: the slider is keyed from the current frame. Or drag the handle in the viewport.</p>
+      </article>
+    </div>
+    <div class="plate"><video data-loop src="clips/together.mp4" poster="clips/together.jpg" muted loop playsinline preload="none" aria-label="21 parts on one slider: the flower opens as the slider moves"></video></div>
+  </section>
+
+  <!-- Built for real files -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">Built for real files</div>
+      <h2>It keeps working after the demo</h2>
+    </div>
+    <div class="grid3">
+      <div><h3>Plays without the add-on</h3><p class="muted">The rig is plain bones, constraints and simple drivers. Files open, play and render anywhere, even with Auto Run Python Scripts off.</p></div>
+      <div><h3>Copies keep working</h3><p class="muted">Alt+D a whole rigged model: the copy gets its own slider and its own animation.</p></div>
+      <div><h3>Edit after Build</h3><p class="muted">Rename or delete a part, change a delay, or press Pause and pose again: the next Build takes it in.</p></div>
+      <div><h3>Look before you build</h3><p class="muted">The eye shows Before or After. Pause lets you pose freely, and To Before puts everything back.</p></div>
+      <div><h3>It tells you what happened</h3><p class="muted">The report box says what each button did and what to do next, and turns red for a warning.</p></div>
+      <div><h3>Bones too</h3><p class="muted">Record poses of an armature's own bones, not only loose objects.</p></div>
+    </div>
+  </section>
+
+  <!-- Perfect for -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">Perfect for</div>
+      <h2>Anything that opens, folds or turns</h2>
+    </div>
+    <div class="tags">
+      <span>Product reveals and packaging that opens</span>
+      <span>Hatches, lids and landing gear</span>
+      <span>Robot arms</span>
+      <span>Flowers, fans and anything that unfolds</span>
+      <span>Motion graphics and kinetic logos</span>
+      <span>Kitbash and hard-surface models</span>
+      <span>Anyone who has never built a rig</span>
+    </div>
+  </section>
+
+  <!-- Included, compatibility, install -->
+  <section class="section">
+    <div class="grid3">
+      <div>
+        <div class="kicker">What's included</div>
+        <ul class="plain">
+          <li>CopyThat 0.20.2, a Blender extension</li>
+          <li>The flower file, ready to rig</li>
+          <li>The flower guide: every click and value of the film</li>
+          <li>The full user guide, in the Documentation tab</li>
+          <li>Free updates</li>
+        </ul>
+      </div>
+      <div>
+        <div class="kicker">Compatibility</div>
+        <ul class="plain">
+          <li>Blender 4.5 LTS to 5.2</li>
+          <li>Windows, macOS and Linux: pure Python, no extra libraries</li>
+          <li>Any render engine: the motion is a plain rig</li>
+          <li>Licence GPL-3.0-or-later</li>
+        </ul>
+      </div>
+      <div id="install">
+        <div class="kicker">Install</div>
+        <ol class="install">
+          <li>Edit &gt; Preferences &gt; Get Extensions, the drop-down at the top right &gt; Install from Disk, and pick the zip.</li>
+          <li>Restart Blender.</li>
+          <li>Press N in the 3D view and open the CopyThat tab.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- What's new -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">What's new</div>
+      <h2>Recent versions</h2>
+    </div>
+    <div class="versions read">
+      <div><b>0.20.2</b><p>The panel reads in full at the sidebar's usual width. It stays on its rig when a part is deleted. An outer ring of petals comes out whole even when the inner ring was made first.</p></div>
+      <div><b>0.20.1</b><p>A fix for an error the installed panel showed at every redraw.</p></div>
+      <div><b>0.20.0</b><p>A new panel: a branded header, gold icons, a big slider for each move, sections that fold, and a report box that turns red for a warning.</p></div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">FAQ</div>
+      <h2>Questions people ask</h2>
+    </div>
+    <div class="read">
+      <details><summary>Do I need to know how to rig?</summary><p>No. Select the parts, pose them, press Build.</p></details>
+      <details><summary>Does the finished file need CopyThat?</summary><p>No. It plays and renders without it.</p></details>
+      <details><summary>Can I change the move after Build?</summary><p>Yes. Press Pause and pose freely, or record a pose again, then Build.</p></details>
+      <details><summary>Is it for characters?</summary><p>It records the poses of any bones. It is made for machines and objects that move as solid parts. For a character's skin and face, use a character rigging tool.</p></details>
+      <details><summary>Where is the full guide?</summary><p>In the Documentation tab: every button, every dialog, and the flower step by step.</p></details>
+    </div>
+  </section>
+
+  <!-- Gallery: the listing's images -->
+  <section class="section">
+    <div class="section-head read">
+      <div class="kicker">Gallery</div>
+      <h2>The listing's images</h2>
+      <p class="muted">Seven images at 2400 × 1200, the first one featured. None shows the Blender logo or name, as Superhive asks.</p>
+    </div>
+    <div class="gallery">
+      <figure><div class="plate wide"><img src="images/01_featured.jpg" alt="Featured: COPY THAT, Record a move. Get a slider, with the flower in bloom" width="2400" height="1200"></div><figcaption>01 · featured</figcaption></figure>
+      <figure><div class="plate wide"><img src="images/02_rigged_in_1m10.jpg" alt="Rigged in 1:10: the bloomed flower beside the Outliner, Properties and CopyThat panel" width="2400" height="1200"></div><figcaption>02 · rigged in 1:10</figcaption></figure>
+      <figure><div class="plate wide"><img src="images/03_ring_dialog.jpg" alt="The Ring dialog set to Count 8, World Origin, Lead step 9" width="2400" height="1200"></div><figcaption>03 · the Ring dialog</figcaption></figure>
+      <figure><div class="plate wide"><img src="images/04_spread_dialog.jpg" alt="The Spread dialog set to Down a chain, Start Delay 0.10, Delay step 0.15" width="2400" height="1200"></div><figcaption>04 · the Spread dialog</figcaption></figure>
+      <figure><div class="plate wide"><img src="images/05_twenty_one_parts.jpg" alt="21 parts, one slider: the panel at 50 percent and the flower half open" width="2400" height="1200"></div><figcaption>05 · 21 parts, one slider</figcaption></figure>
+      <figure><div class="plate wide"><img src="images/06_ring_feature.jpg" alt="Feature 09, Ring: one part, a ring" width="2400" height="1200"></div><figcaption>06 · Ring</figcaption></figure>
+      <figure><div class="plate wide"><img src="images/07_rendered.jpg" alt="The flower in bloom, rendered in Cycles" width="2400" height="1200"></div><figcaption>07 · rendered in Cycles</figcaption></figure>
+    </div>
+  </section>
+
+  <footer>
+    <span>Made by NemVe3D · creators.sa/nemve</span>
+    <span>CopyThat 0.20.2 · GPL-3.0-or-later</span>
+  </footer>
+</div>
+
+<script>
+  // Clips play only while they are on screen, so a page of twenty loops stays light; with reduced motion
+  // they wait for a press instead.
+  (function () {
+    var clips = Array.prototype.slice.call(document.querySelectorAll("video[data-loop]"));
+    var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still || !("IntersectionObserver" in window)) {
+      clips.forEach(function (v) { v.controls = true; });
+      return;
+    }
+    var watch = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var v = entry.target;
+        if (entry.isIntersecting) {
+          if (v.preload === "none") { v.preload = "auto"; }
+          var playing = v.play();
+          if (playing && playing.catch) { playing.catch(function () { v.controls = true; }); }
+        } else {
+          v.pause();
+        }
+      });
+    }, { rootMargin: "240px 0px" });
+    clips.forEach(function (v) { watch.observe(v); });
+  })();
+</script>
