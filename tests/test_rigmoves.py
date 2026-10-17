@@ -2917,6 +2917,352 @@ class TestCurl(CopyThatCase):
         self.assertEqual(found, [(("body:show_chain", "row"), "Curl")])
 
 
+class TestTheFirstFrameOfAGrowIn(CopyThatCase):
+    """A chest - a lid and a latch in one move - stands off the origin and turned,
+    and its rig grows in: the scale of the rig, or of an Empty it hangs from, is
+    keyed from nothing on frame 1 to full size on frame 20. On frame 1 the parts
+    are squeezed to a point with it, and four buttons set them down through that.
+    Remove left both at scale 0 with their places lost, and said the rig was back
+    to how it was; Make Chain gave the follower a parent inverse of 3e8, and after
+    the next Build it was a speck and the lid travelled five metres; the eye
+    scaled them to nothing, and only the next Build gave them back; Set Pivot and
+    Ring said the lid had been moved and not recorded."""
+
+    PLACE = Matrix.Translation((3.0, -2.0, 0.0)) @ Matrix.Rotation(math.radians(25.0), 4, "Z")
+    SIZES = {"Lid": (2.0, 1.2, 0.2), "Latch": (0.3, 0.05, 0.3)}
+    SHARES = (0.0, 0.5, 1.0)
+    NOTHING, FULL = 1, 20
+    GROWN_BY = ("rig", "empty")
+
+    def go_to(self, frame):
+        bpy.context.scene.frame_set(frame)
+        bpy.context.view_layer.update()
+
+    def start_again(self, grown_by):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.build_the_chest(grown_by)
+
+    def build_the_chest(self, grown_by):
+        """The chest built on frame 1, where the rig has its size; then the rig,
+        or an Empty above it, is keyed to grow in. Left on the full-size frame,
+        with where both parts stand at each share of the slider kept."""
+        scene = bpy.context.scene
+        scene.frame_set(self.NOTHING)
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.latch = cube("Latch", (0.0, -0.62, 0.95))
+        self.parts = {"Lid": self.lid, "Latch": self.latch}
+        for name, obj in self.parts.items():
+            obj.scale = self.SIZES[name]
+        bpy.context.view_layer.update()
+        for obj in self.parts.values():
+            obj.matrix_world = self.PLACE @ obj.matrix_world
+        bpy.context.view_layer.update()
+        homes = {name: obj.matrix_world.copy() for name, obj in self.parts.items()}
+        hinge = self.PLACE @ Vector((0.0, 0.6, 1.0))
+        clasp = self.PLACE @ Vector((0.0, -0.62, 1.1))
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for obj, where in ((self.lid, hinge), (self.latch, clasp)):
+            scene.cursor.location = where
+            select(obj)
+            self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        # The lid swings open on the hinge and the latch flips on the lid.
+        across = self.PLACE.to_3x3() @ Vector((1.0, 0.0, 0.0))
+        carry = turn_about(hinge, across, -100.0)
+        self.lid.matrix_world = carry @ homes["Lid"]
+        self.latch.matrix_world = carry @ turn_about(clasp, across, 40.0) @ homes["Latch"]
+        bpy.context.view_layer.update()
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+
+        grower = rig()
+        if grown_by == "empty":
+            grower = bpy.data.objects.new("Grow", None)
+            scene.collection.objects.link(grower)
+            grower.location = self.PLACE.translation
+            bpy.context.view_layer.update()
+            select(grower, rig())
+            self.assertEqual(bpy.ops.object.parent_set(type="OBJECT", keep_transform=True),
+                             {"FINISHED"})
+        grower.scale = (0.0, 0.0, 0.0)
+        grower.keyframe_insert("scale", frame=self.NOTHING)
+        grower.scale = (1.0, 1.0, 1.0)
+        grower.keyframe_insert("scale", frame=self.FULL)
+        self.go_to(self.FULL)
+        self.stood = self.seen_at_the_shares()
+
+    def move(self):
+        return rig().rigmoves.moves[0]
+
+    def seen_at_the_shares(self):
+        """{share: {part: points}} where both meshes really are, on this frame."""
+        seen = {}
+        for share in self.SHARES:
+            drive(self.move(), share)
+            seen[share] = {name: world_points(obj) for name, obj in self.parts.items()}
+        drive(self.move(), 0.0)
+        return seen
+
+    def chain_from(self, root):
+        others = [obj for name, obj in self.parts.items() if name != root]
+        select(self.parts[root], *others)
+        self.assertEqual(bpy.ops.rigmoves.make_chain(index=0), {"FINISHED"})
+
+    def check_the_scales(self, message):
+        for name, obj in self.parts.items():
+            self.assertEqual([round(x, 4) for x in obj.scale], list(self.SIZES[name]),
+                             "{:s}: the scale of {:s}".format(message, name))
+
+    def check_it_stands_as_it_did(self, message):
+        """The model on the full-size frame: both parts keep their scales, and
+        the meshes are where they stood at each share of the slider."""
+        self.go_to(self.FULL)
+        self.check_the_scales(message)
+        now = self.seen_at_the_shares()
+        for share in self.SHARES:
+            for name in self.parts:
+                self.assertLess(drift_of(now[share][name], self.stood[share][name]), TOLERANCE,
+                                "{:s}: {:s} at {:.0%}".format(message, name, share))
+
+    def test_remove_waits_for_a_frame_where_the_rig_has_a_size(self):
+        for grown_by in self.GROWN_BY:
+            with self.subTest(grown_by=grown_by):
+                self.start_again(grown_by)
+                self.go_to(self.NOTHING)
+                result = bpy.ops.rigmoves.remove(index=0)
+                said = rig().rigmoves.report
+                # Nothing is touched: the move still plays where it did.
+                self.check_it_stands_as_it_did("after Remove on frame 1")
+                self.assertEqual(result, {"CANCELLED"})
+                self.assertIn("is scaled to nothing at this frame", said)
+                self.assertNotIn("back to how it was", said)
+                self.assertEqual(len(rig().rigmoves.moves), 1)
+                # And on a frame where it has a size, Remove sets both parts free
+                # exactly where they stand.
+                self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+                self.assertEqual(len(rig().rigmoves.moves), 0)
+                self.check_the_scales("after Remove on frame 20")
+                for name, obj in self.parts.items():
+                    self.assertLess(drift_of(world_points(obj), self.stood[0.0][name]),
+                                    TOLERANCE, name)
+
+    def test_make_chain_on_the_first_frame_comes_to_what_it_does_on_a_full_one(self):
+        for grown_by in self.GROWN_BY:
+            for root in ("Lid", "Latch"):
+                with self.subTest(grown_by=grown_by, root=root):
+                    # What pressing it where the rig has its size comes to.
+                    self.start_again(grown_by)
+                    self.chain_from(root)
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                    wanted = self.seen_at_the_shares()
+                    self.check_the_scales("chained on frame 20")
+                    # Pressed on the first frame, the chain is only declared...
+                    self.start_again(grown_by)
+                    self.go_to(self.NOTHING)
+                    self.chain_from(root)
+                    self.check_the_scales("chained on frame 1")
+                    self.assertIn("Build to put it into effect", rig().rigmoves.report)
+                    # ...and the next Build, on a full-size frame, puts it into effect.
+                    self.go_to(self.FULL)
+                    self.check_the_scales("chained on frame 1, before the Build")
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                    self.check_the_scales("chained on frame 1, built on frame 20")
+                    now = self.seen_at_the_shares()
+                    for share in self.SHARES:
+                        for name in self.parts:
+                            self.assertLess(drift_of(now[share][name], wanted[share][name]),
+                                            TOLERANCE, "{:s} at {:.0%}".format(name, share))
+
+    def test_the_eye_on_the_first_frame_finishes_and_leaves_the_scales_alone(self):
+        for which in ("BEFORE", "AFTER"):
+            for grown_by in self.GROWN_BY:
+                with self.subTest(which=which, grown_by=grown_by):
+                    self.start_again(grown_by)
+                    self.go_to(self.NOTHING)
+                    select(self.lid)
+                    self.assertEqual(bpy.ops.rigmoves.show(index=0, which=which), {"FINISHED"})
+                    self.check_the_scales("the eye on frame 1")
+                    self.go_to(self.FULL)
+                    self.check_the_scales("the eye on frame 1, seen on frame 20")
+                    # The Build that puts the sliders back leaves the chest as it was.
+                    self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                    self.check_it_stands_as_it_did("the eye on frame 1, then a Build")
+
+    def test_set_pivot_and_ring_on_the_first_frame_say_the_rig_has_no_size(self):
+        presses = {"Set Pivot": lambda: bpy.ops.rigmoves.set_pivot(index=0, kind="BASE"),
+                   "Ring": lambda: bpy.ops.rigmoves.ring(index=0, count=4)}
+        for label, press in presses.items():
+            for grown_by in self.GROWN_BY:
+                with self.subTest(button=label, grown_by=grown_by):
+                    self.start_again(grown_by)
+                    self.go_to(self.NOTHING)
+                    select(self.lid)
+                    objects = len(bpy.data.objects)
+                    self.assertEqual(press(), {"CANCELLED"})
+                    said = rig().rigmoves.report
+                    self.assertIn("is scaled to nothing at this frame", said)
+                    self.assertNotIn("not recorded", said)
+                    # Nothing was made, and nothing was moved.
+                    self.assertEqual(len(bpy.data.objects), objects)
+                    self.check_the_scales(label + " on frame 1")
+                    self.check_it_stands_as_it_did(label + " on frame 1")
+
+
+class TestAHandBuiltChainWhoseFirstBoneIsAPart(CopyThatCase):
+    """A hand-built armature, Upper > Fore > Hand with no root bone of its own,
+    and a move on Upper and Fore, built and Animated. The control - where the
+    slider lives and the handle hangs - was Upper, the first bone with no parent,
+    which is a part of the move itself: the handle became its child and the
+    slider's driver looped through it ("Dependency cycle detected"). The part then
+    played one evaluation behind the slider: on frame 42, with the slider at 0.85,
+    Upper stood at 0 degrees where 34.2 was wanted. With a bone that moves for
+    nothing as the root, it was right."""
+
+    TURNS = {"Upper": 40.0, "Fore": 30.0}
+
+    def build_the_arm(self, root=False):
+        """Upper > Fore > Hand, a metre each along X, hung from a bone called Base
+        if asked; a move on Upper and Fore, turned 40 and 30 degrees, built."""
+        scene = bpy.context.scene
+        armature = bpy.data.armatures.new("Arm")
+        arm = self.arm = bpy.data.objects.new("Arm", armature)
+        scene.collection.objects.link(arm)
+        bpy.context.view_layer.objects.active = arm
+        arm.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        above = None
+        if root:
+            above = armature.edit_bones.new("Base")
+            above.head, above.tail = (-1.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        for number, name in enumerate(("Upper", "Fore", "Hand")):
+            bone = armature.edit_bones.new(name)
+            bone.head, bone.tail = (float(number), 0.0, 0.0), (number + 1.0, 0.0, 0.0)
+            bone.parent = above
+            above = bone
+        bpy.ops.object.mode_set(mode="POSE")
+        for pose_bone in arm.pose.bones:
+            pose_bone.rotation_mode = "XYZ"
+            chosen = pose_bone.name in self.TURNS
+            # Blender 5 keeps the selection on the pose bone, 4.5 on the bone.
+            if hasattr(pose_bone, "select"):
+                pose_bone.select = chosen
+            else:
+                pose_bone.bone.select = chosen
+        armature.bones.active = armature.bones["Upper"]
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for name, degrees in self.TURNS.items():
+            arm.pose.bones[name].rotation_euler.z = math.radians(degrees)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        return arm
+
+    def handle_hangs_from(self):
+        handle = self.arm.data.bones[self.arm.rigmoves.moves[0].handle_name]
+        return handle.parent.name if handle.parent is not None else None
+
+    def seen_on(self, frame):
+        """(the slider's share, Upper's turn, Fore's turn in degrees) on a frame,
+        read off the rig the way Blender evaluated it - once."""
+        bpy.context.scene.frame_set(frame)
+        arm = self.arm.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        move = self.arm.rigmoves.moves[0]
+        share = arm.pose.bones[move.handle_name].location.y / move.rail
+        turns = []
+        for name in ("Upper", "Fore"):
+            line = arm.pose.bones[name].tail - arm.pose.bones[name].head
+            turns.append(math.degrees(math.atan2(line.y, line.x)))
+        return share, turns[0], turns[1]
+
+    def animate(self):
+        self.arm.rigmoves.moves[0].play_frames = 48
+        bpy.context.scene.frame_set(1)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+
+    def check_it_plays_with_the_slider(self, message):
+        """Upper turns 40 degrees and Fore 70 in all (their own 30 on top of
+        Upper's), by how far along the slider is, on every frame."""
+        for frame in (1, 20, 42, 83):
+            share, upper, fore = self.seen_on(frame)
+            self.assertAlmostEqual(upper, 40.0 * share, delta=0.05,
+                                   msg="{:s}: Upper on frame {:d}".format(message, frame))
+            self.assertAlmostEqual(fore, 70.0 * share, delta=0.05,
+                                   msg="{:s}: Fore on frame {:d}".format(message, frame))
+
+    def test_the_part_plays_with_the_slider_and_not_a_step_behind(self):
+        self.build_the_arm()
+        self.animate()
+        # The slider is at 41/48 of its way on frame 42, and at the end on 83.
+        share, upper, _fore = self.seen_on(42)
+        self.assertAlmostEqual(share, 41.0 / 48.0, places=3)
+        self.assertAlmostEqual(upper, 34.2, delta=0.05)
+        share, upper, _fore = self.seen_on(83)
+        self.assertAlmostEqual(share, 1.0, places=3)
+        self.assertAlmostEqual(upper, 40.0, delta=0.05)
+        self.check_it_plays_with_the_slider("no root bone")
+
+    def test_the_handle_hangs_from_no_part_and_from_nothing_below_one(self):
+        arm = self.build_the_arm()
+        move = arm.rigmoves.moves[0]
+        parts = {part.name for part in move.parts}
+        self.assertEqual(parts, {"Upper", "Fore"})
+        # The bones above the handle, nearest first: none of them is a part,
+        # and none hangs from one. Here there is nothing to hang from at all.
+        above, bone = [], arm.data.bones[move.handle_name].parent
+        while bone is not None:
+            above.append(bone.name)
+            bone = bone.parent
+        self.assertEqual(set(above) & (parts | {"Hand"}), set())
+        self.assertIsNone(self.handle_hangs_from())
+        # The slider is still the control's: the property stays on Upper.
+        self.assertEqual(move.control, "Upper")
+        self.assertIn(move.prop, arm.pose.bones["Upper"].keys())
+
+    def test_a_handle_goes_on_the_nearest_bone_above_a_control_that_is_below_a_part(self):
+        arm = self.build_the_arm(root=True)
+        self.assertEqual(self.handle_hangs_from(), "Base")
+        # A control put by hand on a bone below the parts: the handle may not
+        # ride on it, nor on the parts between, but on the Base above them all.
+        arm.rigmoves.moves[0].control = "Hand"
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.handle_hangs_from(), "Base")
+        self.animate()
+        self.check_it_plays_with_the_slider("the control on Hand")
+
+    def test_a_rig_with_a_root_bone_keeps_its_handle_on_it(self):
+        self.build_the_arm(root=True)
+        self.assertEqual(self.arm.rigmoves.moves[0].control, "Base")
+        self.assertEqual(self.handle_hangs_from(), "Base")
+        self.animate()
+        self.check_it_plays_with_the_slider("a root bone")
+
+    def test_the_rig_made_for_objects_keeps_its_handle_on_the_root(self):
+        door = cube("Door", (0.0, 0.0, 1.0))
+        select(door)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        door.matrix_world = turn_about(Vector((0.5, 0.0, 1.0)), "Y", 60.0) @ door.matrix_world
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.arm = rig()
+        self.assertEqual(self.arm.rigmoves.moves[0].control, "Root")
+        self.assertEqual(self.handle_hangs_from(), "Root")
+
+    def test_a_handle_an_earlier_version_hung_from_a_part_is_let_go_at_the_next_build(self):
+        arm = self.build_the_arm()
+        name = arm.rigmoves.moves[0].handle_name
+        # How a file built before this came: the handle a child of Upper.
+        bpy.ops.object.mode_set(mode="EDIT")
+        arm.data.edit_bones[name].parent = arm.data.edit_bones["Upper"]
+        bpy.ops.object.mode_set(mode="POSE")
+        self.assertEqual(self.handle_hangs_from(), "Upper")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIsNone(self.handle_hangs_from())
+        self.animate()
+        self.check_it_plays_with_the_slider("a handle let go of the part")
+
+
 class TestCurlOwnAxes(CopyThatCase):
     """A tentacle that curves as it goes: every segment faces a different way,
     so its own axes are not the world's, and each bends about its own."""

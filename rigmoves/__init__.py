@@ -487,6 +487,15 @@ def carriers(data):
     return out
 
 
+def under_a_part(bone, parts):
+    """Whether a bone is one of these parts, or hangs from one."""
+    while bone is not None:
+        if bone.name in parts:
+            return True
+        bone = bone.parent
+    return False
+
+
 def sync_handles(rig, data):
     """Make, move or unmake every handle in one trip through edit mode."""
     wanted = {}
@@ -516,6 +525,7 @@ def sync_handles(rig, data):
         if bone is not None:
             edit.remove(bone)
     into_armature = rig.matrix_world.inverted_safe()
+    parts = {part_bone(part) for one in data.moves for part in one.parts}
     # Where each one goes is worked out before any of them is made, so two
     # controls over the same parts get pushed apart instead of stacked. Two
     # moves on one machine sit over the same middle, and a combined control
@@ -554,7 +564,15 @@ def sync_handles(rig, data):
         bone.roll = 0.0
         bone.use_deform = False
         bone.use_connect = False
+        # Never from a part, nor from anything below one: the handle writes the
+        # slider that plays the part, so a handle riding on a part is a loop,
+        # and the part plays a step behind the slider. A hand-built chain whose
+        # first bone is a part has its control there; the handle then hangs
+        # from the nearest bone above the control that is clear of the parts,
+        # or from none.
         holder = edit.get(move.control)
+        while holder is not None and under_a_part(holder, parts):
+            holder = holder.parent
         bone.parent = holder if (holder is not None and holder.name != bone.name) else None
         move.handle_name = bone.name
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -1355,6 +1373,12 @@ def hang(part):
         return
     obj = part_object(part)
     if obj is None:
+        return
+    # Not while the rig is scaled to nothing - a grow-in, on its first frame:
+    # what is hung there is hung through a matrix that cannot be undone, and
+    # keeps a huge parent inverse and a scale of nothing for good. The next
+    # Build, on a frame where the rig has a size, hangs it.
+    if is_singular(part.id_data.matrix_world):
         return
     move = holder_of(part.id_data, part)
     ahead = move.parts.get(part.follows) if move is not None and part.follows else None
@@ -2368,6 +2392,11 @@ def reseat_bound(data, move=None):
     """
     moves = [move] if move is not None else list(data.moves)
     count = 0
+    # Not while the rig is scaled to nothing: every object it carries has
+    # collapsed with it and looks moved, and one set down through a parent that
+    # has no size has none of its own for good.
+    if is_singular(data.id_data.matrix_world):
+        return count
     for one in moves:
         # Parents first: a follower's object hangs from its leader's, so
         # putting the leader back moves it, and it is only then put right.
@@ -2933,10 +2962,12 @@ def is_singular(matrix):
 def has_no_size(operator, rig, data):
     """Whether the rig is scaled to nothing at this frame, after saying so.
 
-    For the two buttons that write what they read off a rig - Record keys a pose
+    For the buttons that write what they read off a rig - Record keys a pose
     for a part that looks moved, since it has collapsed, and Build binds a new
     part with a bone placed through the rig's inverse: neither can be told
-    anything by a rig that has no size. (catch_up leaves such a rig alone.)
+    anything by a rig that has no size. Remove, which sets the parts free where
+    they stand, and Set Pivot and Ring, which Build, are turned down the same
+    way. (catch_up leaves such a rig alone.)
     """
     if not is_singular(rig.matrix_world):
         return False
@@ -3124,8 +3155,13 @@ def seen_poses(rig, move, shown):
 def stand_parts(context, move, places):
     """Every bound object of a move back on its Before, and every loose one
     where `places` puts it - parents first, as a follower's object hangs from
-    its leader's and goes wherever that is put."""
+    its leader's and goes wherever that is put.
+
+    Nothing is put anywhere while the rig is scaled to nothing, for the reason
+    reseat_bound gives; the eye still goes ahead, and leaves the parts alone."""
     count = 0
+    if is_singular(move.id_data.matrix_world):
+        return count
     for part in follow_order(move, chain_parts(move)):
         obj = part_object(part)
         target = as_matrix(part.before) if is_bound(part) else places.get(part.name)
@@ -7200,7 +7236,9 @@ class RIGMOVES_OT_set_pivot(bpy.types.Operator):
             data.report = "Select the parts to set a pivot for."
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
-        if move.built and not keeps_drags(self, data):
+        # A rig scaled to nothing is asked first: every part of it looks moved
+        # there, and "moved and not recorded" is not why this cannot go ahead.
+        if move.built and (has_no_size(self, rig, data) or not keeps_drags(self, data)):
             return {"CANCELLED"}
         cursor = context.scene.cursor.location.copy()
         for part in parts:
@@ -8840,8 +8878,9 @@ class RIGMOVES_OT_ring(bpy.types.Operator):
                 return self.refuse(data, "'{:s}' has no Before recorded yet.".format(
                     short(joint.name, 18)))
         # Riding along on a built move is a Build, and Build puts a dragged
-        # part back: refused now, with nothing made, rather than half way.
-        if move.built and not keeps_drags(self, data):
+        # part back: refused now, with nothing made, rather than half way. A
+        # rig scaled to nothing is asked first, as there every part looks dragged.
+        if move.built and (has_no_size(self, rig, data) or not keeps_drags(self, data)):
             return None
         return rig, data, move, part, members, chain_of(move, part)
 
@@ -9359,6 +9398,11 @@ class RIGMOVES_OT_remove(bpy.types.Operator):
         if not 0 <= self.index < len(data.moves):
             return {"CANCELLED"}
         move = data.moves[self.index]
+        # Not on a frame where the rig is scaled to nothing: the parts it
+        # carries are squeezed to a point with it, and set free there they would
+        # stay a point.
+        if has_no_size(self, rig, data):
+            return {"CANCELLED"}
         # Never held up by what it is taking out: whatever is wrong with a part
         # is no reason to keep it.
         catch_up(rig, data)
