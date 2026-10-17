@@ -950,13 +950,20 @@ def follow_renames(rig, data):
 
 def point_at_objects(rig, data):
     """Give every part that has no pointer yet the one its name finds, if it is
-    in this rig's model: parts made before the pointer was kept."""
+    in this rig's model: parts made before the pointer was kept. The same for
+    the object a part hung from before (home_object), which 0.19.0 kept by name
+    only: held by pointer it is followed when it is renamed, and found by its
+    name it is not."""
     for move in data.moves:
         for part in move.parts:
             if part.kind == "OBJECT" and part.object is None:
                 obj = part_object(part)
                 if obj is not None and (bound_to(obj, rig) or not part.bone_name):
                     part.object = obj
+            if part.kind == "OBJECT" and part.home_object is None and part.home_parent:
+                home = bpy.data.objects.get(part.home_parent)
+                if home is not None and home.users_collection:
+                    part.home_object = home
 
 
 def has_deleted(data):
@@ -1204,12 +1211,14 @@ def follow_renames_handler(*_arguments):
     whole file at every question. Renames are followed only when a name
     differs, and the timer is set only when an object has no user but the
     pointer, which is what an object deleted in the viewport looks like - the
-    part's own, or the one it hung from before."""
+    part's own, or the one it hung from before. A rig it has not seen yet since the
+    file was opened is looked over (look_over)."""
     try:
         deleted = False
         for obj in bpy.data.objects:
             if obj.type != "ARMATURE" or not len(obj.rigmoves.moves):
                 continue
+            look_over(obj)
             renamed = False
             for move in obj.rigmoves.moves:
                 for part in move.parts:
@@ -1698,6 +1707,12 @@ class RIGMOVES_Rig(bpy.types.PropertyGroup):
     # 0.19.0: Apply and Set Origin on the rig change the object and the bones
     # by the same amount, and the model has not moved.
     seat_on_root: bpy.props.BoolProperty(default=False)
+    # Where the rig object itself stood the last time catch_up looked, beside the
+    # seat above, which is where its Root bone stands. The Root can be edited -
+    # moved, lengthened, rolled, renamed - with the object where it was, and the
+    # model has not moved then: see rig_stayed. All zeros in a file from before
+    # this was kept (0.19.1 and earlier).
+    seat_world: bpy.props.FloatVectorProperty(size=16)
     # The farthest from the world's origin the seat has stood, as far as catch_up
     # has seen it carried. Blender's matrices keep seven digits, so what is carried
     # a few hundred metres off is rounded by the carrying, and keeps that rounding
@@ -2567,7 +2582,7 @@ def marks_fit(part, obj, shift=None):
     return all((a - b).length <= slack for a, b in zip(then, places))
 
 
-def retake_marks(data, meshes=None, shift=None):
+def retake_marks(data, meshes=None, shift=None, old=False):
     """Take new marks for every object part that stands exactly on its Before
     and whose marks no longer fit: its mesh was edited since they were taken,
     so that a vertex moved or the vertices were numbered another way.
@@ -2578,6 +2593,9 @@ def retake_marks(data, meshes=None, shift=None):
     since the rig was last caught up, and what it remembers is still where it
     was - a part stands on its Before if it stands where that is carried to;
     its marks are taken at the Before it still has, and carried with it later.
+    With `old`, the marks 0.19.0 kept are taken afresh as well, though they fit:
+    three vertices by their place in the mesh can lie in a line (a grid's corner,
+    its middle and the next corner), and a line says nothing about a turn.
     """
     for move in data.moves:
         for part in move.parts:
@@ -2591,7 +2609,7 @@ def retake_marks(data, meshes=None, shift=None):
             if (obj is None or world is not None or obj.type != "MESH" or obj.mode == "EDIT"
                     or len(obj.data.vertices) < 3):
                 continue
-            if not marks_fit(part, obj, shift):
+            if (old and part.rest_which[0] < 0) or not marks_fit(part, obj, shift):
                 note_rest(part, obj)
 
 
@@ -2762,6 +2780,25 @@ def seat_of(rig):
 def store_seat(rig, data):
     """Keep where the rig stands now as where what it remembers is true."""
     data.seat, data.seated, data.seat_on_root = flat(seat_of(rig)), True, True
+    data.seat_world = flat(rig.matrix_world)
+
+
+def rig_stayed(rig, data):
+    """Whether the rig object stands where it did the last time catch_up looked,
+    so that the model has not been moved, whatever its Root bone says now.
+
+    The seat is where the Root bone stands, and in Edit Mode the Root can be
+    moved, lengthened, rolled or renamed without a part going anywhere: it
+    deforms nothing. The seat changes by itself then, and was taken for the model
+    having been moved - everything the rig remembers was carried by the edit, and
+    the parts stood that far off. A model that is moved takes its rig object with
+    it; Apply and Set Origin on the rig change the object but not the bone, so
+    neither is this. Not told for a seat kept the old way, or by a version that
+    did not keep the object's matrix: there is nothing to tell it by.
+    """
+    was = as_matrix(data.seat_world)
+    return (data.seat_on_root and not is_singular(was)
+            and same_place(rig.matrix_world, was, rig.matrix_world.translation.length))
 
 
 def moved_since(rig, data):
@@ -2772,9 +2809,59 @@ def moved_since(rig, data):
         return None
     now = seat_of(rig) if data.seat_on_root else rig.matrix_world
     was = as_matrix(data.seat)
-    if is_singular(rig.matrix_world) or is_singular(was):
+    if is_singular(rig.matrix_world) or is_singular(was) or rig_stayed(rig, data):
         return None
     return now @ was.inverted_safe()
+
+
+# The rigs this session has looked over (settle_old_rig), by the number Blender
+# gives each object for the session: a new one for every object of a file opened.
+SETTLED = set()
+
+
+def settle_old_rig(rig, data):
+    """The first look at a rig after its file was opened, to do what a button
+    would do for a file made by an older version - before the file is changed in
+    a way that hides what the button needs. (Blender updates the scene at once
+    when a file is opened, and calls follow_renames_handler after it: that is
+    when this is done, with the objects' matrices worked out.)
+
+    0.19.0 kept the seat as the rig object's matrix. Ctrl+A or Set Origin on the
+    rig before any button changes that matrix and not the Root bone, and the first
+    button took it for the whole model having moved: everything the rig
+    remembers was carried by it. Kept on the Root bone now, it is not. 0.19.1
+    kept no seat_world beside the seat, which an edit of the Root bone is told
+    by (rig_stayed): taken here as well, if the Root still stands where the seat
+    says. And the parts that stand on their Before are given marks that span
+    their mesh (retake_marks), in place of the three of 0.19.0, which a grid has
+    in a line. The parts get the pointers an older file lacks (point_at_objects),
+    for a rename made before any button to be followed.
+
+    The seat is changed only for a rig that stands where the seat says. One
+    that was moved since is carried by the first button, as it was.
+    """
+    if data.seated:
+        if not data.seat_on_root:
+            if same_matrix(rig.matrix_world, as_matrix(data.seat), 1e-4):
+                store_seat(rig, data)
+        elif is_singular(as_matrix(data.seat_world)):
+            if same_matrix(seat_of(rig), as_matrix(data.seat), 1e-4):
+                data.seat_world = flat(rig.matrix_world)
+    point_at_objects(rig, data)
+    retake_marks(data, shift=moved_since(rig, data), old=True)
+
+
+def look_over(rig):
+    """Settle a rig the first time this session sees it, and not again. Never
+    raises: a rig linked from a library cannot be written to, and that must not
+    stop the handler that asks from following renames."""
+    if rig.session_uid in SETTLED:
+        return
+    SETTLED.add(rig.session_uid)
+    try:
+        settle_old_rig(rig, rig.rigmoves)
+    except Exception:
+        pass
 
 
 def is_singular(matrix):
@@ -2823,7 +2910,8 @@ def catch_up(rig, data=None, reframe=True):
     hand - and the parts go with it, but what is remembered stayed behind: a
     Build then put every part back where the model used to be. Where the rig
     stands is told by its Root bone (seat_of), so that Apply and Set Origin on
-    the rig, which move nothing, are not taken for a move.
+    the rig, which move nothing, are not taken for a move; nor is that bone
+    edited with the rig object where it was (rig_stayed).
     """
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
@@ -2846,6 +2934,12 @@ def catch_up(rig, data=None, reframe=True):
         # stands, and what it remembers is taken to be true of that. So is a seat
         # that was kept as nothing, by 0.19.0: there is nowhere to carry from.
         store_seat(rig, data)
+    elif rig_stayed(rig, data):
+        # The rig object is where it was, so the model has not moved, whatever the
+        # Root bone says: it was edited. Nothing is carried; the seat is kept where
+        # the bone stands now, for a move of the model after this to be measured
+        # from there.
+        store_seat(rig, data)
     else:
         # A seat kept by 0.19.0 is the rig object's matrix: measured against
         # that this once, then kept on the Root bone.
@@ -2860,6 +2954,12 @@ def catch_up(rig, data=None, reframe=True):
             store_seat(rig, data)
         elif not data.seat_on_root:
             store_seat(rig, data)
+        else:
+            # Apply or Set Origin on the rig, or a file from before the object's
+            # matrix was kept: the rig object is somewhere else and the model is
+            # not. Noted, or an edit of the Root bone after this would look like a
+            # move of the model (rig_stayed asks where the object was last).
+            data.seat_world = flat(rig.matrix_world)
     # Before anything is put back: a part whose mesh was edited since, and then
     # given a new origin, is told from a part dragged by marks that fit.
     retake_marks(data)
@@ -6086,7 +6186,13 @@ def take_riders_out(rig, move, names):
     driver left on a bone that is gone is one Blender warns about on every
     update. The parts are taken out by name, one at a time, as each removal
     moves the ones after it.
+
+    The curves come out of the move's Action, which a copy of a whole model
+    plays too until it is given one of its own (own_actions): taken out of that,
+    the model it was copied from loses the part's keys as well, and its part
+    stays at rest. So the Action is made this rig's own first, whoever asks.
     """
+    own_actions(rig, rig.rigmoves)
     _action, _slot, bag = action_bits(move)
     for name in names:
         rider = move.parts.get(name)
