@@ -1,0 +1,80 @@
+{
+ "sample_rate": 48000,
+ "channels": 1,
+ "bit_depth": 16,
+ "effects": {
+  "click_down": {
+   "file": "click_down.wav",
+   "duration": 0.07,
+   "use": "mouse button down: the press-scale pulse",
+   "peak_db": -9.0,
+   "marks": {
+    "hit": 0.0
+   }
+  },
+  "click_up": {
+   "file": "click_up.wav",
+   "duration": 0.05,
+   "use": "mouse button up: the release, the end of a drag",
+   "peak_db": -14.0,
+   "marks": {
+    "hit": 0.0
+   }
+  },
+  "click": {
+   "file": "click.wav",
+   "duration": 0.2,
+   "use": "a whole click, down then up",
+   "peak_db": -9.0,
+   "marks": {
+    "hit": 0.0,
+    "up": 0.1
+   }
+  },
+  "whoosh": {
+   "file": "whoosh.wav",
+   "duration": 0.6,
+   "use": "the stripe wipe between two beats",
+   "peak_db": -12.0,
+   "marks": {
+    "hit": 0.26
+   }
+  },
+  "pop": {
+   "file": "pop.wav",
+   "duration": 0.16,
+   "use": "a Ring copy appears",
+   "peak_db": -10.0,
+   "marks": {
+    "hit": 0.0
+   }
+  },
+  "pop_2": {
+   "file": "pop_2.wav",
+   "duration": 0.16,
+   "use": "a Ring copy appears, a little higher",
+   "peak_db": -10.0,
+   "marks": {
+    "hit": 0.0
+   }
+  },
+  "pop_3": {
+   "file": "pop_3.wav",
+   "duration": 0.16,
+   "use": "a Ring copy appears, higher still",
+   "peak_db": -10.0,
+   "marks": {
+    "hit": 0.0
+   }
+  },
+  "tick": {
+   "file": "tick.wav",
+   "duration": 0.09,
+   "use": "a headline lands",
+   "peak_db": -17.0,
+   "marks": {
+    "hit": 0.0
+   }
+  }
+ }
+}
