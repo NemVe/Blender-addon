@@ -4126,6 +4126,179 @@ class TestCopiedParts(CopyThatCase):
         self.check_travel(first, rest, 1.0)
 
 
+class ThreeBoxes(CopyThatCase):
+    """Three boxes in a row, A, B and C, and one move that lifts A, lifts and
+    turns B and slides C along: built, and played at both ends of its path. What
+    the classes below do to it is copy it whole, edit its Root bone, and save it
+    as an older version did."""
+
+    NAMES = ("A", "B", "C")
+
+    @staticmethod
+    def grid(name, location, side=4, size=2.0):
+        """A flat grid of side by side vertices, row by row. The three vertices
+        0.19.0 told a part by - the first, a third of the way through and two
+        thirds - lie in a line on a grid of 4 by 4: 0, 5 and 10."""
+        step = size / (side - 1)
+        middle = (side - 1) / 2.0
+        points = [((column - middle) * step, (row - middle) * step, 0.0)
+                  for row in range(side) for column in range(side)]
+        faces = [(row * side + column, row * side + column + 1,
+                  (row + 1) * side + column + 1, (row + 1) * side + column)
+                 for row in range(side - 1) for column in range(side - 1)]
+        mesh = bpy.data.meshes.new(name)
+        mesh.from_pydata(points, [], faces)
+        obj = bpy.data.objects.new(name, mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        obj.location = location
+        return obj
+
+    def three_boxes(self, grid=False):
+        """The model, built in an empty scene. With `grid`, B is a flat grid of
+        4 by 4 vertices instead of a box."""
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.boxes = {}
+        for number, name in enumerate(self.NAMES):
+            where = (3.0 * number, 0.0, 0.5)
+            self.boxes[name] = self.grid(name, where) if grid and name == "B" else cube(name, where)
+        bpy.context.view_layer.update()
+        a, b, c = (self.boxes[name] for name in self.NAMES)
+        select(a, b, c)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        a.location.z += 1.0
+        b.location.z += 1.0
+        b.rotation_euler.z = math.radians(40.0)
+        c.location.x += 1.0
+        bpy.context.view_layer.update()
+        select(a, b, c)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.rig1 = rig()
+        self.plays = self.play(self.rig1, self.boxes)
+
+    def play(self, owner, boxes):
+        """Where each of these boxes is at both ends of the rig's move, as
+        {share: {name: points}}: the evaluated meshes, deformed by the rig."""
+        move = owner.rigmoves.moves[0]
+        found = {}
+        for share in (0.0, 1.0):
+            owner.pose.bones[move.handle_name].location.y = move.rail * share
+            bpy.context.view_layer.update()
+            found[share] = {name: world_points(obj) for name, obj in boxes.items()}
+        owner.pose.bones[move.handle_name].location.y = 0.0
+        bpy.context.view_layer.update()
+        return found
+
+    def check_plays(self, owner, boxes, label, place=None):
+        """Each of these boxes plays the move as the model did when it was
+        built, `place` (a matrix) away."""
+        place = Matrix.Identity(4) if place is None else place
+        found = self.play(owner, boxes)
+        for share, by_name in self.plays.items():
+            for name in boxes:
+                self.assertLess(drift_of(found[share][name], [place @ p for p in by_name[name]]),
+                                TOLERANCE, "{:s}: {:s} at {:.0%}".format(label, name, share))
+
+    def keys_of(self, owner, name):
+        """How many curves the Action this rig plays for its move holds for one bone."""
+        action = bpy.data.actions[owner.rigmoves.moves[0].action_name]
+        mine = 'pose.bones["{:s}"].'.format(name)
+        return len([path for path, _index in curves_in(action) if path.startswith(mine)])
+
+
+class TestADeletedPartOfACopyLeavesTheOriginalItsKeys(ThreeBoxes):
+    """A whole model is copied - Shift+D or Alt+D, the rig with its parts - and a
+    part of one of the two is deleted. The first button pressed on that rig took
+    the part's curves out of the Action it still shared with the other, before it
+    was given an Action of its own: the other lost them (ten curves to none), and
+    its part stayed at rest, 1.1 m short at the end of its move."""
+
+    AWAY = Matrix.Translation((10.0, 0.0, 0.0))
+
+    def copy_the_model(self, linked):
+        """Duplicate the rig and its boxes as Shift+D or Alt+D does, and move
+        the copy 10 m along. Its rig, and its boxes by the originals' names."""
+        select(self.rig1, *self.boxes.values())
+        if linked:
+            self.assertEqual(bpy.ops.object.duplicate_move_linked(
+                TRANSFORM_OT_translate={"value": (10.0, 0.0, 0.0)}), {"FINISHED"})
+        else:
+            self.assertEqual(bpy.ops.object.duplicate(linked=False), {"FINISHED"})
+            self.assertEqual(bpy.ops.transform.translate(value=(10.0, 0.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        made = list(bpy.context.selected_objects)
+        copy_rig = next(o for o in made if o.type == "ARMATURE")
+        copies = {name: next(o for o in made if o.type == "MESH" and o.name.startswith(name + "."))
+                  for name in self.NAMES}
+        bpy.context.scene.rigmoves_rig = copy_rig
+        return copy_rig, copies
+
+    @staticmethod
+    def how(linked):
+        return "Alt+D" if linked else "Shift+D"
+
+    def test_a_button_on_the_copy_after_its_part_was_deleted_leaves_the_original_its_keys(self):
+        buttons = {"Build": lambda: bpy.ops.rigmoves.build(),
+                   "Record": lambda: bpy.ops.rigmoves.record(index=0, which="AFTER"),
+                   "Remove": lambda: bpy.ops.rigmoves.remove(index=0)}
+        for linked in (False, True):
+            for button, press in buttons.items():
+                label = "{:s}, {:s} on the copy".format(self.how(linked), button)
+                with self.subTest(label):
+                    self.three_boxes()
+                    keys = self.keys_of(self.rig1, "B")
+                    self.assertGreater(keys, 0)
+                    copy_rig, copies = self.copy_the_model(linked)
+                    delete_in_the_viewport(copies["B"])
+                    self.assertEqual(press(), {"FINISHED"})
+                    self.check_plays(self.rig1, self.boxes, label)
+                    self.assertEqual(self.keys_of(self.rig1, "B"), keys, label)
+                    if button == "Build":
+                        # What is left of the copy plays as it did.
+                        self.check_plays(copy_rig, {name: copies[name] for name in "AC"},
+                                         label, self.AWAY)
+
+    def test_a_button_on_the_original_after_its_part_was_deleted_leaves_the_copy_its_keys(self):
+        for linked in (False, True):
+            label = "{:s}, Build on the original".format(self.how(linked))
+            with self.subTest(label):
+                self.three_boxes()
+                keys = self.keys_of(self.rig1, "B")
+                copy_rig, copies = self.copy_the_model(linked)
+                delete_in_the_viewport(self.boxes["B"])
+                bpy.context.scene.rigmoves_rig = self.rig1
+                select(self.rig1)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.check_plays(copy_rig, copies, label, self.AWAY)
+                self.assertEqual(self.keys_of(copy_rig, "B"), keys, label)
+                self.check_plays(self.rig1, {name: self.boxes[name] for name in "AC"}, label)
+
+    def test_a_deleted_part_with_a_curved_path_leaves_no_curve_of_its_own_behind(self):
+        # The curve is shared with the original, and a copy of it is made for
+        # the copy's part: not for a part that is about to be taken out, which
+        # would leave an object nothing owns standing in the scene.
+        for linked in (False, True):
+            label = "{:s}, a curved path".format(self.how(linked))
+            with self.subTest(label):
+                self.three_boxes()
+                select(self.boxes["B"])
+                self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+                middle = self.rig1.rigmoves.moves[0].parts["B"].path_curve.data.splines[0].bezier_points[1]
+                for point in (middle.co, middle.handle_left, middle.handle_right):
+                    point.z += 1.5
+                select(self.boxes["B"])
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.plays = self.play(self.rig1, self.boxes)
+                curves = {o.name for o in bpy.data.objects if o.type == "CURVE"}
+                self.assertEqual(len(curves), 1)
+                copy_rig, copies = self.copy_the_model(linked)
+                delete_in_the_viewport(copies["B"])
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.check_plays(self.rig1, self.boxes, label)
+                self.assertEqual({o.name for o in bpy.data.objects if o.type == "CURVE"},
+                                 curves, label)
+
+
 class WatchedObjects:
     """bpy.data.objects, noting every removal made while a loop over it is going
     on. Iterating it goes through a generator that counts the loops that are

@@ -6086,7 +6086,13 @@ def take_riders_out(rig, move, names):
     driver left on a bone that is gone is one Blender warns about on every
     update. The parts are taken out by name, one at a time, as each removal
     moves the ones after it.
+
+    The curves come out of the move's Action, which a copy of a whole model
+    plays too until it is given one of its own (own_actions): taken out of that,
+    the model it was copied from loses the part's keys as well, and its part
+    stays at rest. So the Action is made this rig's own first, whoever asks.
     """
+    own_actions(rig, rig.rigmoves)
     _action, _slot, bag = action_bits(move)
     for name in names:
         rider = move.parts.get(name)
