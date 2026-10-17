@@ -1169,6 +1169,11 @@ def own_curves(rig, data):
     Action's copy is; the only thing that points at one is the part's pointer.
     A drawn line is let go of: the next Build or Show Paths draws this rig's
     own, and nothing here deletes the other's.
+
+    With the curves selected too, Alt+D gives the copy curve objects of its own,
+    but they share the originals' Curve: bent in Edit Mode on the copy, the
+    original's bent as well, and its lid moved at its next Build. Those get a
+    Curve of their own here.
     """
     others = [o for o in bpy.data.objects
               if o.type == "ARMATURE" and o is not rig and len(o.rigmoves.moves)]
@@ -1181,7 +1186,13 @@ def own_curves(rig, data):
             move.paths_object = None
         for part in move.parts:
             curve = part.path_curve
-            if curve is None or curve not in curves:
+            if curve is None:
+                continue
+            if curve not in curves:
+                # A fake user alone does not make a Curve shared.
+                if (curve.type == "CURVE" and curve.data is not None
+                        and curve.data.users - int(curve.data.use_fake_user) > 1):
+                    curve.data = curve.data.copy()
                 continue
             fresh = curve.copy()
             fresh.name = "{:s} {:s}".format(curve.name, rig.name)

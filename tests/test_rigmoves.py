@@ -7235,6 +7235,59 @@ class TestAnAltDCopyHasTheRigsKeysOfItsOwn(CopiedModel):
         self.assertIs(animation.action, action)
 
 
+class TestAnAltDCopyMadeWithItsPathCurvesBendsOnlyItsOwn(CopiedModel):
+    """Select All - the path curves too - and Alt+D: the copy has curve objects of
+    its own, but linked ones, which share the originals' Curve. Bent on the copy,
+    the original's curve was bent as well, and its lid moved 3 m at its next
+    Build. (The first button pressed on a copy parts them; a bend made before
+    any is made on both, and nothing can tell.)"""
+
+    def setUp(self):
+        super().setUp()
+        self.chest()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.curve = self.rig1.rigmoves.moves[0].parts[0].path_curve
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.keep(self.lid)
+        self.shape = self.points_of(self.curve)
+
+    @staticmethod
+    def points_of(curve):
+        return [tuple(round(c, 5) for c in point.co)
+                for point in curve.data.splines[0].bezier_points]
+
+    @staticmethod
+    def bend(curve, height):
+        """Pull the middle point up, handles with it, as Edit Mode does."""
+        middle = curve.data.splines[0].bezier_points[1]
+        for point in (middle.co, middle.handle_left, middle.handle_right):
+            point.z += height
+
+    def test_bending_the_copys_curve_leaves_the_originals_lid_where_it_was(self):
+        rig2, part2 = self.copy_everything(True, self.curve)
+        curve2 = rig2.rigmoves.moves[0].parts[0].path_curve
+        # The copy's curve is an object of its own, on the original's Curve.
+        self.assertIsNot(curve2, self.curve)
+        self.assertIs(curve2.data, self.curve.data)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.bend(curve2, 3.0)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        bpy.context.scene.rigmoves_rig = self.rig1
+        select(self.part)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_original()
+        self.assertEqual(self.points_of(self.curve), self.shape)
+        self.assertIsNot(curve2.data, self.curve.data)
+        # The copy's lid goes up the 3 m its curve was bent.
+        now = self.play(rig2, part2)
+        raised = [self.OFF @ (p + Vector((0.0, 0.0, 3.0))) for p in self.plays[0.5]]
+        self.assertLess(max((a - b).length for a, b in zip(now[0.5], raised)), 0.01)
+
+
 def drift_of(points, expected):
     """How far the furthest of these points is from the same one of the others."""
     return max((a - b).length for a, b in zip(points, expected))
