@@ -3109,6 +3109,160 @@ class TestTheFirstFrameOfAGrowIn(CopyThatCase):
                     self.check_it_stands_as_it_did(label + " on frame 1")
 
 
+class TestAHandBuiltChainWhoseFirstBoneIsAPart(CopyThatCase):
+    """A hand-built armature, Upper > Fore > Hand with no root bone of its own,
+    and a move on Upper and Fore, built and Animated. The control - where the
+    slider lives and the handle hangs - was Upper, the first bone with no parent,
+    which is a part of the move itself: the handle became its child and the
+    slider's driver looped through it ("Dependency cycle detected"). The part then
+    played one evaluation behind the slider: on frame 42, with the slider at 0.85,
+    Upper stood at 0 degrees where 34.2 was wanted. With a bone that moves for
+    nothing as the root, it was right."""
+
+    TURNS = {"Upper": 40.0, "Fore": 30.0}
+
+    def build_the_arm(self, root=False):
+        """Upper > Fore > Hand, a metre each along X, hung from a bone called Base
+        if asked; a move on Upper and Fore, turned 40 and 30 degrees, built."""
+        scene = bpy.context.scene
+        armature = bpy.data.armatures.new("Arm")
+        arm = self.arm = bpy.data.objects.new("Arm", armature)
+        scene.collection.objects.link(arm)
+        bpy.context.view_layer.objects.active = arm
+        arm.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        above = None
+        if root:
+            above = armature.edit_bones.new("Base")
+            above.head, above.tail = (-1.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        for number, name in enumerate(("Upper", "Fore", "Hand")):
+            bone = armature.edit_bones.new(name)
+            bone.head, bone.tail = (float(number), 0.0, 0.0), (number + 1.0, 0.0, 0.0)
+            bone.parent = above
+            above = bone
+        bpy.ops.object.mode_set(mode="POSE")
+        for pose_bone in arm.pose.bones:
+            pose_bone.rotation_mode = "XYZ"
+            chosen = pose_bone.name in self.TURNS
+            # Blender 5 keeps the selection on the pose bone, 4.5 on the bone.
+            if hasattr(pose_bone, "select"):
+                pose_bone.select = chosen
+            else:
+                pose_bone.bone.select = chosen
+        armature.bones.active = armature.bones["Upper"]
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for name, degrees in self.TURNS.items():
+            arm.pose.bones[name].rotation_euler.z = math.radians(degrees)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        return arm
+
+    def handle_hangs_from(self):
+        handle = self.arm.data.bones[self.arm.rigmoves.moves[0].handle_name]
+        return handle.parent.name if handle.parent is not None else None
+
+    def seen_on(self, frame):
+        """(the slider's share, Upper's turn, Fore's turn in degrees) on a frame,
+        read off the rig the way Blender evaluated it - once."""
+        bpy.context.scene.frame_set(frame)
+        arm = self.arm.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        move = self.arm.rigmoves.moves[0]
+        share = arm.pose.bones[move.handle_name].location.y / move.rail
+        turns = []
+        for name in ("Upper", "Fore"):
+            line = arm.pose.bones[name].tail - arm.pose.bones[name].head
+            turns.append(math.degrees(math.atan2(line.y, line.x)))
+        return share, turns[0], turns[1]
+
+    def animate(self):
+        self.arm.rigmoves.moves[0].play_frames = 48
+        bpy.context.scene.frame_set(1)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+
+    def check_it_plays_with_the_slider(self, message):
+        """Upper turns 40 degrees and Fore 70 in all (their own 30 on top of
+        Upper's), by how far along the slider is, on every frame."""
+        for frame in (1, 20, 42, 83):
+            share, upper, fore = self.seen_on(frame)
+            self.assertAlmostEqual(upper, 40.0 * share, delta=0.05,
+                                   msg="{:s}: Upper on frame {:d}".format(message, frame))
+            self.assertAlmostEqual(fore, 70.0 * share, delta=0.05,
+                                   msg="{:s}: Fore on frame {:d}".format(message, frame))
+
+    def test_the_part_plays_with_the_slider_and_not_a_step_behind(self):
+        self.build_the_arm()
+        self.animate()
+        # The slider is at 41/48 of its way on frame 42, and at the end on 83.
+        share, upper, _fore = self.seen_on(42)
+        self.assertAlmostEqual(share, 41.0 / 48.0, places=3)
+        self.assertAlmostEqual(upper, 34.2, delta=0.05)
+        share, upper, _fore = self.seen_on(83)
+        self.assertAlmostEqual(share, 1.0, places=3)
+        self.assertAlmostEqual(upper, 40.0, delta=0.05)
+        self.check_it_plays_with_the_slider("no root bone")
+
+    def test_the_handle_hangs_from_no_part_and_from_nothing_below_one(self):
+        arm = self.build_the_arm()
+        move = arm.rigmoves.moves[0]
+        parts = {part.name for part in move.parts}
+        self.assertEqual(parts, {"Upper", "Fore"})
+        # The bones above the handle, nearest first: none of them is a part,
+        # and none hangs from one. Here there is nothing to hang from at all.
+        above, bone = [], arm.data.bones[move.handle_name].parent
+        while bone is not None:
+            above.append(bone.name)
+            bone = bone.parent
+        self.assertEqual(set(above) & (parts | {"Hand"}), set())
+        self.assertIsNone(self.handle_hangs_from())
+        # The slider is still the control's: the property stays on Upper.
+        self.assertEqual(move.control, "Upper")
+        self.assertIn(move.prop, arm.pose.bones["Upper"].keys())
+
+    def test_a_handle_goes_on_the_nearest_bone_above_a_control_that_is_below_a_part(self):
+        arm = self.build_the_arm(root=True)
+        self.assertEqual(self.handle_hangs_from(), "Base")
+        # A control put by hand on a bone below the parts: the handle may not
+        # ride on it, nor on the parts between, but on the Base above them all.
+        arm.rigmoves.moves[0].control = "Hand"
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.handle_hangs_from(), "Base")
+        self.animate()
+        self.check_it_plays_with_the_slider("the control on Hand")
+
+    def test_a_rig_with_a_root_bone_keeps_its_handle_on_it(self):
+        self.build_the_arm(root=True)
+        self.assertEqual(self.arm.rigmoves.moves[0].control, "Base")
+        self.assertEqual(self.handle_hangs_from(), "Base")
+        self.animate()
+        self.check_it_plays_with_the_slider("a root bone")
+
+    def test_the_rig_made_for_objects_keeps_its_handle_on_the_root(self):
+        door = cube("Door", (0.0, 0.0, 1.0))
+        select(door)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        door.matrix_world = turn_about(Vector((0.5, 0.0, 1.0)), "Y", 60.0) @ door.matrix_world
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.arm = rig()
+        self.assertEqual(self.arm.rigmoves.moves[0].control, "Root")
+        self.assertEqual(self.handle_hangs_from(), "Root")
+
+    def test_a_handle_an_earlier_version_hung_from_a_part_is_let_go_at_the_next_build(self):
+        arm = self.build_the_arm()
+        name = arm.rigmoves.moves[0].handle_name
+        # How a file built before this came: the handle a child of Upper.
+        bpy.ops.object.mode_set(mode="EDIT")
+        arm.data.edit_bones[name].parent = arm.data.edit_bones["Upper"]
+        bpy.ops.object.mode_set(mode="POSE")
+        self.assertEqual(self.handle_hangs_from(), "Upper")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertIsNone(self.handle_hangs_from())
+        self.animate()
+        self.check_it_plays_with_the_slider("a handle let go of the part")
+
+
 class TestCurlOwnAxes(CopyThatCase):
     """A tentacle that curves as it goes: every segment faces a different way,
     so its own axes are not the world's, and each bends about its own."""

@@ -487,6 +487,15 @@ def carriers(data):
     return out
 
 
+def under_a_part(bone, parts):
+    """Whether a bone is one of these parts, or hangs from one."""
+    while bone is not None:
+        if bone.name in parts:
+            return True
+        bone = bone.parent
+    return False
+
+
 def sync_handles(rig, data):
     """Make, move or unmake every handle in one trip through edit mode."""
     wanted = {}
@@ -516,6 +525,7 @@ def sync_handles(rig, data):
         if bone is not None:
             edit.remove(bone)
     into_armature = rig.matrix_world.inverted_safe()
+    parts = {part_bone(part) for one in data.moves for part in one.parts}
     # Where each one goes is worked out before any of them is made, so two
     # controls over the same parts get pushed apart instead of stacked. Two
     # moves on one machine sit over the same middle, and a combined control
@@ -554,7 +564,15 @@ def sync_handles(rig, data):
         bone.roll = 0.0
         bone.use_deform = False
         bone.use_connect = False
+        # Never from a part, nor from anything below one: the handle writes the
+        # slider that plays the part, so a handle riding on a part is a loop,
+        # and the part plays a step behind the slider. A hand-built chain whose
+        # first bone is a part has its control there; the handle then hangs
+        # from the nearest bone above the control that is clear of the parts,
+        # or from none.
         holder = edit.get(move.control)
+        while holder is not None and under_a_part(holder, parts):
+            holder = holder.parent
         bone.parent = holder if (holder is not None and holder.name != bone.name) else None
         move.handle_name = bone.name
     bpy.ops.object.mode_set(mode="OBJECT")
