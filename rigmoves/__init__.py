@@ -2877,10 +2877,48 @@ def rig_stayed(rig, data):
     it; Apply and Set Origin on the rig change the object but not the bone, so
     neither is this. Not told for a seat kept the old way, or by a version that
     did not keep the object's matrix: there is nothing to tell it by.
+
+    Not enough by itself: scale or turn the whole model on the rig and apply it
+    (Ctrl+A > Scale or Rotation) and the object is back where it was as well, with
+    the scale or turn in the bones and the parts gone with it
+    (see model_went_with_the_seat).
     """
     was = as_matrix(data.seat_world)
     return (data.seat_on_root and not is_singular(was)
             and same_place(rig.matrix_world, was, rig.matrix_world.translation.length))
+
+
+def model_went_with_the_seat(data, now):
+    """Whether the bound parts went with the Root bone when the rig object stayed
+    where it was and the seat, where that bone stands (`now`), is not where it
+    was kept - a model scaled or turned on the rig and then applied, and not a
+    Root edited in Edit Mode.
+
+    S 2 or R Z 90 on the rig takes its parts with it, and Ctrl+A > Scale or
+    Rotation puts the numbers into the bones and the object back to the matrix it
+    was kept at, the parts where they went: rig_stayed took that for a Root edited
+    and carried nothing, so every Before and After stayed at the old size and
+    place and Build put the parts back there. An edited Root leaves the parts on
+    their Before. They are asked: more standing where the seat's change carries
+    their Before than still on it is a model that was moved, and that change is
+    what to carry by. A part standing in neither place was dragged, and does not
+    vote; with no bound part there is nobody to ask, and the Root was edited.
+    """
+    was = as_matrix(data.seat)
+    shift = now @ was.inverted_safe()
+    if same_place(shift, Matrix.Identity(4), max(now.translation.length, was.translation.length)):
+        return False
+    carried = stayed = 0
+    for move in data.moves:
+        for part in bound_parts(move):
+            obj, world = hand_moved(part)
+            if obj is None:
+                continue
+            if world is None:
+                stayed += 1
+            elif hand_moved(part, shift)[1] is None:
+                carried += 1
+    return carried > stayed
 
 
 def moved_since(rig, data):
@@ -2891,7 +2929,9 @@ def moved_since(rig, data):
         return None
     now = seat_of(rig) if data.seat_on_root else rig.matrix_world
     was = as_matrix(data.seat)
-    if is_singular(rig.matrix_world) or is_singular(was) or rig_stayed(rig, data):
+    if is_singular(rig.matrix_world) or is_singular(was):
+        return None
+    if rig_stayed(rig, data) and not model_went_with_the_seat(data, now):
         return None
     return now @ was.inverted_safe()
 
@@ -2995,7 +3035,8 @@ def catch_up(rig, data=None, reframe=True):
     Build then put every part back where the model used to be. Where the rig
     stands is told by its Root bone (seat_of), so that Apply and Set Origin on
     the rig, which move nothing, are not taken for a move; nor is that bone
-    edited with the rig object where it was (rig_stayed).
+    edited with the rig object where it was and the parts on their Before
+    (rig_stayed, model_went_with_the_seat).
     """
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
@@ -3022,13 +3063,16 @@ def catch_up(rig, data=None, reframe=True):
         # stands, and what it remembers is taken to be true of that. So is a seat
         # that was kept as nothing, by 0.19.0: there is nowhere to carry from.
         store_seat(rig, data)
-    elif rig_stayed(rig, data):
-        # The rig object is where it was, so the model has not moved, whatever the
-        # Root bone says: it was edited. Nothing is carried; the seat is kept where
-        # the bone stands now, for a move of the model after this to be measured
-        # from there.
+    elif rig_stayed(rig, data) and not model_went_with_the_seat(data, now):
+        # The rig object is where it was and the parts stand on their Before, so the
+        # model has not moved, whatever the Root bone says: it was edited. Nothing is
+        # carried; the seat is kept where the bone stands now, for a move of the
+        # model after this to be measured from there.
         store_seat(rig, data)
     else:
+        # (A model scaled or turned on the rig and applied comes here as well: the
+        # object is back where it was, and the parts are where the scale or turn took
+        # them.)
         # A seat kept by 0.19.0 is the rig object's matrix: measured against
         # that this once, then kept on the Root bone.
         where, was = now if data.seat_on_root else rig.matrix_world, as_matrix(data.seat)

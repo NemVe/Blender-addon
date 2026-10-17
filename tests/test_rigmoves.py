@@ -12100,6 +12100,92 @@ class TestGeometryAddedToABuiltPart(ChestCase):
         self.assertEqual(rigmoves.bind_new_geometry(rig().rigmoves), ["Lid"])
 
 
+class TestTheModelScaledOrTurnedThenApplied(ChestCase):
+    """The built chest is made twice the size with S 2 on the rig, or turned a
+    quarter with R Z 90 - its lid goes with it - and then Ctrl+A > Scale or
+    Rotation is pressed on the rig, with no button between. Blender puts the
+    scale or the turn into the bones and the object back to the matrix the rig
+    kept for it, and 0.19.2 took that for an edited Root bone: nothing was
+    carried, every Before and After stayed at the old size and place, and Build
+    put the lid back there, 1.57 m off for the scale and 2.21 m for the turn.
+    (0.19.1 got it right.)"""
+
+    HOWS = ("scale", "turn")
+
+    def change_and_apply(self, how):
+        """S 2 or R Z 90 on the rig alone, about its origin, and then Ctrl+A on it:
+        what that did to the world, as a matrix."""
+        stood = rig().matrix_world.copy()
+        origin = stood.translation.copy()
+        select(rig())
+        if how == "scale":
+            self.assertEqual(bpy.ops.transform.resize(value=(2.0, 2.0, 2.0)), {"FINISHED"})
+            change = Matrix.Translation(origin) @ Matrix.Scale(2.0, 4) @ Matrix.Translation(-origin)
+            kinds = dict(location=False, rotation=False, scale=True)
+        else:
+            # R Z 90, about the rig's origin, without asking which way the operator turns.
+            rig().rotation_euler.z += math.radians(90.0)
+            change = turn_about(origin, "Z", 90.0)
+            kinds = dict(location=False, rotation=True, scale=False)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.object.transform_apply(**kinds), {"FINISHED"})
+        bpy.context.view_layer.update()
+        # The case itself: the rig object is where the rig kept it.
+        self.assertTrue(rigmoves.same_matrix(rig().matrix_world, stood, 1e-5), how)
+        # And Blender's own part of it, before any button of ours: the lid went with
+        # the model. If a Blender does not keep it there, there is nothing of ours to
+        # test (none of 4.5, 5.0 and 5.2 does that).
+        if drift(self.lid, self.lid_at(0.0, change)) > TOLERANCE:
+            self.skipTest("Blender {:s} moves the lid itself when the rotation of a rig is "
+                          "applied".format(bpy.app.version_string))
+        return change
+
+    def test_the_lid_goes_with_the_model_and_nothing_has_been_pressed_yet(self):
+        for how in self.HOWS:
+            with self.subTest(how):
+                self.setUp()
+                change = self.change_and_apply(how)
+                self.assertLess(drift(self.lid, self.lid_at(0.0, change)), TOLERANCE)
+                # What the next button will carry everything by.
+                shift = rigmoves.moved_since(rig(), rig().rigmoves)
+                self.assertIsNotNone(shift)
+                self.assertTrue(rigmoves.same_matrix(shift, change, 1e-4))
+
+    def test_the_next_build_leaves_the_lid_where_it_is_and_opens_it_about_the_hinge(self):
+        for how in self.HOWS:
+            with self.subTest(how):
+                self.setUp()
+                change = self.change_and_apply(how)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertNotIn("put back", rig().rigmoves.report)
+                self.check_lid(change)
+
+    def test_the_eye_shows_the_lid_open_at_the_new_size_and_place(self):
+        for how in self.HOWS:
+            with self.subTest(how):
+                self.setUp()
+                change = self.change_and_apply(how)
+                select(self.lid)
+                self.assertEqual(bpy.ops.rigmoves.show(index=0, which="AFTER"), {"FINISHED"})
+                self.assertLess(drift(self.lid, self.lid_at(1.0, change)), TOLERANCE)
+
+    def test_an_edit_of_the_root_after_it_is_still_no_move(self):
+        change = self.change_and_apply("scale")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(rig())
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bone = rig().data.edit_bones["Root"]
+            bone.tail = bone.head + (bone.tail - bone.head) * 2.0
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+        self.assertIsNone(rigmoves.moved_since(rig(), rig().rigmoves))
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotIn("put back", rig().rigmoves.report)
+        self.check_lid(change)
+
+
 if __name__ == "__main__":
     # Inside a Blender binary sys.argv is Blender's own command line; only what
     # follows "--" is meant for the tests.
