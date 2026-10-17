@@ -1,4 +1,4 @@
-# CopyThat - v0.19.3
+# CopyThat - v0.20.0
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -20,7 +20,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 CopyThat is a Blender extension, and it needs Blender 4.5 or newer: Blender
 will not install it on an older one. First, if an older RigMoves or CopyThat
 is listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
-the two cannot be on at once. Then drag `CopyThat-0.19.3.zip` into Blender,
+the two cannot be on at once. Then drag `CopyThat-0.20.0.zip` into Blender,
 or use Edit > Preferences > **Get Extensions** > the drop-down at the top
 right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
 **CopyThat**. Files made with older versions keep working.
