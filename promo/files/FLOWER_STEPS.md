@@ -75,7 +75,7 @@ field instead.
 
 ## 2. Follows: the leaves hang from each other
 
-- **Do:** In the panel, open the **Follows** sub-panel (below the Move box). It
+- **Do:** In the panel, open the **CHAINS** section of the Move box. It
   has a dropdown beside each part. Click the dropdown and pick (cheat sheet,
   "Follows"): **Leaf A2** follows **Leaf A1**, **Leaf A3** follows **Leaf A2**,
   **Leaf B2** follows **Leaf B1**, **Leaf B3** follows **Leaf B2**. Leave the
@@ -126,7 +126,7 @@ Ring you did, even one from an earlier take, until you restart Blender. Check
 every row against the table.
 
 - **Outer petals. Do:** In the Outliner click **Outer Leader**. In the Move 1
-  box press **Ring…** (in the row under **Curve the Path**). A dialog opens.
+  box open **COPIES** and press **Ring…**. A dialog opens.
   Set:
 
   | Field | Set to |
@@ -180,7 +180,7 @@ every row against the table.
 
 ## 6. Timing: the Delays
 
-- **Do:** Click the header **Timing** to open it. It lists the nine parts that
+- **Do:** Click the title **TIMING** to open it. It lists the nine parts that
   are not riders. Double-click each **Delay** field, type the number, press
   Enter (cheat sheet, "Delay"). Outer Leader stays 0.
 - **You see:** nothing moves. A Delay is "waits this long before starting": the

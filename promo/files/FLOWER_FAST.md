@@ -48,9 +48,9 @@ flower, exactly as the long way does.
 
    | Button | Where |
    |---|---|
-   | **Ring…** | in the Move 1 box, in the row under **Curve the Path** (greyed out until a part of the move is the active object) |
-   | **Spread…** | on the **Timing** header (spreads Delays) and on the **Riding along** header (spreads Leads) |
-   | **Make Chain** and **Curl** | at the top of the **Follows** section (click its header if it is closed). You use Make Chain; Curl is not needed here |
+   | **Ring…** | in the Move 1 box, in the **COPIES** section (click its title to open it); greyed out until a part of the move is the active object |
+   | **Spread…** | on the **TIMING** header (spreads Delays) and beside **Riding along** in **COPIES** (spreads Leads) |
+   | **Make Chain** and **Curl** | at the top of the **CHAINS** section (click its title to open it). You use Make Chain; Curl is not needed here |
 
 ### How to pose a part
 
@@ -77,7 +77,7 @@ use the field.)
 
 - **Do:** in the Outliner click **Leaf 3**, Ctrl+click **Leaf 2**, then
   Ctrl+click **Leaf 1** last, so Leaf 1 is the active one (the brightest
-  highlight). In the **Follows** section press **Make Chain**.
+  highlight). Open the **CHAINS** section and press **Make Chain**.
 - **You see:** the report "Chain: Leaf 1 > Leaf 2 > Leaf 3". In the Outliner
   Leaf 2 now sits inside Leaf 1 and Leaf 3 inside Leaf 2, and each one's
   dropdown under Follows names the part before it.
@@ -191,7 +191,7 @@ restart Blender. Check every row against the table.
 ## 8. Delays: Spread on the leaf, then two numbers
 
 - **Do:** select the three leaf parts: click **Leaf 3**, Ctrl+click **Leaf 2**,
-  Ctrl+click **Leaf 1**. Open the **Timing** section (click its header) and
+  Ctrl+click **Leaf 1**. Open the **TIMING** section (click its title) and
   press **Spread…** on its header. A dialog opens. Set:
 
   | Field | Set to |
@@ -268,7 +268,7 @@ dialog remembers the last Ring, so check every row.
 
 ### Spread
 
-On the **Timing** header, with these parts selected first.
+On the **TIMING** header, with these parts selected first.
 
 | Order | Only the selected | By | Start Delay | Delay step | Select first |
 |-------|-------------------|----|-------------|------------|--------------|
@@ -305,7 +305,7 @@ frame 1, Frames, Animate, camera view, Play.
 | The ring is lopsided, or is round the wrong point | **Round** was left on 3D Cursor with the cursor off the origin. Ctrl+Z, press Ring… again and choose **World Origin**. |
 | The second leaf opens ahead of the first | **Lead step** was left on 14 in the leaf's dialog. Ctrl+Z, press Ring… again and set **Lead step** to 0. |
 | Spread says none of the parts is selected | Select the three leaf parts first, or untick Only the selected (then it also writes Outer Leader, Inner Leader and Core: retype those). |
-| A Delay or Lead did not change | The Timing section was not open when you looked, or Spread was pressed on the Riding along header instead (that one spreads Leads). |
+| A Delay or Lead did not change | The TIMING section was not open when you looked, or Spread was pressed beside Riding along instead (that one spreads Leads). |
 | Report after Build says "not recorded yet" | You skipped step 4. Press Record on After, then Build again. |
 | A red "Build to put it into effect" under Follows | Press **Build Sliders**. |
 | A red box "Auto Keying is on" | Switch off the record dot in the timeline, press **Lift Those Keyframes**, Build again. |

@@ -220,10 +220,22 @@ def auto_keying_off():
     select(bpy.data.objects["Outer Leader"])
 
 
-def two_moves_combined():
+def second_move_combined():
+    """Two cubes as a second move, built, and one control for both moves."""
+    for name, x in (("Stem A", 3.0), ("Stem B", 3.6)):
+        bpy.ops.mesh.primitive_cube_add(size=0.3, location=(x, 2.0, 0.0))
+        bpy.context.object.name = name
     with override():
-        select(*objects("Core"), active=bpy.data.objects["Core"])
-    log("two moves skipped: the flower is one move")
+        select(*objects("Stem A", "Stem B"), active=bpy.data.objects["Stem A"])
+        run("new move 2", bpy.ops.rigmoves.new_move())
+        for name in ("Stem A", "Stem B"):
+            bpy.data.objects[name].location.z += 0.8
+        bpy.context.view_layer.update()
+        run("record after 2", bpy.ops.rigmoves.record(index=1, which="AFTER"))
+        run("build", bpy.ops.rigmoves.build())
+        run("combine", bpy.ops.rigmoves.combine())
+        run("build", bpy.ops.rigmoves.build())
+    flags(expanded=False)
 
 
 def open_sections():
@@ -278,10 +290,12 @@ STEPS = [
     (close_sections, 0.3), (inner_ring, 1.5), (leaf_ring, 1.5),
     (timing_and_copies, 1.0), *shots("04_after_ring"),
     # 5. a warning report
-    (refused, 1.0), *shots("05_warning_report"),
+    (close_sections, 0.3), (refused, 1.0), *shots("05_warning_report"),
     # the loud boxes
     (auto_keying_and_newcomer, 1.0), *shots("06_auto_keying_and_newcomer"),
     (auto_keying_off, 0.5),
+    # two moves, and one control that plays both
+    (second_move_combined, 1.5), *shots("07_two_moves_combined"),
     (quit_blender, None),
 ]
 STATE = {"next": 0}
