@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CopyThat promo v2.1</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">
+{ "imports": {
+    "three": "/node_modules/three/build/three.module.js",
+    "three/addons/": "/node_modules/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="stage">
+  <div id="beats"></div>
+  <div id="grain"></div>
+  <svg id="wipe" viewBox="0 0 2560 1440" width="2560" height="1440">
+    <polygon id="wW" fill="#F6F1E6"></polygon>
+    <polygon id="wG" fill="#C9A76A"></polygon>
+  </svg>
+  <div id="rips"><i></i><i></i><i></i><i></i></div>
+  <svg id="cur" width="46" height="62" viewBox="0 0 23 31">
+    <path d="M1.5 1.5 V24.5 L7.6 18.9 L11.8 28.6 L16 26.8 L11.8 17.4 L20.2 17.4 Z" fill="#fff" stroke="#0b0b0d" stroke-width="1.5" stroke-linejoin="round"/>
+  </svg>
+</div>
+<script type="module" src="/src/main.mjs"></script>
+</body>
+</html>

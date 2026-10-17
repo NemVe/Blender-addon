@@ -1,0 +1,11 @@
+{
+  "name": "copythat-promo-v2",
+  "private": true,
+  "version": "2.0.0",
+  "description": "CopyThat promo v2: Three.js scenes posed by window.setTime(t), rendered with Playwright",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "three": "0.170.0",
+    "playwright": "1.55.0"
+  }
+}

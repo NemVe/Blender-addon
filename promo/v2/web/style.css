@@ -1,0 +1,115 @@
+/* CopyThat promo v2.1. The stage is 2560x1440 CSS px; the page scales it (transform) for previews, so every size here is a
+   pixel of the final film. Colours: the flower's dark studio and gold; the panel copies Blender's dark theme. */
+@font-face { font-family: Inter; src: url(/fonts/Inter.woff2) format('woff2'); font-weight: 100 900; font-style: normal; font-display: block; }
+:root { --gold: #C9A76A; --gold2: #E8CE96; --ink: #F2EADB; --mute: #9A968E; --bg: #0A0A0C; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+#stage { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; transform-origin: 0 0; overflow: hidden; background: var(--bg);
+  font-family: Inter, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; font-kerning: normal; }
+#beats, #grain, #wipe, #rips { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; }
+#grain { z-index: 900; pointer-events: none; opacity: .07; mix-blend-mode: overlay; background-size: 256px 256px; }
+#wipe { z-index: 950; pointer-events: none; filter: drop-shadow(0 0 30px rgba(0, 0, 0, .55)); display: none; }
+#rips { z-index: 970; pointer-events: none; }
+#rips i { position: absolute; left: 0; top: 0; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; border: 3px solid rgba(232, 206, 150, .9);
+  box-shadow: 0 0 22px rgba(201, 167, 106, .55); opacity: 0; }
+#cur { position: absolute; left: 0; top: 0; z-index: 990; pointer-events: none; opacity: 0; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .6)); transform-origin: 3px 3px; }
+
+/* ---- one beat: the same template for every feature ---- */
+.beat { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; overflow: hidden; display: none;
+  background: radial-gradient(1500px 1100px at 0% 0%, rgba(201, 167, 106, .14), rgba(201, 167, 106, 0) 70%),
+              radial-gradient(1700px 1000px at 100% 100%, rgba(201, 167, 106, .05), rgba(201, 167, 106, 0) 70%), var(--bg); }
+.col { position: absolute; left: 154px; top: 0; width: 830px; height: 1440px; }
+.kick { position: absolute; left: 0; top: 272px; font: 600 22px/1 Inter; letter-spacing: .18em; text-transform: uppercase; color: var(--gold); white-space: nowrap; }
+.kick i { font-style: normal; font-weight: 700; margin-right: .5em; }
+.hl { position: absolute; left: 0; top: 318px; font: 800 80px/1.07 Inter; letter-spacing: -.026em; color: #fff; }
+.hl .ln { white-space: nowrap; }
+.hl em, .big em { font-style: normal; color: var(--gold); }
+.sub { position: absolute; left: 0; top: 548px; font: 400 26px/1.3 Inter; color: var(--mute); white-space: nowrap; }
+.mini { position: absolute; left: 0; top: 636px; width: 830px; }
+.card { position: absolute; left: 1075px; top: 150px; width: 1331px; height: 1140px; border-radius: 18px; overflow: hidden; background: #0d0d10;
+  box-shadow: 0 50px 140px rgba(0, 0, 0, .7), 0 0 0 1px rgba(255, 255, 255, .08); }
+.card .cv { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.cv canvas { position: absolute; left: 0; top: 0; }
+.vig { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 46%, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, .55) 100%); }
+.tag { position: absolute; left: 28px; top: 26px; padding: 10px 17px 9px; border-radius: 8px; background: rgba(10, 10, 12, .66);
+  border: 1px solid rgba(255, 255, 255, .12); font: 600 22px/1 Inter; letter-spacing: .16em; color: var(--ink); text-transform: uppercase; white-space: nowrap; }
+.tag.g { color: var(--gold); border-color: rgba(201, 167, 106, .5); }
+.tag.r { left: auto; right: 28px; }
+.tag.b { top: auto; bottom: 26px; }
+
+/* hooks and the logo: big type over full-bleed pictures */
+.full { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; }
+.full canvas { position: absolute; left: 0; top: 0; }
+.shade { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; pointer-events: none;
+  background: linear-gradient(90deg, rgba(10, 10, 12, .88) 0%, rgba(10, 10, 12, .55) 34%, rgba(10, 10, 12, 0) 62%), radial-gradient(ellipse at 60% 50%, rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, .55) 100%); }
+.big { position: absolute; left: 154px; top: 500px; font: 800 118px/1.05 Inter; letter-spacing: -.03em; color: #fff; }
+.big .ln { white-space: nowrap; }
+.stack .ln { font-size: 128px; line-height: 1.12; }
+.foot { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; object-fit: cover; }
+
+/* ---- the panel, copied from Blender's dark theme ---- */
+.ui { font: 400 25px/1 Inter; color: #e6e6e6; background: #29292b; border-radius: 16px; padding: 16px 18px 16px; position: relative;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .09); }
+.mh { display: flex; align-items: center; gap: 12px; height: 40px; margin: -2px 0 8px; font-weight: 600; font-size: 25px; color: #f2f2f2; }
+.mh img { width: 34px; height: 34px; }
+.mh span { margin-left: auto; font-weight: 400; font-size: 22px; color: #8d8d8d; }
+.row { display: flex; gap: 5px; height: 50px; margin-top: 6px; align-items: stretch; position: relative; }
+.row > * { flex: 1; min-width: 0; }
+.row > .w2 { flex: 2; } .row > .w3 { flex: 3; } .row > .sm { flex: 0 0 56px; }
+.btn { display: flex; align-items: center; justify-content: center; gap: 12px; background: #585858; border-radius: 9px; color: #ececec; white-space: nowrap; position: relative; }
+.btn img { width: 30px; height: 30px; }
+.btn.on { background: #4772b3; color: #fff; }
+.btn.hot { background: #7ba3e3; color: #fff; }
+.btn.dim { opacity: .42; }
+.btn.flat { background: transparent; }
+.fld { position: relative; display: flex; align-items: center; justify-content: space-between; background: #585858; border-radius: 9px; padding: 0 18px; overflow: hidden; white-space: nowrap; }
+.fld .fill { position: absolute; left: 0; top: 0; bottom: 0; background: #4772b3; width: 0; }
+.fld > span { position: relative; }
+.fld.c { justify-content: center; }
+.fld.txt { background: #1c1c1c; justify-content: flex-start; }
+.fld .v { font-variant-numeric: tabular-nums; }
+.sec { display: flex; align-items: center; gap: 12px; height: 48px; font-weight: 500; font-size: 24px; letter-spacing: .03em; text-transform: uppercase; margin-top: 4px; }
+.sec img { width: 30px; height: 30px; }
+.sec .btn { margin-left: auto; height: 42px; padding: 0 20px; font-size: 23px; text-transform: none; letter-spacing: 0; flex: 0 0 auto; }
+.tri { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 11px solid #c9c9c9; margin: 0 6px 0 3px; flex: 0 0 auto; }
+.tri.shut { border-top: 8px solid transparent; border-bottom: 8px solid transparent; border-left: 11px solid #c9c9c9; border-right: 0; margin: 0 8px 0 5px; }
+.note { color: #8b8b8b; font-size: 22px; height: 36px; display: flex; align-items: center; }
+.lbl { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.lbl img { width: 30px; height: 30px; }
+.lbl.mute { color: #8f8f8f; }
+.cb { width: 26px; height: 26px; border-radius: 5px; border: 2px solid #cfcfcf; box-sizing: border-box; flex: 0 0 auto; position: relative; }
+.cb.on { background: #cfcfcf; }
+.cb.on::after { content: ''; position: absolute; left: 6px; top: 1px; width: 6px; height: 12px; border: solid #2a2a2a; border-width: 0 3px 3px 0; transform: rotate(40deg); }
+.ck { width: 18px; height: 26px; position: relative; display: inline-block; }
+.ck::after { content: ''; position: absolute; left: 3px; top: 3px; width: 7px; height: 14px; border: solid #e8e8e8; border-width: 0 3px 3px 0; transform: rotate(40deg); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #e8e8e8; display: inline-block; margin: 0 4px; }
+.eye { flex: 0 0 56px; background: #585858; border-radius: 9px; display: flex; align-items: center; justify-content: center; }
+.eye::before { content: ''; width: 26px; height: 14px; border-radius: 50%; border: 3px solid #e8e8e8; box-sizing: border-box; position: absolute; }
+.eye::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #e8e8e8; position: absolute; }
+.key { width: 22px; height: 22px; background: #e8e8e8; transform: rotate(45deg) scale(.8); border-radius: 3px; display: inline-block; }
+.x { flex: 0 0 40px; display: flex; align-items: center; justify-content: center; color: #b9b9b9; font-size: 30px; }
+.chev { margin-left: auto; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid #c9c9c9; }
+.box { background: #323234; border-radius: 12px; padding: 10px 12px 12px; margin-top: 10px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .06); }
+.dlg { font: 400 25px/1 Inter; background: #303030; border-radius: 16px; padding: 18px 22px 22px; color: #e6e6e6; position: relative;
+  box-shadow: 0 34px 100px rgba(0, 0, 0, .7), 0 0 0 1px rgba(255, 255, 255, .14); }
+.dlg h4 { margin: 0 0 8px; font: 600 28px/1.2 Inter; color: #f4f4f4; }
+.dlg .pr { display: flex; align-items: center; height: 48px; margin-top: 6px; }
+.dlg .pr > .l { flex: 0 0 38%; text-align: right; padding-right: 22px; color: #bdbdbd; white-space: nowrap; }
+.dlg .pr > .f { flex: 1; display: flex; gap: 4px; height: 100%; }
+.dlg .pr > .f > * { flex: 1; }
+.dlg .ok { margin-top: 14px; height: 54px; }
+.iconrow { display: flex; gap: 16px; }
+
+/* timeline strip under a card (Animate) */
+.tl { position: absolute; left: 0; right: 0; bottom: 0; height: 250px; background: #232325; border-top: 2px solid #3a3a3d; font: 500 20px/1 Inter; color: #aaa; }
+.tl .ruler { position: absolute; left: 0; right: 0; top: 0; height: 44px; background: #2d2d30; }
+.tl .tk { position: absolute; top: 24px; width: 2px; height: 20px; background: #6b6b6f; }
+.tl .tk b { position: absolute; top: -22px; left: -20px; width: 40px; text-align: center; font-weight: 500; }
+.tl .lane { position: absolute; left: 0; right: 0; top: 74px; height: 56px; background: #29292c; border-top: 1px solid #353538; border-bottom: 1px solid #353538; }
+.tl .dm { position: absolute; top: 14px; width: 28px; height: 28px; margin-left: -14px; background: var(--gold2); transform: rotate(45deg) scale(.72); border-radius: 4px; box-shadow: 0 0 18px rgba(232, 206, 150, .6); }
+.tl .ph { position: absolute; top: 0; bottom: 0; width: 3px; background: #4a87ff; margin-left: -1px; }
+.tl .ph b { position: absolute; top: 4px; left: -26px; width: 56px; padding: 6px 0; text-align: center; background: #4a87ff; color: #fff; border-radius: 6px; font-weight: 600; }
+
+.tag.bd { transform: translateX(-50%); }
+/* the panel and its dialogs, a little larger than Blender draws them, so they read at film size */
+.mini .ui, .mini .dlg { zoom: 1.25; }
