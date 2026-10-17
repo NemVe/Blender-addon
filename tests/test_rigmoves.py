@@ -240,6 +240,21 @@ def drawn_panel(context=None):
     return log
 
 
+class Narrow:
+    """The real context as a sidebar this many pixels wide sees it, at a UI
+    scale of 1 and the usual 11 point text: headless Blender has no region,
+    and gives its UI scale as 0."""
+
+    def __init__(self, width=220):
+        self.region = types.SimpleNamespace(width=width)
+        self.preferences = types.SimpleNamespace(
+            system=types.SimpleNamespace(ui_scale=1.0),
+            ui_styles=[types.SimpleNamespace(widget=types.SimpleNamespace(points=11.0))])
+
+    def __getattr__(self, name):
+        return getattr(bpy.context, name)
+
+
 def drawn_buttons():
     """Every button the panel draws now, as (path, operator id, text)."""
     return [row for row in drawn_panel() if "." in row[1]]
@@ -2382,34 +2397,85 @@ class TestSpread(CopyThatCase):
 
     # -- the panel ----------------------------------------------------------
 
-    def test_spread_buttons_sit_with_riding_along_and_in_the_timing_header(self):
+    def test_spread_buttons_sit_in_timing_and_beside_ring(self):
         self.ring_of_riders(count=4)
         move = rig().rigmoves.moves[0]
         spread = lambda: [text for _where, idname, text in drawn_buttons()  # noqa: E731
                           if idname == "rigmoves.spread"]
-        # Delays: in the header of TIMING, which is on show whether it is open or not.
+        # In the sections they spread for, not in a header: beside the title,
+        # at the sidebar's usual width, Spread read "Spr…".
         move.show_timing, move.show_riders = False, False
+        self.assertEqual(spread(), [])
+        # Delays: first in TIMING, the whole width to itself.
+        move.show_timing = True
         self.assertEqual(spread(), ["Spread…"])
-        # Leads: with the riders, in COPIES, once it is open.
+        # Leads: beside Ring in COPIES, once there are riders.
         move.show_riders = True
         self.assertEqual(spread(), ["Spread…", "Spread…"])
         headers = [text for _where, kind, text in drawn_panel()
                    if kind in ("prop:show_timing", "prop:show_riders") and text]
         self.assertEqual(headers, ["TIMING", "COPIES"])
 
-    def test_the_spread_buttons_take_only_their_own_width(self):
-        # Set straight in a row, the button and the label share it half and
-        # half, and "Riding along (7)" was cut to "Riding alon…". In a row of
-        # its own, aligned right, the button takes what it needs and the label
-        # keeps the rest.
+    def test_riding_along_has_a_row_of_its_own(self):
+        # Beside Spread, "Riding along (7)" was cut to "Riding alon…".
         self.ring_of_riders(count=4)
         rig().rigmoves.moves[0].show_riders = True
         log = drawn_panel()
         spread = [where for where, kind, _text in log if kind == "rigmoves.spread"]
-        aligned = {where for where, kind, text in log
-                   if kind == "alignment" and text == "RIGHT"}
-        self.assertEqual(len(spread), 2)
-        self.assertTrue(set(spread) <= aligned, (spread, aligned))
+        ring = [where for where, kind, _text in log if kind == "rigmoves.ring"]
+        title = [where for where, kind, text in log
+                 if kind.startswith("label") and text.startswith("Riding along")]
+        self.assertEqual(len(spread), 1)
+        self.assertEqual(len(title), 1)
+        # Spread beside Ring, in the row Ring's own row is in.
+        self.assertEqual(spread[0], ring[0][:-1], (spread, ring))
+        self.assertNotEqual(title[0], spread[0])
+
+
+class TestRingNestedLayers(CopyThatCase):
+    """A bud of two layers, as the flower is: inner petals three quarters the
+    size of the outer ones, standing inside them, round the world's Z."""
+
+    def petal(self, name, radius, size):
+        obj = cube(name, (0.0, -radius, 1.2 + size[2] / 2.0))
+        obj.scale = size
+        bpy.context.view_layer.update()
+        return obj
+
+    def setUp(self):
+        super().setUp()
+        self.outer = self.petal("Outer", 0.21, (0.25, 0.3, 1.1))
+        self.inner = self.petal("Inner", 0.12, (0.18, 0.17, 0.88))
+
+        def pose():
+            self.outer.rotation_euler.x = math.radians(-60.0)
+            self.inner.rotation_euler.x = math.radians(-40.0)
+
+        record_move([self.outer, self.inner], pose)
+
+    def ring(self, part, count):
+        select(part)
+        return bpy.ops.rigmoves.ring(index=0, use="FILL", count=count, center="ORIGIN",
+                                     axis="Z", linked=True)
+
+    def made(self, prefix):
+        return sorted(o.name for o in bpy.data.objects if o.name.startswith(prefix + " "))
+
+    def test_the_outer_ring_is_whole_when_the_inner_was_made_first(self):
+        """In the shut bud the inner copies stand within a quarter of the
+        outer petal's reach of its places. 0.20.1 took them for something
+        standing there, and the outer ring got 2 of its 7 copies."""
+        self.assertEqual(self.ring(self.inner, 6), {"FINISHED"})
+        self.assertEqual(len(self.made("Inner")), 5)
+        self.assertEqual(self.ring(self.outer, 8), {"FINISHED"})
+        self.assertEqual(len(self.made("Outer")), 7, rig().rigmoves.report)
+        self.assertNotIn("standing there", rig().rigmoves.report)
+
+    def test_the_outer_ring_first_is_whole_as_before(self):
+        self.assertEqual(self.ring(self.outer, 8), {"FINISHED"})
+        self.assertEqual(self.ring(self.inner, 6), {"FINISHED"})
+        self.assertEqual(len(self.made("Outer")), 7)
+        self.assertEqual(len(self.made("Inner")), 5)
 
 
 class TestMakeChain(CopyThatCase):
@@ -8812,7 +8878,7 @@ class TestRingReports(RingFlows):
     def drawn_report(text, open_box=True):
         log = []
         data = types.SimpleNamespace(report=text, show_report=open_box)
-        rigmoves.RIGMOVES_PT_panel._draw_report(None, Sketch(log), data)
+        rigmoves.RIGMOVES_PT_panel._draw_report(None, Sketch(log), bpy.context, data)
         return [line for _where, kind, line in log if kind.startswith("label")]
 
     @staticmethod
@@ -10246,6 +10312,62 @@ class TestPanelStates(CopyThatCase):
             rigmoves.bl_info = kept
         self.assertEqual(said[-1], footer)
 
+    # -- at the sidebar's usual width ---------------------------------------
+
+    def test_at_the_sidebars_usual_width_nothing_is_cut(self):
+        """At the width Blender gives the sidebar, 0.20.1 cut "Before" to "Be",
+        "After" to "Af", the hints out of their middle and the report's lines
+        off at the end. The poses read as a checklist there, and every line of
+        a hint or of the report is broken to fit."""
+        move = self.two_parts()
+        for flag in self.SECTIONS:
+            setattr(move, flag, True)
+        rig().rigmoves.report = ("21 part(s) on 1 slider(s). 6 object(s) were given a bone "
+                                 "and bound. 15 object(s) now ride along.")
+        narrow = Narrow(220)
+        log = drawn_panel(narrow)
+        labels = [(kind, text) for _where, kind, text in log if kind.startswith("label")]
+        self.assertIn(("label:CHECKMARK", "Before"), labels)
+        self.assertIn(("label:CHECKMARK", "After"), labels)
+        room = rigmoves.row_room(narrow, rigmoves.INSET)
+        texts = [text for _kind, text in labels if text]
+        hints = ("how long each one waits before it starts", "moves with the part it follows")
+        for hint in hints:
+            self.assertNotIn(hint, texts)
+            pieces = [text for text in texts if text in hint]
+            self.assertEqual(" ".join(pieces), hint)
+        report_at = next(n for n, (_where, kind, _text) in enumerate(log)
+                         if kind == "prop:show_report")
+        report = [text for _where, kind, text in log[report_at + 1:]
+                  if kind.startswith("label") and text][:-1]
+        self.assertGreater(len(report), 1)
+        self.assertEqual(" ".join(report), rig().rigmoves.report)
+        shown = report + [text for text in texts if any(text in hint for hint in hints)]
+        too_wide = [text for text in shown
+                    if rigmoves.text_width(narrow, text) + rigmoves.PAD_PX > room]
+        self.assertEqual(too_wide, [])
+        # The same panel in a script, with no width to go by, is as before.
+        labels = [(kind, text) for _where, kind, text in drawn_panel()
+                  if kind.startswith("label")]
+        self.assertIn(("label:NONE", "how long each one waits before it starts"), labels)
+
+    def test_nothing_active_keeps_the_rig(self):
+        """Deleting the part that was active leaves nothing active. The panel
+        stays on the rig being worked on; 0.20.1 asked for it to be picked
+        again, from a list of one."""
+        self.two_parts()
+        bpy.context.view_layer.objects.active = None
+        self.assertIs(rigmoves.rig_of(bpy.context), rig())
+        log = drawn_panel()
+        self.assertNotIn("Pick the rig to work on:", self.said(log))
+        self.assertIn("Build Sliders", self.pressed(log))
+
+    def test_picking_a_rig_of_objects_stays_in_object_mode(self):
+        # Its parts are clicked, which pose mode stops.
+        self.two_parts()
+        self.assertEqual(bpy.ops.rigmoves.pick_rig(name=rig().name), {"FINISHED"})
+        self.assertEqual(rig().mode, "OBJECT")
+
     # -- no rig yet ---------------------------------------------------------
 
     def test_nothing_selected_says_what_to_select(self):
@@ -10289,8 +10411,8 @@ class TestPanelStates(CopyThatCase):
         log = drawn_panel()
         said = self.branded(log)
         self.assertEqual(said[1:3], [rig().name, "2 parts"])
-        # Spread is the one button in a header, so it is there with TIMING shut.
-        self.assertEqual(self.pressed(log), ["Record", "Record", "Spread…", "Build Sliders",
+        # With every section shut, the poses and the actions under them.
+        self.assertEqual(self.pressed(log), ["Record", "Record", "Build Sliders",
                                               "Pause", "To Before", "New Move"])
         # No slider yet, and no Frames: there is nothing built to play.
         self.assertNotIn("prop:play", [kind for _where, kind, _text in log])

@@ -42,7 +42,7 @@ from mathutils.geometry import interpolate_bezier
 bl_info = {
     "name": "CopyThat - Record a Move, Get a Slider",
     "author": "NemVe3D",
-    "version": (0, 20, 1),
+    "version": (0, 20, 2),
     "blender": (4, 5, 0),
     "location": "View3D > Sidebar > CopyThat",
     "description": "Record a path between two poses of any bones, with per-part "
@@ -1839,7 +1839,12 @@ def rig_of(context):
     """The armature being worked on, whether it or one of its meshes is active."""
     obj = context.object
     if obj is None:
-        return None
+        # Nothing active - the part that was has just been deleted with X, or
+        # a file was opened. The rig being worked on is still the one: asked
+        # to pick it again, from a list of one, after deleting a petal, the
+        # panel read as having lost it.
+        kept = getattr(context.scene, "rigmoves_rig", None)
+        return kept if here(context, kept) and len(kept.rigmoves.moves) else None
     if obj.type == "ARMATURE":
         return obj
     if obj.parent is not None and obj.parent.type == "ARMATURE" and here(context, obj.parent):
@@ -6376,7 +6381,12 @@ class RIGMOVES_OT_ride_along(bpy.types.Operator):
             data.report = ("{:s}. Set each one's Lead under Riding along to send "
                            "it ahead or behind.".format(", and ".join(told)))
         else:
-            data.report = "{:s}. Record its After, then Build.".format(", and ".join(told))
+            # Ring, made after Record After as the flower's steps go, was told
+            # to record what it had.
+            leader = move.parts.get(lead_name)
+            data.report = "{:s}. {:s}.".format(
+                ", and ".join(told), "Build to set them going"
+                if leader is not None and leader.has_after else "Record its After, then Build")
         if left_out:
             data.report += " " + left_out
         say(self, {"INFO"}, data.report)
@@ -8452,7 +8462,24 @@ class Seen:
         self.mean, low, high = world_stats(obj, self.matrix)
         self.box = (low + high) * 0.5
         self.half = (high - low).length * 0.5
-        self.local = self.world = self.tree = self.signature = None
+        self.local = self.world = self.tree = self.signature = self.extent = None
+
+    def reach(self):
+        """How far it reaches from its middle, as a joint's reach is."""
+        if self.extent is None:
+            points = self.world_points()
+            middle = sum(points, Vector()) / max(len(points), 1)
+            self.extent = max(((p - middle).length for p in points), default=0.0)
+        return self.extent
+
+    def sized_like(self, joint):
+        """Whether it is about as big as the joint: within a sixth of its
+        reach either way. What stands in a place must be. A smaller part
+        nested inside the ring is not standing in it: the inner petals of a
+        shut bud, three quarters the outer ones' size, held every place of the
+        outer ring when it was made after theirs, and Ring made two of its
+        seven copies."""
+        return 0.85 * joint.reach <= self.reach() <= joint.reach / 0.85
 
     def like(self, joint):
         """Whether it is a copy of the joint wherever it stands: the same
@@ -8588,7 +8615,9 @@ def find_standing(pool, joints, turns, free, ours=()):
     Nothing else may be copied on top of, taken or not: a place is occupied
     when any mesh object at all - hidden, in a move, of any number of
     vertices - has the middle of the box round it within a quarter of the
-    joint's reach of where the joint would be. And the copies of the part that
+    joint's reach of where the joint would be, and is about the joint's size
+    (Seen.sized_like): a smaller part nested inside the ring, an inner petal,
+    is not in the way of an outer one. And the copies of the part that
     stand on none of the places are listed in `off`, for a ring that has been
     made round the wrong centre.
     """
@@ -8645,7 +8674,8 @@ def find_standing(pool, joints, turns, free, ours=()):
                 # average is.
                 if (one.mean - there.mean).length > one.half + 2.0 * shape.reach:
                     continue
-                if (one.box - there.box()).length <= 0.25 * shape.reach:
+                if ((one.box - there.box()).length <= 0.25 * shape.reach
+                        and one.sized_like(shape)):
                     names.add(one.name)
             there.release()
         if names or number in found.partial:
@@ -9737,10 +9767,14 @@ class RIGMOVES_OT_pick_rig(bpy.types.Operator):
         if not activate(context, rig):
             say(self, {"WARNING"}, "That rig is not in this view layer.")
             return {"CANCELLED"}
-        try:
-            bpy.ops.object.mode_set(mode="POSE")
-        except RuntimeError:
-            pass
+        # Pose mode is where a rig's own bones are posed. A rig made from
+        # objects is worked on by clicking them, which pose mode stops.
+        parts = [part for move in rig.rigmoves.moves for part in move.parts]
+        if not parts or any(part.kind == "BONE" for part in parts):
+            try:
+                bpy.ops.object.mode_set(mode="POSE")
+            except RuntimeError:
+                pass
         return {"FINISHED"}
 
 
@@ -9771,7 +9805,83 @@ INSET = 16.0
 REPORT_WIDTH = 32
 
 
-def fitted(context, name, share, tail="", inset=0.0):
+# What an icon takes of a row, the gap after it included, and a button's or a
+# label's own padding, both sides together: pixels at a UI scale of 1.
+ICON_PX = 20.0
+PAD_PX = 12.0
+
+
+def row_room(context, inset=0.0):
+    """How wide a row of the panel is, in pixels: the region less what the
+    panel's margins take, and `inset` for the box the row is in. None in a
+    script, which has no window to measure."""
+    region = getattr(context, "region", None)
+    if region is None or region.width <= 1:
+        return None
+    return region.width - (53.0 + inset) * context.preferences.system.ui_scale
+
+
+def text_width(context, text):
+    """How wide a text is drawn in the panel, in pixels, in its own font."""
+    import blf
+    blf.size(0, context.preferences.ui_styles[0].widget.points
+             * context.preferences.system.ui_scale)
+    return blf.dimensions(0, text)[0]
+
+
+def needs(context, text, icons=1):
+    """The width a button or a label needs to show its text whole."""
+    return (text_width(context, text)
+            + (ICON_PX * icons + PAD_PX) * context.preferences.system.ui_scale)
+
+
+def fits(context, widths, inset=0.0):
+    """Whether controls this wide go side by side in a row of the panel.
+
+    At the sidebar's usual width two buttons of a row were each cut to a few
+    letters ("Make C…"); where they do not fit they go one under the other.
+    In a script there is no window, and they stay side by side.
+    """
+    room = row_room(context, inset)
+    return room is None or sum(widths) <= room
+
+
+def lines_of(context, text, inset=0.0, most=6, by_letters=None, icon_first=False):
+    """Text broken into lines that fit a row of the panel, measured in its
+    font: Blender cuts a label that is too long out of its middle, and that
+    lost the very words that said what to do. In a script, with no window to
+    measure, it is broken every `by_letters` letters, or not at all."""
+    room = row_room(context, inset)
+    if room is None:
+        return wrapped(text, by_letters, most) if by_letters else [text]
+    scale = context.preferences.system.ui_scale
+    words, line, out = text.split(), "", []
+    for word in words:
+        trial = (line + " " + word).strip()
+        icon_room = ICON_PX * scale if icon_first and not out else 0.0
+        if line and text_width(context, trial) + icon_room + PAD_PX * scale > room:
+            out.append(line)
+            line = word
+        else:
+            line = trial
+    if line:
+        out.append(line)
+    return out[:most]
+
+
+def hint(layout, context, text, inset=INSET, icon_name=None):
+    """A quiet line, or two, saying what the rows under it are for."""
+    note = layout.column(align=True)
+    note.enabled = False
+    for number, line in enumerate(lines_of(context, text, inset,
+                                           icon_first=icon_name is not None)):
+        if number == 0 and icon_name:
+            note.label(text=line, icon=icon_name)
+        else:
+            note.label(text=line)
+
+
+def fitted(context, name, share, tail="", inset=0.0, icons=1, keep_end=True):
     """A name as it fits beside a row's controls, cut from the front only as
     far as it has to be, with the tail after it kept whole.
 
@@ -9785,32 +9895,33 @@ def fitted(context, name, share, tail="", inset=0.0):
 
     `share` is how much of the row the label has (the factor of its split),
     `tail` something that must show whole, such as a copied finger's " +2",
-    `inset` what a box round the row takes of its width, in pixels.
+    `inset` what a box round the row takes of its width, in pixels, and
+    `icons` how many icons the label has before its text. Names that differ
+    at the start rather than the end - "Outer Leader", "Inner Leader" - are
+    cut at the end instead (`keep_end` False): cut at the front, both read
+    "…r Leader".
     """
-    region = getattr(context, "region", None)
-    if region is None or region.width <= 1:
+    row = row_room(context, inset)
+    if row is None:
         # A script, or a run with no window: there is no room to measure.
         return short(name, 13 if not tail else 10) + tail
-    import blf
-    scale = context.preferences.system.ui_scale
     # Measured in a real window: the panel's rows are the region less about
     # 53 px, and a label loses about 32 px of its share to its icon and its
     # padding.
-    room = share * (region.width - (53.0 + inset) * scale) - 32.0 * scale
-    blf.size(0, context.preferences.ui_styles[0].widget.points * scale)
+    room = share * row - (ICON_PX * icons + PAD_PX) * context.preferences.system.ui_scale
 
     def width(text):
-        return blf.dimensions(0, text)[0]
+        return text_width(context, text)
 
     if width(name + tail) <= room:
         return name + tail
     for keep in range(len(name) - 1, 0, -1):
-        cut = "…" + name[-keep:] + tail
+        cut = ("…" + name[-keep:] if keep_end else name[:keep] + "…") + tail
         if width(cut) <= room:
             return cut
     # Not even one letter fits: the last is still the one that tells it from
     # the row above.
-    return "…" + name[-1:] + tail
+    return ("…" + name[-1:] if keep_end else name[:1] + "…") + tail
 
 
 def wrapped(text, width=34, most=6):
@@ -9909,6 +10020,27 @@ def section(layout, holder, prop, title, icon_name):
     return head, (layout.column() if getattr(holder, prop) else None)
 
 
+def pose_layout(context, steps):
+    """How a pose's row is split, and whether its name has room for its
+    gold icon as well as the tick that says it is recorded.
+
+    At the sidebar's usual width it had not: "Before" was cut to "Be" and
+    "After" to "Af". There the tick stands before the name alone, as in a
+    checklist, and the name gets the room it needs - no more, so that
+    Record keeps its word.
+    """
+    room = row_room(context, INSET)
+    if room is None:
+        return 0.4, True
+    scale = context.preferences.system.ui_scale
+    name = max(needs(context, "Before", 2), needs(context, "Step 9", 3) if steps else 0.0)
+    buttons = needs(context, "Record", 0) + (24.0 + (24.0 if steps else 0.0)) * scale
+    wide = name + buttons <= room
+    if not wide:
+        name = max(needs(context, "Before"), needs(context, "Step 9") if steps else 0.0)
+    return max(0.3, min(0.6, name / room)), wide
+
+
 def playable(carrier):
     """Whether a move or a combined control has something to play now: it is
     built and its control is still there to read and write."""
@@ -9951,7 +10083,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
 
     def _draw_rig(self, layout, context, rig):
         data = rig.rigmoves
-        self._draw_rig_line(layout, rig, data)
+        self._draw_rig_line(layout, context, rig, data)
         self._draw_own_keys(layout, context, rig, data)
         self._draw_newcomers(layout, context, rig, data)
 
@@ -9963,23 +10095,28 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             self._draw_group(layout, context, rig, data, group, index)
         if len(data.moves):
             self._draw_actions(layout, data)
-        self._draw_report(layout, data)
+        self._draw_report(layout, context, data)
 
-    def _draw_rig_line(self, layout, rig, data):
-        """The rig and what it holds, on one line."""
+    def _draw_rig_line(self, layout, context, rig, data):
+        """The rig and what it holds: on one line where both fit, else the
+        count under the name - beside it, at the sidebar's usual width, the
+        name was cut to "Cop…"."""
         parts = sum(len(move.parts) for move in data.moves)
         sliders = (sum(1 for move in data.moves if move.built)
                    + sum(1 for group in data.groups if group.built))
         row = layout.row()
         row.label(text=rig.name, icon="ARMATURE_DATA")
         if parts:
+            count = (counted(parts, "part")
+                     + (" · " + counted(sliders, "slider") if sliders else ""))
+            if not fits(context, [needs(context, rig.name), needs(context, count, 0)]):
+                row = layout.row()
             # In a row of its own, aligned right, so that it takes only its
             # own width and the name keeps the rest.
             side = row.row()
             side.alignment = "RIGHT"
             side.enabled = False
-            side.label(text=counted(parts, "part")
-                       + (" · " + counted(sliders, "slider") if sliders else ""))
+            side.label(text=count)
 
     def _draw_first_move(self, layout):
         """A rig with no move in it: the one thing to do."""
@@ -10061,9 +10198,9 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             head = box.row()
             head.alert = True
             head.label(text="Auto Keying is on", icon="ERROR")
-            for line in wrapped("Every drag this tool asks for leaves a "
-                                "keyframe behind, and a keyed part or handle "
-                                "is one the rig cannot move."):
+            for line in lines_of(context, "Every drag this tool asks for leaves a "
+                                 "keyframe behind, and a keyed part or handle "
+                                 "is one the rig cannot move.", INSET, by_letters=34):
                 box.label(text=line)
             box.prop(context.scene.tool_settings, "use_keyframe_insert_auto",
                      text="Auto Keying", toggle=True)
@@ -10085,8 +10222,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                          text="Lift Those Keyframes", icon="KEY_DEHLT")
             note = box.column(align=True)
             note.enabled = False
-            for line in wrapped("Build does this too. Handles you have really "
-                                "animated are left alone."):
+            for line in lines_of(context, "Build does this too. Handles you have really "
+                                 "animated are left alone.", INSET, by_letters=34):
                 note.label(text=line)
 
         # An NLA strip or a driver is somebody's work: Lift Those Keyframes
@@ -10096,7 +10233,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 box.separator(factor=0.5)
             told = box.column(align=True)
             told.alert = True
-            for line in wrapped(sentence, most=8):
+            for line in lines_of(context, sentence, INSET, most=8, by_letters=34):
                 told.label(text=line)
 
     def _draw_newcomers(self, layout, context, rig, data):
@@ -10122,17 +10259,20 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         for number, (index, move, part) in enumerate(leaders(context, rig)[:2]):
             run = box.row()
             run.scale_y = 1.3
+            # The name cut to the room the words around it leave, measured.
+            room = row_room(context, INSET)
+            name = short(part.name, 14)
+            if room is not None:
+                share = max(0.1, 1.0 - needs(context, "Ride Along With ''") / room)
+                name = fitted(context, part.name, share, inset=INSET, icons=0)
             riding = run.operator(
                 RIGMOVES_OT_ride_along.bl_idname,
-                text="Ride Along With '{:s}'".format(short(part.name, 14)),
-                icon="LINKED")
+                text="Ride Along With '{:s}'".format(name), icon="LINKED")
             riding.index, riding.leader, riding.rig_name = index, part.name, rig.name
             if not number:
-                note = box.row()
-                note.enabled = False
-                note.label(text="each copies its move from where it stands"
-                           if len(chain_of(move, part)) < 2 else
-                           "copies of the whole chain ride joint for joint")
+                hint(box, context, "each copies its move from where it stands"
+                     if len(chain_of(move, part)) < 2 else
+                     "copies of the whole chain ride joint for joint")
 
         singled = {index for index, _move in indicated(context, rig)}
         for index, move in indicated(context, rig)[:2]:
@@ -10166,7 +10306,13 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 joining.rig_name = owner.name
 
         box.separator(factor=0.4)
-        row = box.row(align=True)
+        # Side by side where both fit; at the sidebar's usual width they did
+        # not, and read "New Gro…".
+        if fits(context, [needs(context, "New Group Here"), needs(context, "New Rig")],
+                INSET):
+            row = box.row(align=True)
+        else:
+            row = box.column(align=True)
         row.operator(RIGMOVES_OT_new_move.bl_idname,
                      text="New Group Here", icon="ADD").fresh = False
         row.operator(RIGMOVES_OT_new_move.bl_idname,
@@ -10197,9 +10343,10 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
 
         # Before, the poses in between, After: one gesture each, Record, and
         # the eye to look at what was recorded.
-        row = body.split(factor=0.4, align=True)
+        share, wide = pose_layout(context, len(move.steps))
+        row = body.split(factor=share, align=True)
         row.scale_y = 1.15
-        self._draw_pose_name(row, "Before", "record_before", before)
+        self._draw_pose_name(row, "Before", "record_before", before, wide=wide)
         row = row.row(align=True)
         press = row.operator(RIGMOVES_OT_record.bl_idname, text="Record")
         press.index, press.which = index, "BEFORE"
@@ -10213,10 +10360,10 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         # row further in.
         for position, step in enumerate(move.steps):
             self._draw_speed(body, step, "speed")
-            row = body.split(factor=0.4, align=True)
+            row = body.split(factor=share, align=True)
             row.scale_y = 1.15
             self._draw_pose_name(row, "Step {:d}".format(position + 1), "steps",
-                                 step.done, indent=True)
+                                 step.done, indent=True, wide=wide)
             row = row.row(align=True)
             press = row.operator(RIGMOVES_OT_record.bl_idname, text="Record")
             press.index, press.which, press.step = index, "STEP", position
@@ -10229,9 +10376,9 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         if len(move.steps):
             self._draw_speed(body, move, "speed_after")
 
-        row = body.split(factor=0.4, align=True)
+        row = body.split(factor=share, align=True)
         row.scale_y = 1.15
-        self._draw_pose_name(row, "After", "record_after", after)
+        self._draw_pose_name(row, "After", "record_after", after, wide=wide)
         row = row.row(align=True)
         press = row.operator(RIGMOVES_OT_record.bl_idname, text="Record")
         press.index, press.which = index, "AFTER"
@@ -10247,13 +10394,17 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         self._draw_path_section(body, context, move, index, before and after, objects)
         self._draw_timing_section(body, context, move, index)
         self._draw_copies_section(body, context, move, index)
-        self._draw_chains_section(body, rig, move, index)
-        self._draw_animate_section(body, move, index)
+        self._draw_chains_section(body, context, rig, move, index)
+        self._draw_animate_section(body, context, move, index)
 
-    def _draw_pose_name(self, row, title, name, done, indent=False):
-        """A pose's name beside its icon, and after it whether it is recorded."""
+    def _draw_pose_name(self, row, title, name, done, indent=False, wide=True):
+        """A pose's name beside its icon, and after it whether it is recorded;
+        where there is no room for both, the tick or the dot before the name."""
         left = row.row(align=True)
         left.alignment = "LEFT"
+        if not wide:
+            left.label(text=title, icon="CHECKMARK" if done else "DOT")
+            return
         if indent:
             left.label(text="", icon="BLANK1")
         left.label(text=title, **icon(name))
@@ -10296,28 +10447,28 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
     def _draw_timing_section(self, body, context, move, index):
         # Who moves when. The reason a machine reads as built rather than
         # animated: the parts do not all leave at once.
-        head, timing = section(body, move, "show_timing", "TIMING", "timing")
-        # In a row of its own, so that the button takes only its own width: set
-        # straight in the header it shares it with the title half and half.
-        side = head.row()
-        side.alignment = "RIGHT"
-        spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…",
-                                  **icon("spread"))
-        spreading.index, spreading.what = index, "DELAY"
+        _head, timing = section(body, move, "show_timing", "TIMING", "timing")
         if timing is None:
             return
-        note = timing.row()
-        note.enabled = False
-        note.label(text="how long each one waits before it starts")
+        # Spread first and the whole width to itself: in the header beside
+        # the title, at the sidebar's usual width, it read "Spr…".
+        spreading = timing.row(align=True).operator(
+            RIGMOVES_OT_spread.bl_idname, text="Spread…", **icon("spread"))
+        spreading.index, spreading.what = index, "DELAY"
+        hint(timing, context, "how long each one waits before it starts")
         lit = held(context, move)
         if lit:
-            said = timing.row()
-            said.enabled = False
-            said.label(text="lit: what you have selected", icon="RESTRICT_SELECT_OFF")
+            hint(timing, context, "lit: what you have selected",
+                 icon_name="RESTRICT_SELECT_OFF")
+        # The delay needs room for its number only; the name has the rest.
+        room = row_room(context, INSET)
+        # (Narrower than this, Blender drops a decimal: 0.34 read "0.3".)
+        share = 0.45 if room is None else max(
+            0.45, min(0.72, 1.0 - needs(context, "0.00", 0) * 1.35 / room))
         for position, part in enumerate(move.parts):
             if part.leader:
                 continue
-            line = timing.split(factor=0.45, align=True)
+            line = timing.split(factor=share, align=True)
             # Everything else goes quiet rather than the chosen one being
             # shouted: the eye lands on the one row still at full strength.
             line.active = part.name in lit or not lit
@@ -10327,7 +10478,8 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                 icon="RESTRICT_SELECT_OFF" if part.name in lit
                 else ("OBJECT_DATA" if part.kind == "OBJECT" else "BONE_DATA"))
             pick.index, pick.part = index, position
-            name.label(text=short(part.name))
+            name.label(text=fitted(context, part.name, share, inset=INSET, keep_end=False)
+                       if room is not None else short(part.name))
             line.prop(part, "start", text="")
 
     def _draw_copies_section(self, body, context, move, index):
@@ -10344,23 +10496,38 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         _head, copies = section(body, move, "show_riders", "COPIES", "ring")
         if copies is None:
             return
-        self._draw_ring(copies, context, move, index)
+        # Ring, and Spread for the riders' Leads once there are riders: side
+        # by side where both fit, one under the other where they do not. Beside
+        # the count, at the sidebar's usual width, Spread read "Spr…" and the
+        # count "Riding alo…".
+        if riders and fits(context, [needs(context, "Ring…"), needs(context, "Spread…")],
+                           INSET):
+            tools = copies.row(align=True)
+        else:
+            tools = copies.column(align=True)
+        self._draw_ring(tools, context, move, index)
         if not riders:
             return
-        title = copies.row()
-        title.label(text="Riding along ({:d})".format(len(riders)))
-        # The button in a row of its own, aligned right, so that it takes
-        # only its own width: set straight in the row it shares it with the
-        # label half and half, and at the sidebar's usual width the count was
-        # the first thing cut off.
-        side = title.row()
-        side.alignment = "RIGHT"
-        spreading = side.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…",
-                                  **icon("spread"))
+        spreading = tools.operator(RIGMOVES_OT_spread.bl_idname, text="Spread…",
+                                   **icon("spread"))
         spreading.index, spreading.what = index, "LEAD"
-        note = copies.row()
-        note.enabled = False
-        note.label(text="lead: below 0 behind, above 0 ahead")
+        copies.label(text="Riding along ({:d})".format(len(riders)))
+        hint(copies, context, "lead: below 0 behind, above 0 ahead")
+        # Narrow, the Lead is a plain number and the mirror its letter: as a
+        # slider with "Lead" on it, and the mirror with its icon, they left no
+        # room at the sidebar's usual width for the number, nor for the name
+        # ("…er 2").
+        room = row_room(context, INSET)
+        scale = context.preferences.system.ui_scale
+        narrow = room is not None and room < 200.0 * scale
+        share = 0.42
+        if narrow:
+            # The Lead and the mirror at the width they need and no more (in
+            # UI units, of 20 px): left to share the row, they took half of it
+            # each and the names had "…der 2".
+            share = max(0.3, min(0.7, 1.0 - (2.4 + 1.2 + 1.0) * 20.0 * scale / room))
+        labels = [label for _key, label, _description in MIRRORS]
+        keys = [key for key, _label, _description in MIRRORS]
         shown = None
         for position, part in riders:
             if part.leader != shown:
@@ -10371,27 +10538,34 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             joints = len(copy_of(move, part)) - 1
             # The copies of a petal are named alike but for the number
             # at the end, so that is what the name is cut to keep.
-            share = 0.42
             line = copies.split(factor=share, align=True)
             line.label(text=fitted(context, part.name, share,
-                                   " +{:d}".format(joints) if joints else "", INSET),
-                       icon="OBJECT_DATA")
+                                   " +{:d}".format(joints) if joints else "", INSET,
+                                   icons=0 if narrow else 1),
+                       icon="NONE" if narrow else "OBJECT_DATA")
             right = line.row(align=True)
-            right.prop(part, "lead", text="Lead", slider=True)
+            if narrow:
+                cell = right.row(align=True)
+                cell.ui_units_x = 2.4
+                cell.prop(part, "lead", text="")
+                cell = right.row(align=True)
+                cell.ui_units_x = 1.2
+            else:
+                right.prop(part, "lead", text="Lead", slider=True)
+                cell = right
             # One button that steps through the choices: a mirror
             # moves the rider's bone, so each one is a Build.
-            labels = [label for _key, label, _description in MIRRORS]
-            keys = [key for key, _label, _description in MIRRORS]
-            step = right.operator(RIGMOVES_OT_set_mirror.bl_idname,
+            step = cell.operator(RIGMOVES_OT_set_mirror.bl_idname,
                                   text=labels[keys.index(part.mirror)],
-                                  depress=part.mirror != "NONE", **icon("mirror"))
+                                  depress=part.mirror != "NONE",
+                                  **({} if narrow else icon("mirror")))
             step.index, step.part = index, position
             step.axis = keys[(keys.index(part.mirror) + 1) % len(keys)]
             drop = right.operator(RIGMOVES_OT_drop_rider.bl_idname, text="",
                                   icon="X", emboss=False)
             drop.index, drop.part = index, position
 
-    def _draw_chains_section(self, body, rig, move, index):
+    def _draw_chains_section(self, body, context, rig, move, index):
         # Which part hangs from which: a dropdown beside every part, listing
         # the move's parts to follow.
         chain = [p for p in move.parts if p.kind == "OBJECT" and not p.leader]
@@ -10401,30 +10575,44 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         if listed is None:
             return
         # Two tools for the whole chain at once: the dropdowns set
-        # down a line, and the first joint's bend repeated down it.
-        tools = listed.row(align=True)
+        # down a line, and the first joint's bend repeated down it. Each with
+        # the room for its name, or one under the other: half and half, at the
+        # sidebar's usual width, Make Chain read "Make C…".
+        wanted = [needs(context, "Make Chain"), needs(context, "Curl")]
+        if fits(context, wanted, INSET):
+            tools = listed.split(factor=wanted[0] / sum(wanted), align=True)
+        else:
+            tools = listed.column(align=True)
         tools.operator(RIGMOVES_OT_make_chain.bl_idname, text="Make Chain",
                        **icon("chain")).index = index
         tools.operator(RIGMOVES_OT_curl.bl_idname, text="Curl",
                        **icon("curl")).index = index
-        note = listed.row()
-        note.enabled = False
-        note.label(text="moves with the part it follows")
+        hint(listed, context, "moves with the part it follows")
+        narrow = not fits(context, [needs(context, "Outer Leader") * 2.0], INSET)
         for part in chain:
-            line = listed.split(factor=0.42, align=True)
-            line.label(text=short(part.name, 13), icon="OBJECT_DATA")
+            line = listed.split(factor=0.38 if narrow else 0.42, align=True)
+            if narrow:
+                # Its icon goes: it said nothing the row does not, and took
+                # the room that "Outer Leader" needed. Cut at the end: these are
+                # parts with names of their own, not numbered copies; and the
+                # part followed keeps the room to be told apart, "Leaf 1" from
+                # "Leaf 2", which at half and half both read "Lea…".
+                line.label(text=fitted(context, part.name, 0.38, inset=INSET, icons=0,
+                                       keep_end=False))
+            else:
+                line.label(text=short(part.name, 13), icon="OBJECT_DATA")
             line.prop_search(part, "follows", move, "parts", text="", icon="LINKED")
         if move.built and parent_pending(rig, rig.rigmoves, move):
             waiting = listed.row()
             waiting.alert = True
             waiting.label(text="Build to put it into effect", icon="INFO")
 
-    def _draw_animate_section(self, body, move, index):
+    def _draw_animate_section(self, body, context, move, index):
         if not playable(move):
             return
         _head, inner = section(body, move, "show_animate", "ANIMATE", "animate")
         if inner is not None:
-            self._draw_frames(inner, move, index, False)
+            self._draw_frames(inner, context, move, index, False)
 
     def _draw_play(self, body, carrier, index, combined):
         """What the animator actually reaches for: one slider that plays the
@@ -10441,10 +10629,15 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                            icon="DECORATE_KEYFRAME")
         key.index, key.combined = index, combined
 
-    def _draw_frames(self, body, carrier, index, combined):
+    def _draw_frames(self, body, context, carrier, index, combined):
         # Keys the whole of it from the current frame, so nobody has to key
-        # the start and the end by hand to get it playing.
-        row = body.row(align=True)
+        # the start and the end by hand to get it playing. The two side by
+        # side where they fit; at the sidebar's usual width they read "Fra…".
+        if fits(context, [needs(context, "Frames 999", 0) * 1.25, needs(context, "Animate")],
+                INSET):
+            row = body.row(align=True)
+        else:
+            row = body.column(align=True)
         row.prop(carrier, "play_frames", text="Frames")
         run = row.operator(RIGMOVES_OT_animate.bl_idname, text="Animate",
                            **icon("animate"))
@@ -10456,20 +10649,24 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         if not any(p.kind == "OBJECT" and not p.leader for p in move.parts):
             return
         chosen = chosen_parts(context, move)
-        row = body.split(factor=0.4, align=True)
+        labels = ["Cursor" if kind == "CURSOR" else label for kind, label, _d in PIVOTS]
+        # The three beside the word where they fit; under it where they do
+        # not, for at the sidebar's usual width they read "Or…" and "Cu…".
+        if fits(context, [needs(context, "Pivot")]
+                + [needs(context, label, 0) for label in labels], INSET):
+            row = body.split(factor=0.4, align=True)
+        else:
+            row = body.column(align=True)
         row.label(text="Pivot", icon="PIVOT_CURSOR")
         buttons = row.row(align=True)
         buttons.enabled = bool(chosen)
         current = chosen[0].pivot_kind if chosen else ""
-        for kind, label, _description in PIVOTS:
-            press = buttons.operator(RIGMOVES_OT_set_pivot.bl_idname,
-                                     text="Cursor" if kind == "CURSOR" else label,
+        for (kind, _label, _description), label in zip(PIVOTS, labels):
+            press = buttons.operator(RIGMOVES_OT_set_pivot.bl_idname, text=label,
                                      depress=kind == current)
             press.index, press.kind = index, kind
         if not chosen:
-            said = body.row()
-            said.enabled = False
-            said.label(text="select a part to set where it turns")
+            hint(body, context, "select a part to set where it turns")
 
     def _draw_ring(self, body, context, move, index):
         """One button for making a ring of copies of the selected part, which
@@ -10492,7 +10689,9 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         curved = [(i, p) for i, p in enumerate(move.parts) if curve_alive(p.path_curve)]
         for position, part in curved:
             line = body.split(factor=0.55, align=True)
-            line.label(text=short(part.name, 16), icon="CURVE_BEZCURVE")
+            line.label(text=fitted(context, part.name, 0.55, inset=INSET)
+                       if row_room(context, INSET) is not None else short(part.name, 16),
+                       icon="CURVE_BEZCURVE")
             right = line.row(align=True)
             edit = right.operator(RIGMOVES_OT_edit_curve.bl_idname, text="Edit",
                                   icon="EDITMODE_HLT")
@@ -10501,9 +10700,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
                                   icon="X", emboss=False)
             drop.index, drop.part = index, position
         if curved:
-            said = body.row()
-            said.enabled = False
-            said.label(text="bend it in edit mode, then Build")
+            hint(body, context, "bend it in edit mode, then Build")
 
     def _draw_speed(self, body, holder, prop):
         """The speed of one stretch, drawn between the two poses it joins.
@@ -10534,9 +10731,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         if playable(group):
             self._draw_play(body, group, index, True)
             body.separator(factor=0.3)
-        note = body.row()
-        note.enabled = False
-        note.label(text="plays these, each after its own delay")
+        hint(body, context, "plays these, each after its own delay")
         for position, member in enumerate(group.members):
             move = move_by_uid(data, member.uid)
             line = body.split(factor=0.45, align=True)
@@ -10551,9 +10746,9 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
             drop.group_index, drop.member_index = index, position
         if playable(group):
             body.separator(factor=0.3)
-            self._draw_frames(body, group, index, True)
+            self._draw_frames(body, context, group, index, True)
 
-    def _draw_report(self, layout, data):
+    def _draw_report(self, layout, context, data):
         if not data.report:
             return
         layout.separator(factor=0.5)
@@ -10575,7 +10770,9 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         # Room for the names of what a ring left out. A report longer than that
         # is cut, and what was cut can be what to do next: it is said to be cut,
         # and where the rest is - the Info editor has it all.
-        lines = wrapped(data.report, width=REPORT_WIDTH, most=1000)
+        # Broken where the box really ends, measured in the panel's font: by a
+        # count of letters, at the sidebar's usual width, lines were cut off.
+        lines = lines_of(context, data.report, INSET, most=1000, by_letters=REPORT_WIDTH)
         if len(lines) > 9:
             lines = lines[:9]
             lines[-1] = lines[-1][:REPORT_WIDTH - 1].rstrip() + "…"

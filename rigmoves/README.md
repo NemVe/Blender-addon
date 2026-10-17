@@ -1,4 +1,4 @@
-# CopyThat - v0.20.1
+# CopyThat - v0.20.2
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -20,7 +20,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 CopyThat is a Blender extension, and it needs Blender 4.5 or newer: Blender
 will not install it on an older one. First, if an older RigMoves or CopyThat
 is listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
-the two cannot be on at once. Then drag `CopyThat-0.20.1.zip` into Blender,
+the two cannot be on at once. Then drag `CopyThat-0.20.2.zip` into Blender,
 or use Edit > Preferences > **Get Extensions** > the drop-down at the top
 right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
 **CopyThat**. Files made with older versions keep working.
@@ -55,12 +55,14 @@ worth having over a pair of poses.
 
 - **The header** has the gold flower and the name, and under it the line
   "Record a move. Get a slider.". The rig is on the next line, with how many
-  parts and sliders it holds ("21 parts · 1 slider").
+  parts and sliders it holds ("21 parts · 1 slider"), or under it where the
+  sidebar is too narrow for both.
 - **A box for each move.** Its first row is the move's name: the arrow folds
   the box, a click in the name renames it, and the **x** deletes the move. Under
   it, once it is built, is the **Play** slider with its key button, big. Then
   **Before** and **After**, each with its **Record** and the eye, and the **Step**
-  rows between them if there are any; a tick says the pose is recorded. The rest
+  rows between them if there are any; a tick says the pose is recorded (at the
+  sidebar's usual width it stands before the name, as in a checklist). The rest
   folds away, in the order it is reached for: **PARTS & PIVOT**, **PATH**,
   **TIMING**, **COPIES**, **CHAINS** and **ANIMATE**. A new move has all of them
   shut. Click a title to open it. **COPIES** is there once a part can be ringed,
@@ -211,13 +213,14 @@ set the pivot on the leader - its hinge, its base - and every rider swings
 about the same point on itself. No origins need moving.
 
 Riders are listed in **COPIES**, under **Riding along**, each with a **Lead**
-slider from -50 to 50 that says when it moves against its leader. 0 moves with
+from -50 to 50 (a slider in a wide sidebar, a number at its usual width) that
+says when it moves against its leader. 0 moves with
 it. Below 0 it follows behind: -25 sets off when the leader is half way, -50 only once the
 leader has finished. Above 0 it goes first, and at 50 it has finished before
 the leader starts. Either way it travels at the leader's speed, for as long
 as the leader does - only when changes. Petals at -8, -16, -24 and on round
 the flower open one after another, in a wave. **Spread...** beside
-**Riding along** fills those in for you, and **Ring** makes the petals as
+**Ring...** in **COPIES** fills those in for you, and **Ring** makes the petals as
 well - see below.
 
 The move's control, and the **Play** slider, always cover the whole of it, so
@@ -421,8 +424,8 @@ are kept. A part that follows another is not turned down.
 should go one after the next, a row should topple in a wave - and you do not
 want to type a number into every row.
 
-*Recipe:* press **Spread...** beside **Riding along** in **COPIES** (Leads) or in the
-header of **TIMING** (Delays), pick an **Order**, pick **By**, set the values, **OK**.
+*Recipe:* press **Spread...** beside **Ring...** in **COPIES** (Leads) or at the top
+of **TIMING** (Delays), pick an **Order**, pick **By**, set the values, **OK**.
 
 **By** says how the values are given:
 
@@ -707,8 +710,8 @@ travel. Delay 0.2 means that part waits until the control is a fifth of the
 way across before it starts, and then runs to the end. That is what stops a
 machine reading as one rubber object: the parts leave in order, and overlap.
 A delay, like an ease or a speed, takes effect as soon as it is changed.
-Riders are not listed here; their **Lead** does the same job. **Spread...** in
-the header of this section fills all the Delays in at once - see Spread.
+Riders are not listed here; their **Lead** does the same job. **Spread...** at
+the top of this section fills all the Delays in at once - see Spread.
 
 A combined control has the same box per member.
 
@@ -1692,6 +1695,25 @@ and one lifted 1 m:
   drawn** ("name 'bl_info' is not defined"), and its last line, the version,
   was missing. Blender takes that information away from an extension once it
   is loaded; the panel keeps its own copy of the version now.
+
+- **At the sidebar's usual width the panel cut its words short:** "Before" read
+  "Be" and "After" "Af", Spread "Spr…", Make Chain "Make C…", the pivot's
+  "Origin" "Or…", Frames "Fra…" and the rig's name "Cop…"; the copies' Leads did
+  not show at all, and the hints and the report lost words out of their middle
+  or off their end. Each row now measures what it has room for, in the panel's
+  own font: what does not fit side by side goes one under the other, the poses
+  read as a checklist, Spread sits in the sections it spreads for, and the hints
+  and the report are broken into lines that fit.
+- **Deleting the active part with X turned the panel into "Pick the rig to work
+  on"**, a list of one, and picking it put a rig made of objects into pose mode,
+  where its parts cannot be clicked. The panel stays on the rig being worked on,
+  and such a rig is picked in object mode.
+- **Ringing the inner petals of a bud before the outer ones left the outer ring
+  with 2 of its 7 copies**: the shut inner petals stood near enough to its
+  places to count as something standing there. Only something about the size of
+  the part being ringed counts now.
+- **Ring, used after Record After, said "Record its After, then Build" in the
+  status bar** for a moment, though After was recorded.
 
 ## Known rough edges
 

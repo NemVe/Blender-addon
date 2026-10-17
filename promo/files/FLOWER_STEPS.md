@@ -158,7 +158,7 @@ every row against the table.
   | Round | World Origin (it already says this: leave it) |
   | About | World Z (leave it) |
   | Linked copies | greyed out (leave it) |
-  | Lead step | **14** (it shows 9) |
+  | Lead step | **14** (it opens at 0 every time) |
 
   Press **OK**.
 - **You see:** nothing new again. The report "5 modelled copies of 'Inner

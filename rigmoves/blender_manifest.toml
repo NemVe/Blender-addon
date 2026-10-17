@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "copythat"
 # Written from bl_info["version"] by tools/build_zip.py when the zip is made,
 # so the two can never disagree.
-version = "0.20.1"
+version = "0.20.2"
 name = "CopyThat"
 tagline = "Record a move, get a slider: animate machines without a rig"
 maintainer = "NemVe3D"

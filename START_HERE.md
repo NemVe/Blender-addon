@@ -38,7 +38,7 @@ guide: what the add-on promises).
 
 ## State of the add-on
 
-Current version: 0.20.1. On NemVe3D's PC the state, plan and procedures live in the Obsidian vault D:\ObsidianVault\NemVe3D (read its CLAUDE.md first). Elsewhere, read HANDOFF.md.
+Current version: 0.20.2. On NemVe3D's PC the state, plan and procedures live in the Obsidian vault D:\ObsidianVault\NemVe3D (read its CLAUDE.md first). Elsewhere, read HANDOFF.md.
 
 ## Superhive (Blender Market) release: status
 

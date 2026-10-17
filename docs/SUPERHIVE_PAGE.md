@@ -11,7 +11,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 - Author: **NemVe3D** (https://creators.sa/nemve)
 - Licence: **GPL-3.0-or-later** (the GNU General Public License, version 3 or any later version)
 - Needs: **Blender 4.5 or newer**
-- In the download: one `.zip` file, `CopyThat-0.20.1.zip`, which is the Blender extension (see Installation)
+- In the download: one `.zip` file, `CopyThat-0.20.2.zip`, which is the Blender extension (see Installation)
 - Support: through this product's page on Superhive, or at https://creators.sa/nemve (see Support and credits at the end)
 - Where it lives: the 3D Viewport sidebar (press **N**), tab **CopyThat**
 
@@ -32,7 +32,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 ## Installation
 
-CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.20.1.zip`).
+CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.20.2.zip`).
 
 **What is in the download.** One file: that `.zip`, which is the extension itself. Inside it are the add-on (plain Python, so it is also the full source code), its manifest, the user guide (`README.md`) and the licence (`LICENSE`).
 
@@ -234,7 +234,7 @@ For exact control of each stretch use the Speed sliders instead, with Ease left 
 3. Type a **Delay** from 0 to 0.99 in its box.
 4. Drag **Play** to see it.
 
-It takes effect at once. Riders are not listed here: their **Lead** does the same job (see Ride Along). **Spread…** in the Timing header fills all the Delays in at once (see Spread). A combined control has the same box for each move it plays.
+It takes effect at once. Riders are not listed here: their **Lead** does the same job (see Ride Along). **Spread…** at the top of **Timing** fills all the Delays in at once (see Spread). A combined control has the same box for each move it plays.
 
 ### 7. Ride Along, with Lead and Mirror
 
@@ -258,7 +258,7 @@ A rider turns about its leader's pivot, carried over to where the rider stands. 
 - Below 0 it follows behind. -25 sets off when the leader is half way. -50 sets off only once the leader has finished.
 - Above 0 it goes first. 50 has finished before the leader starts.
 
-Either way it travels at the leader's speed, for as long as the leader does: only *when* changes. A lead takes effect as soon as you change it. The Play slider always covers the whole of it, so a rider sent ahead has somewhere to go: the leader simply starts later along the control. Petals at -8, -16, -24 and on round the flower open one after another in a wave. **Spread…** in the **Riding along** header fills these in for you.
+Either way it travels at the leader's speed, for as long as the leader does: only *when* changes. A lead takes effect as soon as you change it. The Play slider always covers the whole of it, so a rider sent ahead has somewhere to go: the leader simply starts later along the control. Petals at -8, -16, -24 and on round the flower open one after another in a wave. **Spread…** beside **Ring…** in **Copies** fills these in for you.
 
 **Mirror.** A rider that is a mirrored copy of its leader (negative scale, the way **Ctrl+M** leaves one) mirrors its leader's move by itself: the left wing does the mirror image of what the right one does. A rider that only *faces* the other way, such as the second of a pair of doors turned round to fit, has a **Mirror** button on its row. Each press steps it on: **-** (none), **X**, **Y**, **Z**, and rebuilds. X, Y or Z mirrors the leader's move across that axis of the rider, so what is the leader's left becomes the rider's right.
 
@@ -429,7 +429,7 @@ Ring takes an object up, or stands it on a new frame, only when that is provably
 
 **Steps**
 
-1. Press **Spread…** in the header of **Riding along** (to set Leads) or of **Timing** (to set Delays).
+1. Press **Spread…** beside **Ring…** in **Copies** (to set Leads), or at the top of **Timing** (to set Delays).
 2. Pick an **Order** (below). For Leads the dialog opens on **Around a ring**. For Delays it opens on **Down a chain** if the move has Follows links, and on **Along an axis** if not.
 3. Pick **By**: **Step** or **Range**.
 4. Set the values and press **OK**.
@@ -703,6 +703,7 @@ Read the grey report box at the bottom of the panel first. It says what happened
 
 ## Version history
 
+- **0.20.2:** The live test of 0.20.1: the panel reads in full at the sidebar's usual width, it stays on its rig when the active part is deleted, and an outer ring of petals is whole when the inner ring was made first.
 - **0.20.1:** Fixed: installed from the zip, the 0.20.0 panel raised an error each time it was drawn, and its version line was missing.
 - **0.20.0:** A new panel: a branded header, gold icons, a big slider for each move, sections that fold (Parts & Pivot, Path, Timing, Copies, Chains, Animate) and a Report box that turns red for a warning. Nothing changes in how it works.
 - **0.19.3:** The light review of 0.19.2, fixed: a model scaled or turned on its rig and then applied, meshes joined into a built part, and the curves of an Alt+D copy.
