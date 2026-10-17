@@ -214,8 +214,9 @@ restart Blender. Check every row against the table.
 
 ## 9. Ease, Build, Animate, Play
 
-- **Do:** In the Move 1 box, the dropdown under the After row says **Even
-  speed**. Choose **Smooth**. Press the big **Build Sliders** button.
+- **Do:** In the Move 1 box open the **PATH** section (click its title): of
+  its four choices **Even speed** is lit. Click **Smooth**. Press the big
+  **Build Sliders** button.
 - **You see:** the report "21 part(s) on 1 slider(s). 6 object(s) were given a
   bone and bound. 15 object(s) now ride along. 2 part(s) hung from the part
   they follow." A **Move 1** slider appears, with **Frames [48] [Animate]**.
