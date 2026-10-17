@@ -4225,6 +4225,21 @@ class ThreeBoxes(CopyThatCase):
             self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
         bpy.context.view_layer.update()
 
+    def open_again(self):
+        """Save the file and open it; the rig and the boxes are taken again by name."""
+        rig_name, box_names = self.rig1.name, list(self.boxes)
+        path = os.path.join(tempfile.mkdtemp(), "saved.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
+        # What Blender's window does at once after a file is opened, and a session
+        # without one leaves out: everything is evaluated, and the handlers that
+        # follow an update are called.
+        for obj in bpy.data.objects:
+            obj.update_tag()
+        bpy.context.view_layer.update()
+        self.rig1 = bpy.data.objects[rig_name]
+        self.boxes = {name: bpy.data.objects[name] for name in box_names}
+
     def keys_of(self, owner, name):
         """How many curves the Action this rig plays for its move holds for one bone."""
         action = bpy.data.actions[owner.rigmoves.moves[0].action_name]
@@ -4469,21 +4484,6 @@ class TestAFileFrom0190IsSettledWhenItOpens(ThreeBoxes):
         self.write_what_0190_kept()
         self.open_again()
 
-    def open_again(self):
-        """Save the file and open it; the rig and the boxes are taken again by name."""
-        rig_name = self.rig1.name
-        path = os.path.join(tempfile.mkdtemp(), "from_0190.blend")
-        bpy.ops.wm.save_as_mainfile(filepath=path)
-        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
-        # What Blender's window does at once after a file is opened, and a session
-        # without one leaves out: everything is evaluated, and the handlers that
-        # follow an update are called.
-        for obj in bpy.data.objects:
-            obj.update_tag()
-        bpy.context.view_layer.update()
-        self.rig1 = bpy.data.objects[rig_name]
-        self.boxes = {name: bpy.data.objects[name] for name in self.NAMES}
-
     def test_apply_and_set_origin_on_the_rig_before_any_button_move_nothing(self):
         for how in ("Apply", "Set Origin"):
             with self.subTest(how):
@@ -4582,6 +4582,87 @@ class TestAFileFrom0190IsSettledWhenItOpens(ThreeBoxes):
             self.open_again()
             self.open_again()
         self.assertEqual(looked.call_count, 2)
+
+
+class TestAPartsOldParentIsFoundInAFileFrom0190(ThreeBoxes):
+    """A lid modelled hanging from a body, which is no part of the move, goes
+    back to hanging from it when the move is removed. 0.19.1 holds the body by
+    pointer as well as by name, to follow it when it is renamed; a file from
+    0.19.0 has the name only, and never gained the pointer. Rename the body (F2)
+    and Remove said "'Lid' hung from 'Body', which is gone", left the lid
+    standing free, and moving the body did not move it."""
+
+    def lid_on_a_body(self):
+        """A lid hung from a body, built, and then as 0.19.0 kept it: the body
+        by name, and no pointer to it."""
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.body = cube("Body", (0.0, 0.0, 0.5))
+        self.body.scale = (2.0, 1.2, 1.0)
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        bpy.context.view_layer.update()
+        home = self.lid.matrix_world.copy()
+        self.lid.parent = self.body
+        self.lid.matrix_parent_inverse = self.body.matrix_world.inverted()
+        self.lid.matrix_world = home
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.lid.rotation_euler.x = math.radians(-70.0)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.rig1, self.boxes = rig(), {"Lid": self.lid}
+        self.shut = world_points(self.lid)
+        part = self.rig1.rigmoves.moves[0].parts["Lid"]
+        self.assertIs(part.home_object, self.body)
+        self.assertEqual(part.home_parent, "Body")
+        self.assertIs(self.lid.parent, self.rig1)
+        part.home_object = None
+
+    def rename_the_body_and_remove(self):
+        self.body.name = "Chest"
+        bpy.context.view_layer.update()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+
+    def check_the_lid_hangs_from_the_body(self):
+        self.assertIs(self.lid.parent, self.body)
+        self.assertEqual(self.body.name, "Chest")
+        self.assertLess(drift(self.lid, self.shut), TOLERANCE)
+        self.assertNotIn("which is gone", rig().rigmoves.report)
+        # Moving it moves the lid.
+        there = world_points(self.lid)
+        self.body.location.x += 2.0
+        bpy.context.view_layer.update()
+        self.assertLess(drift(self.lid, [p + Vector((2.0, 0.0, 0.0)) for p in there]), TOLERANCE)
+
+    def test_a_body_renamed_after_the_first_button_is_still_the_one_the_lid_goes_back_to(self):
+        self.lid_on_a_body()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        part = self.rig1.rigmoves.moves[0].parts["Lid"]
+        self.assertIs(part.home_object, self.body)
+        self.rename_the_body_and_remove()
+        self.check_the_lid_hangs_from_the_body()
+
+    def test_a_body_renamed_before_any_button_is_still_the_one_too(self):
+        # The file is opened and the body renamed, and Remove is the first button.
+        self.lid_on_a_body()
+        self.open_again()
+        self.lid, self.body = self.boxes["Lid"], bpy.data.objects["Body"]
+        self.rename_the_body_and_remove()
+        self.check_the_lid_hangs_from_the_body()
+
+    def test_a_name_that_no_standing_object_has_is_not_pointed_at(self):
+        self.lid_on_a_body()
+        part = self.rig1.rigmoves.moves[0].parts["Lid"]
+        # An object that stands in no scene, and a name that nothing has.
+        bpy.data.objects.new("Ghost", None)
+        for name in ("Ghost", "Nothing by this name"):
+            part.home_parent = name
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+            self.assertIsNone(part.home_object, name)
+            self.assertEqual(part.home_parent, name)
 
 
 class WatchedObjects:

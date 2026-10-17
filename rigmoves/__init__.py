@@ -950,13 +950,20 @@ def follow_renames(rig, data):
 
 def point_at_objects(rig, data):
     """Give every part that has no pointer yet the one its name finds, if it is
-    in this rig's model: parts made before the pointer was kept."""
+    in this rig's model: parts made before the pointer was kept. The same for
+    the object a part hung from before (home_object), which 0.19.0 kept by name
+    only: held by pointer it is followed when it is renamed, and found by its
+    name it is not."""
     for move in data.moves:
         for part in move.parts:
             if part.kind == "OBJECT" and part.object is None:
                 obj = part_object(part)
                 if obj is not None and (bound_to(obj, rig) or not part.bone_name):
                     part.object = obj
+            if part.kind == "OBJECT" and part.home_object is None and part.home_parent:
+                home = bpy.data.objects.get(part.home_parent)
+                if home is not None and home.users_collection:
+                    part.home_object = home
 
 
 def has_deleted(data):
@@ -2827,7 +2834,8 @@ def settle_old_rig(rig, data):
     by (rig_stayed): taken here as well, if the Root still stands where the seat
     says. And the parts that stand on their Before are given marks that span
     their mesh (retake_marks), in place of the three of 0.19.0, which a grid has
-    in a line.
+    in a line. The parts get the pointers an older file lacks (point_at_objects),
+    for a rename made before any button to be followed.
 
     The seat is changed only for a rig that stands where the seat says. One
     that was moved since is carried by the first button, as it was.
@@ -2839,6 +2847,7 @@ def settle_old_rig(rig, data):
         elif is_singular(as_matrix(data.seat_world)):
             if same_matrix(seat_of(rig), as_matrix(data.seat), 1e-4):
                 data.seat_world = flat(rig.matrix_world)
+    point_at_objects(rig, data)
     retake_marks(data, shift=moved_since(rig, data), old=True)
 
 
