@@ -4,12 +4,12 @@ docs/UI_0.20.md, each at UI scale 1.0 and 1.33.
 Run with the fast flower file, a window, simulated input only:
   blender --factory-startup --enable-event-simulate --no-window-focus
           --window-geometry 0 0 1500 1390 promo/files/CopyThat_flower_fast.blend
-          --python promo/tools/ui_states.py -- <folder holding rigmoves/> <out folder> [wider]
+          --python promo/tools/ui_states.py -- <folder holding rigmoves/> <out folder>
 
 It writes one PNG of the whole window per shot, and geometry.jsonl with where
-the sidebar stood in each, which crop_shots.py cuts the sidebar out by. [wider]
-is how many pixels to drag the sidebar wider before the first shot (0 keeps
-Blender's default width).
+the sidebar stood in each, which crop_shots.py cuts the sidebar out by. The
+sidebar is at Blender's default width: a simulated drag like the one in
+window_screenshots.py did not widen it when tried here.
 """
 
 import json
@@ -24,7 +24,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 ADDON = argv[0] if len(argv) > 0 else os.path.dirname(os.path.dirname(HERE))
 OUT = argv[1] if len(argv) > 1 else os.path.join(HERE, "shots")
-WIDER = int(argv[2]) if len(argv) > 2 else 0
 os.makedirs(OUT, exist_ok=True)
 LOG = os.path.join(OUT, "log.txt")
 GEOMETRY = os.path.join(OUT, "geometry.jsonl")
@@ -253,22 +252,6 @@ def timing_and_copies():
           show_chain=False, show_animate=False)
 
 
-def widen(by):
-    win, _area, _region, ui = places()
-    y = ui.y + ui.height // 2
-    x = ui.x + 1
-    win.event_simulate(type="MOUSEMOVE", value="NOTHING", x=x, y=y)
-    win.event_simulate(type="LEFTMOUSE", value="PRESS", x=x, y=y)
-    for k in range(1, 11):
-        win.event_simulate(type="MOUSEMOVE", value="NOTHING", x=x - by * k // 10, y=y)
-    win.event_simulate(type="LEFTMOUSE", value="RELEASE", x=x - by, y=y)
-    log("widen by", by, "from", ui.width)
-
-
-def width_now():
-    log("sidebar now", places()[3].width)
-
-
 def quit_blender():
     log("quit")
     bpy.ops.wm.quit_blender()
@@ -276,7 +259,6 @@ def quit_blender():
 
 STEPS = [
     (setup, 1.0), (show_tab, 1.0), (show_tab, 1.0),
-    (lambda: widen(WIDER) if WIDER else None, 0.8), (width_now, 0.3),
     # 1. empty: no rig yet
     (nothing_selected, 0.6), *shots("01a_empty_nothing_selected"),
     (parts_selected, 0.6), *shots("01b_empty_parts_selected"),

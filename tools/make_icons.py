@@ -1,9 +1,8 @@
 """Draw the panel's icons: gold line icons, PNG 64x64, on transparent.
 
-    python tools/make_icons.py            writes rigmoves/icons/*.png
-    python tools/make_icons.py sheet.png  also writes a contact sheet to look at
+    python tools/make_icons.py
 
-Needs Pillow. Each icon is drawn eight times too big and brought down, so the
+Writes rigmoves/icons/*.png. Needs Pillow. Each icon is drawn eight times too big and brought down, so the
 edges are smooth; every stroke has the same weight and round ends, so the set
 reads as one at the 16 to 24 pixels Blender draws it at. The gold is the
 add-on's: #C9A76A.
@@ -11,7 +10,6 @@ add-on's: #C9A76A.
 
 import math
 import os
-import sys
 
 from PIL import Image, ImageDraw
 
@@ -217,30 +215,11 @@ ICONS = [logo, new_move, record_before, record_after, build, slider, ring, sprea
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    drawn = []
     for function in ICONS:
         pen = Pen()
         function(pen)
-        image = pen.image()
-        image.save(os.path.join(OUT, function.__name__ + ".png"), optimize=True)
-        drawn.append((function.__name__, image))
-    print("{:d} icons in {:s}".format(len(drawn), OUT))
-    if len(sys.argv) > 1:
-        sheet(drawn, sys.argv[1])
-
-
-def sheet(drawn, path):
-    """The icons large, and at the sizes Blender draws them, on the panel's grey."""
-    cell = 150
-    image = Image.new("RGB", (cell * 6, cell * 3 + 10), (45, 45, 45))
-    for number, (name, icon) in enumerate(drawn):
-        x, y = number % 6 * cell, number // 6 * cell
-        image.paste(icon.resize((96, 96), Image.LANCZOS), (x + 6, y + 6), icon.resize((96, 96), Image.LANCZOS))
-        for step, size in enumerate((16, 20, 24)):
-            small = icon.resize((size, size), Image.LANCZOS)
-            big = small.resize((size * 2, size * 2), Image.NEAREST)
-            image.paste(big, (x + 6 + step * 50, y + 108 - (size - 16)), big)
-    image.save(path)
+        pen.image().save(os.path.join(OUT, function.__name__ + ".png"), optimize=True)
+    print("{:d} icons in {:s}".format(len(ICONS), OUT))
 
 
 if __name__ == "__main__":

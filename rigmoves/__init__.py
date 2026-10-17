@@ -9759,7 +9759,8 @@ def short(name, keep=15):
 
 
 # What the box of a move takes of the width of a row in it, both sides
-# together, in pixels at a UI scale of 1 (measured in a real window).
+# together, in pixels at a UI scale of 1 (judged in a real window, where the
+# names cut to fit it do fit).
 INSET = 16.0
 
 # How many letters of the report fit on a line of its box.
@@ -10173,6 +10174,7 @@ class RIGMOVES_PT_panel(bpy.types.Panel):
         box = layout.box()
         header = box.row(align=True)
         chevron(header, move, "expanded")
+        header.label(text="", **icon("slider"))
         header.prop(move, "name", text="")
         header.operator(RIGMOVES_OT_remove.bl_idname, text="", icon="X",
                         emboss=False).index = index
