@@ -6220,7 +6220,12 @@ class RIGMOVES_OT_pick_part(bpy.types.Operator):
                 self.report({"WARNING"}, data.report)
                 return {"CANCELLED"}
             for pose_bone in rig.pose.bones:
-                pose_bone.bone.select = pose_bone.name == part_bone(part)
+                picked = pose_bone.name == part_bone(part)
+                # Blender 5.0 moved the selection from the bone to the pose bone.
+                if hasattr(pose_bone, "select"):
+                    pose_bone.select = picked
+                else:
+                    pose_bone.bone.select = picked
             rig.data.bones.active = rig.data.bones.get(part_bone(part))
             data.report = "Selected '{:s}'.".format(short(part.name, 24))
             return {"FINISHED"}

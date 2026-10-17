@@ -7288,6 +7288,96 @@ class TestAnAltDCopyMadeWithItsPathCurvesBendsOnlyItsOwn(CopiedModel):
         self.assertLess(max((a - b).length for a, b in zip(now[0.5], raised)), 0.01)
 
 
+class TestTheSelectIconBesideAPart(CopyThatCase):
+    """The icon beside a part in the Timing list picks that part in the viewport:
+    a bone in pose mode, an object in object mode. Beside a bone it set
+    Bone.select, which Blender 5.0 took away (the pose bone has it now), and
+    raised AttributeError on 5.0 and 5.2. The button had no test at all."""
+
+    def select_bones(self, holder, *names):
+        """Select exactly these bones, as clicking them would."""
+        for pose_bone in holder.pose.bones:
+            if hasattr(pose_bone, "select"):
+                pose_bone.select = pose_bone.name in names
+            else:
+                pose_bone.bone.select = pose_bone.name in names
+        holder.data.bones.active = holder.data.bones[names[0]]
+
+    def hand_built_arm(self):
+        """An armature made by hand, in pose mode, with a move on two of its bones
+        recorded and built."""
+        armature = bpy.data.armatures.new("Arm")
+        self.arm = bpy.data.objects.new("Hand rig", armature)
+        bpy.context.scene.collection.objects.link(self.arm)
+        select(self.arm)
+        bpy.ops.object.mode_set(mode="EDIT")
+        for number, name in enumerate(("Upper", "Fore", "Hand")):
+            bone = armature.edit_bones.new(name)
+            bone.head = (float(number), 0.0, 0.0)
+            bone.tail = (number + 1.0, 0.0, 0.0)
+        bpy.ops.object.mode_set(mode="POSE")
+        self.select_bones(self.arm, "Upper", "Fore")
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for name, degrees in (("Upper", 40.0), ("Fore", 30.0)):
+            pose_bone = self.arm.pose.bones[name]
+            pose_bone.rotation_mode = "XYZ"
+            pose_bone.rotation_euler.z = math.radians(degrees)
+        bpy.context.view_layer.update()
+        self.select_bones(self.arm, "Upper", "Fore")
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = self.arm.rigmoves.moves[0]
+        self.assertEqual([part.kind for part in self.move.parts], ["BONE", "BONE"])
+        self.assertEqual(bpy.context.mode, "POSE")
+
+    def two_boxes(self):
+        """A lid and a latch in one move, built; the rig is what is selected."""
+        self.lid = cube("Lid", (0.0, 0.0, 1.0))
+        self.latch = cube("Latch", (3.0, 0.0, 1.0))
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.lid.location.z += 1.0
+        self.latch.location.z += 1.0
+        bpy.context.view_layer.update()
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(rig())
+
+    def test_the_icon_beside_a_bone_selects_just_that_bone(self):
+        self.hand_built_arm()
+        for name in ("Fore", "Upper"):
+            number = self.move.parts.find(name)
+            self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=number), {"FINISHED"})
+            self.assertEqual([bone.name for bone in bpy.context.selected_pose_bones], [name])
+            self.assertEqual(self.arm.data.bones.active.name, name)
+            self.assertEqual(self.arm.rigmoves.report, "Selected '{:s}'.".format(name))
+
+    def test_a_bone_is_not_picked_from_object_mode(self):
+        self.hand_built_arm()
+        bpy.ops.object.mode_set(mode="OBJECT")
+        self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=0), {"CANCELLED"})
+        self.assertEqual(self.arm.rigmoves.report, "Go into pose mode on the rig to pick 'Upper'.")
+        self.assertEqual(bpy.context.mode, "OBJECT")
+
+    def test_the_icon_beside_an_object_selects_and_activates_just_that_object(self):
+        self.two_boxes()
+        move = rig().rigmoves.moves[0]
+        for obj in (self.latch, self.lid):
+            number = move.parts.find(obj.name)
+            self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=number), {"FINISHED"})
+            self.assertEqual([o.name for o in bpy.context.selected_objects], [obj.name])
+            self.assertIs(bpy.context.view_layer.objects.active, obj)
+            self.assertEqual(rig().rigmoves.report, "Selected '{:s}'.".format(obj.name))
+
+    def test_an_object_is_not_picked_from_pose_mode(self):
+        self.two_boxes()
+        bpy.ops.object.mode_set(mode="POSE")
+        self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=0), {"CANCELLED"})
+        self.assertEqual(rig().rigmoves.report, "Leave pose mode to pick 'Lid'.")
+        self.assertEqual(bpy.context.mode, "POSE")
+
+
 def drift_of(points, expected):
     """How far the furthest of these points is from the same one of the others."""
     return max((a - b).length for a, b in zip(points, expected))
