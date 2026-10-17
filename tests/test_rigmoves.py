@@ -4199,6 +4199,32 @@ class ThreeBoxes(CopyThatCase):
                 self.assertLess(drift_of(found[share][name], [place @ p for p in by_name[name]]),
                                 TOLERANCE, "{:s}: {:s} at {:.0%}".format(label, name, share))
 
+    def shove_everything(self, build=True):
+        """The whole model, rig and boxes, turned 30 degrees and moved off, so that
+        the rig object stands somewhere that Apply and Set Origin can change; and
+        built there, unless `build` is off. Returns the matrix the model is placed
+        by now."""
+        before = self.rig1.matrix_world.copy()
+        bpy.ops.object.select_all(action="SELECT")
+        self.assertEqual(bpy.ops.transform.rotate(value=math.radians(30.0), orient_axis="Z"),
+                         {"FINISHED"})
+        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
+        bpy.context.view_layer.update()
+        if build:
+            self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        return self.rig1.matrix_world @ before.inverted()
+
+    def tidy_the_rig(self, how):
+        select(self.rig1)
+        if how == "Apply":
+            self.assertEqual(bpy.ops.object.transform_apply(
+                location=True, rotation=True, scale=True), {"FINISHED"})
+        else:
+            bpy.context.scene.cursor.location = self.rig1.matrix_world.translation + Vector(
+                (1.5, -2.0, -0.6))
+            self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+
     def keys_of(self, owner, name):
         """How many curves the Action this rig plays for its move holds for one bone."""
         action = bpy.data.actions[owner.rigmoves.moves[0].action_name]
@@ -4371,30 +4397,6 @@ class TestEditingTheRootBoneMovesNothing(ThreeBoxes):
                 self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
                 self.check_plays(self.rig1, self.boxes, label + ", then moved", away)
 
-    def shove_everything(self):
-        """The whole model, rig and boxes, turned 30 degrees and moved off, so that
-        the rig object stands somewhere that Apply and Set Origin can change.
-        Returns the matrix the model is placed by now."""
-        before = self.rig1.matrix_world.copy()
-        bpy.ops.object.select_all(action="SELECT")
-        self.assertEqual(bpy.ops.transform.rotate(value=math.radians(30.0), orient_axis="Z"),
-                         {"FINISHED"})
-        self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
-        bpy.context.view_layer.update()
-        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
-        return self.rig1.matrix_world @ before.inverted()
-
-    def tidy_the_rig(self, how):
-        select(self.rig1)
-        if how == "Apply":
-            self.assertEqual(bpy.ops.object.transform_apply(
-                location=True, rotation=True, scale=True), {"FINISHED"})
-        else:
-            bpy.context.scene.cursor.location = self.rig1.matrix_world.translation + Vector(
-                (1.5, -2.0, -0.6))
-            self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
-        bpy.context.view_layer.update()
-
     def test_an_edit_after_apply_or_set_origin_on_the_rig_moves_nothing(self):
         # Apply and Set Origin change the rig object and not the Root bone: what
         # the rig remembers of the object has to follow, or the edit that comes
@@ -4440,6 +4442,146 @@ class TestEditingTheRootBoneMovesNothing(ThreeBoxes):
         self.assertEqual(bpy.ops.transform.translate(value=(5.0, 2.0, 0.0)), {"FINISHED"})
         bpy.context.view_layer.update()
         self.assertIsNotNone(rigmoves.moved_since(self.rig1, data))
+
+
+class TestAFileFrom0190IsSettledWhenItOpens(ThreeBoxes):
+    """A file made by 0.19.0 keeps the seat as the rig object's matrix, and each
+    part's marks as three vertices by their place in the mesh. Neither was dealt
+    with until a button was pressed: Ctrl+A or Set Origin on the rig before that
+    was read as the whole model having moved (3 m off), and Set Origin on a part
+    whose three marks lie in a line - the corners of a grid of 4 by 4 - was read
+    as a drag (1.1 m off). 0.19.0 itself gave nothing in either case."""
+
+    def write_what_0190_kept(self):
+        """Write into the rig what 0.19.0 kept: the seat as the rig object's matrix
+        and no matrix of the object beside it, and for each part three marks by
+        their place in the mesh."""
+        data = self.rig1.rigmoves
+        data.seat, data.seat_on_root = rigmoves.flat(self.rig1.matrix_world), False
+        data.seat_world = [0.0] * 16
+        for part in data.moves[0].parts:
+            mesh = self.boxes[part.name].data
+            part.rest_which = (-1, -1, -1)
+            part.rest_marks = [c for index in rigmoves.marked_vertices(len(mesh.vertices))
+                               for c in rigmoves.as_matrix(part.before) @ mesh.vertices[index].co]
+
+    def save_it_as_0190_did(self):
+        self.write_what_0190_kept()
+        self.open_again()
+
+    def open_again(self):
+        """Save the file and open it; the rig and the boxes are taken again by name."""
+        rig_name = self.rig1.name
+        path = os.path.join(tempfile.mkdtemp(), "from_0190.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
+        # What Blender's window does at once after a file is opened, and a session
+        # without one leaves out: everything is evaluated, and the handlers that
+        # follow an update are called.
+        for obj in bpy.data.objects:
+            obj.update_tag()
+        bpy.context.view_layer.update()
+        self.rig1 = bpy.data.objects[rig_name]
+        self.boxes = {name: bpy.data.objects[name] for name in self.NAMES}
+
+    def test_apply_and_set_origin_on_the_rig_before_any_button_move_nothing(self):
+        for how in ("Apply", "Set Origin"):
+            with self.subTest(how):
+                self.three_boxes()
+                place = self.shove_everything()
+                self.save_it_as_0190_did()
+                self.tidy_the_rig(how)
+                self.check_plays(self.rig1, self.boxes, how, place)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.check_plays(self.rig1, self.boxes, how + ", built", place)
+
+    def test_set_origin_on_a_grid_part_before_any_button_moves_nothing(self):
+        # B is a flat grid of 4 by 4: the vertices 0.19.0 told it by, 0, 5 and 10,
+        # lie in a line.
+        self.three_boxes(grid=True)
+        self.save_it_as_0190_did()
+        grid = self.boxes["B"]
+        self.assertEqual(rigmoves.marked_vertices(len(grid.data.vertices)), (0, 5, 10))
+        select(grid)
+        bpy.context.scene.cursor.location = grid.matrix_world.translation + Vector((0.7, -0.4, 0.3))
+        self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_plays(self.rig1, self.boxes, "a grid with a new origin")
+
+    def test_the_marks_of_a_part_standing_on_its_before_span_its_mesh_at_once(self):
+        self.three_boxes(grid=True)
+        self.save_it_as_0190_did()
+        for part in self.rig1.rigmoves.moves[0].parts:
+            self.assertGreaterEqual(part.rest_which[0], 0, part.name)
+            self.assertEqual(len(set(part.rest_which)), 3, part.name)
+            # Three marks that a frame can stand on: not in a line.
+            self.assertIsNotNone(rigmoves.triangle_frame(*rigmoves.rest_marks_of(part)),
+                                 part.name)
+        self.assertTrue(self.rig1.rigmoves.seat_on_root)
+
+    def test_a_part_dragged_off_its_before_keeps_the_marks_it_has(self):
+        # A part that is not on its Before cannot be told from one dragged, and new
+        # marks taken where it stands would say it was never moved.
+        self.three_boxes(grid=True)
+        self.boxes["B"].location.x += 0.4
+        bpy.context.view_layer.update()
+        self.save_it_as_0190_did()
+        parts = self.rig1.rigmoves.moves[0].parts
+        self.assertIsNotNone(rigmoves.hand_moved(parts["B"])[1])
+        self.assertEqual(tuple(parts["B"].rest_which), (-1, -1, -1))
+        self.assertGreaterEqual(parts["A"].rest_which[0], 0)
+
+    def test_a_model_moved_since_the_last_button_is_still_carried_by_the_first(self):
+        # The seat is made over to the Root bone only for a rig that stands where it
+        # says. This one was moved after the last button, and the file saved so.
+        self.three_boxes()
+        self.write_what_0190_kept()
+        place = self.shove_everything(build=False)
+        self.open_again()
+        data = self.rig1.rigmoves
+        self.assertFalse(data.seat_on_root)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertTrue(data.seat_on_root)
+        self.check_plays(self.rig1, self.boxes, "carried by the first button", place)
+
+    def test_a_file_from_0191_is_given_the_objects_matrix_and_an_edit_of_the_root_is_no_move(self):
+        self.three_boxes()
+        place = self.shove_everything()
+        self.rig1.rigmoves.seat_world = [0.0] * 16
+        self.open_again()
+        data = self.rig1.rigmoves
+        self.assertTrue(rigmoves.same_matrix(rigmoves.as_matrix(data.seat_world),
+                                             self.rig1.matrix_world, 1e-5))
+        select(self.rig1)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bone = self.rig1.data.edit_bones["Root"]
+            bone.tail = bone.head + (bone.tail - bone.head) * 2.0
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_plays(self.rig1, self.boxes, "an edit of the Root in a file from 0.19.1", place)
+
+    def test_a_rig_is_looked_over_once_for_a_file_and_not_at_every_update(self):
+        self.three_boxes()
+        with mock.patch.object(rigmoves, "settle_old_rig",
+                               wraps=rigmoves.settle_old_rig) as looked:
+            self.open_again()
+            for _ in range(3):
+                rigmoves.follow_renames_handler()
+                bpy.context.scene.frame_set(bpy.context.scene.frame_current + 1)
+        self.assertEqual(looked.call_count, 1)
+        self.assertEqual(looked.call_args[0][0], self.rig1)
+
+    def test_a_file_opened_again_is_looked_over_again(self):
+        self.three_boxes()
+        with mock.patch.object(rigmoves, "settle_old_rig",
+                               wraps=rigmoves.settle_old_rig) as looked:
+            self.open_again()
+            self.open_again()
+        self.assertEqual(looked.call_count, 2)
 
 
 class WatchedObjects:

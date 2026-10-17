@@ -1204,12 +1204,14 @@ def follow_renames_handler(*_arguments):
     whole file at every question. Renames are followed only when a name
     differs, and the timer is set only when an object has no user but the
     pointer, which is what an object deleted in the viewport looks like - the
-    part's own, or the one it hung from before."""
+    part's own, or the one it hung from before. A rig it has not seen yet since the
+    file was opened is looked over (look_over)."""
     try:
         deleted = False
         for obj in bpy.data.objects:
             if obj.type != "ARMATURE" or not len(obj.rigmoves.moves):
                 continue
+            look_over(obj)
             renamed = False
             for move in obj.rigmoves.moves:
                 for part in move.parts:
@@ -2573,7 +2575,7 @@ def marks_fit(part, obj, shift=None):
     return all((a - b).length <= slack for a, b in zip(then, places))
 
 
-def retake_marks(data, meshes=None, shift=None):
+def retake_marks(data, meshes=None, shift=None, old=False):
     """Take new marks for every object part that stands exactly on its Before
     and whose marks no longer fit: its mesh was edited since they were taken,
     so that a vertex moved or the vertices were numbered another way.
@@ -2584,6 +2586,9 @@ def retake_marks(data, meshes=None, shift=None):
     since the rig was last caught up, and what it remembers is still where it
     was - a part stands on its Before if it stands where that is carried to;
     its marks are taken at the Before it still has, and carried with it later.
+    With `old`, the marks 0.19.0 kept are taken afresh as well, though they fit:
+    three vertices by their place in the mesh can lie in a line (a grid's corner,
+    its middle and the next corner), and a line says nothing about a turn.
     """
     for move in data.moves:
         for part in move.parts:
@@ -2597,7 +2602,7 @@ def retake_marks(data, meshes=None, shift=None):
             if (obj is None or world is not None or obj.type != "MESH" or obj.mode == "EDIT"
                     or len(obj.data.vertices) < 3):
                 continue
-            if not marks_fit(part, obj, shift):
+            if (old and part.rest_which[0] < 0) or not marks_fit(part, obj, shift):
                 note_rest(part, obj)
 
 
@@ -2800,6 +2805,54 @@ def moved_since(rig, data):
     if is_singular(rig.matrix_world) or is_singular(was) or rig_stayed(rig, data):
         return None
     return now @ was.inverted_safe()
+
+
+# The rigs this session has looked over (settle_old_rig), by the number Blender
+# gives each object for the session: a new one for every object of a file opened.
+SETTLED = set()
+
+
+def settle_old_rig(rig, data):
+    """The first look at a rig after its file was opened, to do what a button
+    would do for a file made by an older version - before the file is changed in
+    a way that hides what the button needs. (Blender updates the scene at once
+    when a file is opened, and calls follow_renames_handler after it: that is
+    when this is done, with the objects' matrices worked out.)
+
+    0.19.0 kept the seat as the rig object's matrix. Ctrl+A or Set Origin on the
+    rig before any button changes that matrix and not the Root bone, and the first
+    button took it for the whole model having moved: everything the rig
+    remembers was carried by it. Kept on the Root bone now, it is not. 0.19.1
+    kept no seat_world beside the seat, which an edit of the Root bone is told
+    by (rig_stayed): taken here as well, if the Root still stands where the seat
+    says. And the parts that stand on their Before are given marks that span
+    their mesh (retake_marks), in place of the three of 0.19.0, which a grid has
+    in a line.
+
+    The seat is changed only for a rig that stands where the seat says. One
+    that was moved since is carried by the first button, as it was.
+    """
+    if data.seated:
+        if not data.seat_on_root:
+            if same_matrix(rig.matrix_world, as_matrix(data.seat), 1e-4):
+                store_seat(rig, data)
+        elif is_singular(as_matrix(data.seat_world)):
+            if same_matrix(seat_of(rig), as_matrix(data.seat), 1e-4):
+                data.seat_world = flat(rig.matrix_world)
+    retake_marks(data, shift=moved_since(rig, data), old=True)
+
+
+def look_over(rig):
+    """Settle a rig the first time this session sees it, and not again. Never
+    raises: a rig linked from a library cannot be written to, and that must not
+    stop the handler that asks from following renames."""
+    if rig.session_uid in SETTLED:
+        return
+    SETTLED.add(rig.session_uid)
+    try:
+        settle_old_rig(rig, rig.rigmoves)
+    except Exception:
+        pass
 
 
 def is_singular(matrix):
