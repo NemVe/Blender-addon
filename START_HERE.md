@@ -14,7 +14,7 @@ guide: what the add-on promises).
   1. Bump the version (bl_info, the guide's title and zip name).
   2. Add any bug fixed to the guide's list.
   3. Run the tests and ruff.
-  4. Commit and push to `claude/funny-hypatia-jnendi`.
+  4. Commit and push to `main`.
   5. Build with `python tools/build_zip.py`.
   6. Send them the zip from `dist/`.
 - Their uploads are capped at **30 MB**. They split big files with 7-Zip

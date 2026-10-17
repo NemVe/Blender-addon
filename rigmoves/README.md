@@ -1445,73 +1445,6 @@ and one lifted 1 m:
   "is a mirror image of 'Petal' (not the same on both sides), so it is not a copy -
   it can ride along with Ride Along, which mirrors by itself".
 
-- **Delete a part of a copy of a whole model (Shift+D or Alt+D) and press Build,
-  Record or Remove on the copy:** the model it was copied from no longer loses
-  that part's keys and stays at rest; the same the other way round.
-- **Moving, lengthening, rolling or renaming the Root bone in Edit Mode is no
-  longer taken for the whole model having moved:** the next Build or Record no
-  longer throws every part off by that much.
-- **A file made by 0.19.0:** Ctrl+A or Set Origin on the rig before pressing any
-  CopyThat button no longer throws the parts off at the next Build, and Set
-  Origin on a part whose old marks lie in a line (a grid of 4 by 4) is no longer
-  read as the part being dragged. The file is settled when it opens.
-- **A lid that hung from a body in a file made by 0.19.0 is hung back on that
-  body by Remove even after the body was renamed.**
-- **Geometry added to a built part stayed behind when the part moved.** A built
-  lid; in Edit Mode a cube made with Shift+A, or a handle joined to it with
-  Ctrl+J; Build. The lid swung open and the new vertices stayed where they were
-  (1.96 m behind it at full share), and Build said nothing. Build now puts the
-  vertices that are in no vertex group into the part's group, and says "'Lid'
-  had new geometry; it moves with it now." A vertex that is in a group already -
-  extruded or subdivided from a weighted one, or painted for another bone - is
-  somebody's weight and is left alone.
-- **A move named with 64 bytes or more broke Build half way.** A move renamed to
-  92 letters, 32 accented letters or 22 CJK characters, then Build: "KeyError:
-  the length of IDProperty names is limited to 63 characters", the parts bound
-  and given bones and no slider to play them. Two moves named alike at 62 bytes
-  did the same (the second slider is given a " 2"), and so did a combined
-  control named with 70 characters. The slider's name is now cut to 56 bytes, on
-  the edge of a letter; a file saved after a failed Build is put right by its
-  next Build.
-- **A move named with accented letters still failed to build on Blender 4.5.**
-  The handle's bone ("<name> handle") was cut through a letter by 4.5, and its
-  name could not be read ("UnicodeDecodeError ... position 62"). It is cut on
-  the edge of a letter now.
-- **Remove, Make Chain and the eye wrecked a model on the frame where its rig is
-  scaled to nothing.** A chest whose rig (or an Empty above it) grows in from
-  scale 0: Remove on frame 1 left the lid and latch at scale 0 with their places
-  lost and said "The rig is back to how it was"; Make Chain gave the follower a
-  scale of 0 and a parent inverse of 3e8, so after the next Build the lid
-  travelled 4.8 m instead of 0.9; the eye scaled the parts to nothing (the next
-  Build gave them back); and Set Pivot and Ring blamed "has been moved and not
-  recorded". Remove, Set Pivot and Ring now ask for a frame where the rig has a
-  size, in the words Record and Build use; Make Chain only notes the chain, and
-  the next Build hangs it; the eye shows the pose and leaves the parts alone.
-- **A hand-built chain whose first bone is a part played a step behind its
-  slider.** An armature Upper > Fore > Hand with no root bone of its own: the
-  slider's property and the handle went on Upper, the first bone with no parent,
-  which is a part itself. The handle became Upper's child, the slider's driver
-  looped through it ("Dependency cycle detected"), and on frame 42, with the
-  slider at 0.85, Upper stood at 0 degrees where 34.2 was wanted. The handle now
-  hangs from no part and from nothing below one: from the nearest bone above the
-  control that is clear of the parts, or from none. A rig with a root bone of
-  its own keeps its handle on it. (A file built before this is put right by its
-  next Build.)
-- **A model scaled up 130 times or more was read as dragged at every button,**
-  and Record then lost its move. How much two places may differ now grows with
-  the model's size as well as its distance from the origin.
-- **Set Origin on a very thin part moved it at the next Build** (a rod 10,000
-  times longer than it is thick). Such parts are told right now.
-- **After the whole model was carried far, Build said parts had turned about a
-  new pivot** and keyed their paths again, though nothing had changed.
-- **An Alt+D copy of an animated model shared the rig's own keys.** Remove,
-  Animate or the key button on the copy, or a new Path length, changed the
-  original's animation.
-- **An Alt+D copy made with its path curves selected shared the curves' shape
-  with the original:** bending the copy's curve bent the original's path too.
-- **On Blender 5.0 and 5.2 the select icon beside a bone part in the Timing list
-  raised an error.**
-
 - **Deleting a part could close Blender.** About half a second after X, a timer lets
   go of the deleted part's object. It removed the object from the very list it was
   looping over, and a loop over a list that loses a member goes on to read the one it
@@ -1648,6 +1581,73 @@ and one lifted 1 m:
   is not a place a bone can stand; the riders' seats are worked out in the rig's own
   space now, for mirrored riders too.
 
+- **Delete a part of a copy of a whole model (Shift+D or Alt+D) and press Build,
+  Record or Remove on the copy:** the model it was copied from no longer loses
+  that part's keys and stays at rest; the same the other way round.
+- **Moving, lengthening, rolling or renaming the Root bone in Edit Mode is no
+  longer taken for the whole model having moved:** the next Build or Record no
+  longer throws every part off by that much.
+- **A file made by 0.19.0:** Ctrl+A or Set Origin on the rig before pressing any
+  CopyThat button no longer throws the parts off at the next Build, and Set
+  Origin on a part whose old marks lie in a line (a grid of 4 by 4) is no longer
+  read as the part being dragged. The file is settled when it opens.
+- **A lid that hung from a body in a file made by 0.19.0 is hung back on that
+  body by Remove even after the body was renamed.**
+- **Geometry added to a built part stayed behind when the part moved.** A built
+  lid; in Edit Mode a cube made with Shift+A, or a handle joined to it with
+  Ctrl+J; Build. The lid swung open and the new vertices stayed where they were
+  (1.96 m behind it at full share), and Build said nothing. Build now puts the
+  vertices that are in no vertex group into the part's group, and says "'Lid'
+  had new geometry; it moves with it now." A vertex that is in a group already -
+  extruded or subdivided from a weighted one, or painted for another bone - is
+  somebody's weight and is left alone.
+- **A move named with 64 bytes or more broke Build half way.** A move renamed to
+  92 letters, 32 accented letters or 22 CJK characters, then Build: "KeyError:
+  the length of IDProperty names is limited to 63 characters", the parts bound
+  and given bones and no slider to play them. Two moves named alike at 62 bytes
+  did the same (the second slider is given a " 2"), and so did a combined
+  control named with 70 characters. The slider's name is now cut to 56 bytes, on
+  the edge of a letter; a file saved after a failed Build is put right by its
+  next Build.
+- **A move named with accented letters still failed to build on Blender 4.5.**
+  The handle's bone ("<name> handle") was cut through a letter by 4.5, and its
+  name could not be read ("UnicodeDecodeError ... position 62"). It is cut on
+  the edge of a letter now.
+- **Remove, Make Chain and the eye wrecked a model on the frame where its rig is
+  scaled to nothing.** A chest whose rig (or an Empty above it) grows in from
+  scale 0: Remove on frame 1 left the lid and latch at scale 0 with their places
+  lost and said "The rig is back to how it was"; Make Chain gave the follower a
+  scale of 0 and a parent inverse of 3e8, so after the next Build the lid
+  travelled 4.8 m instead of 0.9; the eye scaled the parts to nothing (the next
+  Build gave them back); and Set Pivot and Ring blamed "has been moved and not
+  recorded". Remove, Set Pivot and Ring now ask for a frame where the rig has a
+  size, in the words Record and Build use; Make Chain only notes the chain, and
+  the next Build hangs it; the eye shows the pose and leaves the parts alone.
+- **A hand-built chain whose first bone is a part played a step behind its
+  slider.** An armature Upper > Fore > Hand with no root bone of its own: the
+  slider's property and the handle went on Upper, the first bone with no parent,
+  which is a part itself. The handle became Upper's child, the slider's driver
+  looped through it ("Dependency cycle detected"), and on frame 42, with the
+  slider at 0.85, Upper stood at 0 degrees where 34.2 was wanted. The handle now
+  hangs from no part and from nothing below one: from the nearest bone above the
+  control that is clear of the parts, or from none. A rig with a root bone of
+  its own keeps its handle on it. (A file built before this is put right by its
+  next Build.)
+- **A model scaled up 130 times or more was read as dragged at every button,**
+  and Record then lost its move. How much two places may differ now grows with
+  the model's size as well as its distance from the origin.
+- **Set Origin on a very thin part moved it at the next Build** (a rod 10,000
+  times longer than it is thick). Such parts are told right now.
+- **After the whole model was carried far, Build said parts had turned about a
+  new pivot** and keyed their paths again, though nothing had changed.
+- **An Alt+D copy of an animated model shared the rig's own keys.** Remove,
+  Animate or the key button on the copy, or a new Path length, changed the
+  original's animation.
+- **An Alt+D copy made with its path curves selected shared the curves' shape
+  with the original:** bending the copy's curve bent the original's path too.
+- **On Blender 5.0 and 5.2 the select icon beside a bone part in the Timing list
+  raised an error.**
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -1700,7 +1700,7 @@ and one lifted 1 m:
   can be read as a drag, and Build puts the part back. Press any CopyThat button
   between the two (the eye will do).
 - Apply Scale on a rig that is scaled unevenly is still read as a move of the model.
-- On a frame where the rig is scaled to nothing, Record, Build, Set Pivot and Ring
+- On a frame where the rig is scaled to nothing, Record, Build, Remove, Set Pivot and Ring
   are refused. Go to a frame where it has a size.
 - A rider copies its leader from where it stood when it joined. To move one,
   take it out and add it again. A rider cannot lead others, and only objects

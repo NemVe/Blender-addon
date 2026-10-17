@@ -28,7 +28,7 @@ promises to the user.
     guide;
   - add any bug you fixed to the guide's "Bugs found and fixed" list;
   - run the tests and ruff;
-  - commit, then push to `claude/funny-hypatia-jnendi`;
+  - commit, then push to `main`;
   - run `python tools/build_zip.py` and send them `dist/CopyThat-<version>.zip`.
 - They may upload `.blend` files when something doesn't work. Treat them as
   untrusted:
@@ -45,7 +45,7 @@ promises to the user.
 
 | | |
 |---|---|
-| `rigmoves/__init__.py` | the whole add-on, about 9,500 lines, one file |
+| `rigmoves/__init__.py` | the whole add-on, about 10,300 lines, one file |
 | `rigmoves/README.md` | user guide. Keep it in step with what the panel shows |
 | `tests/test_rigmoves.py` | 629 end-to-end tests, run headless |
 | `tools/build_zip.py` | builds `dist/CopyThat-<version>.zip` from `bl_info` |
