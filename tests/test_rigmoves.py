@@ -7645,6 +7645,388 @@ class TestRingAnimatedChild(RingFlows):
         self.assertGreater(drift_of(self.seen_at([bee])[10]["Bee"], was[10]["Bee"]), 0.1)
 
 
+class TestAnAltDCopyHasTheRigsKeysOfItsOwn(CopiedModel):
+    """The keys on a handle - from Animate, or put there by hand - are in the rig's
+    own Action, and Alt+D of the whole model plays that very Action on the copy.
+    Remove on the copy took the handle's curve out of the original's too, so the
+    original stood still; Animate and Key the Control on the copy wrote into it,
+    moving the original's last key and adding one. And the path both rigs play is
+    one Action until a button gives the copy its own, so a Path length set on the
+    copy (by Python: it is not on the panel) stretched the original's. A Shift+D
+    copy has the path in common as well, but not the handle's keys."""
+
+    FRAMES = (1, 13, 25, 30, 37, 49, 60)
+
+    def setUp(self):
+        super().setUp()
+        self.chest()
+        bpy.context.scene.frame_set(1)
+
+    def where_they_are(self, objects):
+        """Where these objects are on each of the frames, as the timeline plays them."""
+        out = {}
+        for frame in self.FRAMES:
+            bpy.context.scene.frame_set(frame)
+            out[frame] = [world_points(obj) for obj in objects]
+        bpy.context.scene.frame_set(1)
+        return out
+
+    def check_they_play(self, objects, was, after):
+        """Each of these is where it was on every one of the frames."""
+        for frame in self.FRAMES:
+            bpy.context.scene.frame_set(frame)
+            for obj, points in zip(objects, was[frame]):
+                self.assertLess(drift(obj, points), TOLERANCE,
+                                "{:s} on frame {:d}, after {:s}".format(obj.name, frame, after))
+        bpy.context.scene.frame_set(1)
+
+    def handle_keys(self, owner, move):
+        """(frame, place along the rail) of every key on the move's handle."""
+        path = owner.pose.bones[move.handle_name].path_from_id("location")
+        _holder, curve = rigmoves.action_curve(owner, path, 1)
+        if curve is None:
+            return []
+        return [(round(point.co[0]), round(point.co[1], 4)) for point in curve.keyframe_points]
+
+    def animated_and_copied(self):
+        """The original animated over frames 1 to 49, then copied with Alt+D."""
+        select(self.rig1)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        self.was = self.where_they_are([self.lid])
+        # It does play, so that what is lost shows.
+        self.assertGreater(drift_of(self.was[49][0], self.was[1][0]), 1.0)
+        rig2, part2 = self.copy_everything(linked=True)
+        self.assertIs(rig2.animation_data.action, self.rig1.animation_data.action)
+        bpy.context.scene.frame_set(1)
+        return rig2, part2
+
+    def test_removing_the_copys_move_leaves_the_original_playing(self):
+        rig2, _part2 = self.animated_and_copied()
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.check_they_play([self.lid], self.was, "Remove on the copy")
+
+    def test_animating_the_copy_leaves_the_original_playing_and_the_copy_plays_its_own(self):
+        rig2, part2 = self.animated_and_copied()
+        move1, move2 = self.rig1.rigmoves.moves[0], rig2.rigmoves.moves[0]
+        move2.play_frames = 100
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        self.check_they_play([self.lid], self.was, "Animate on the copy")
+        self.assertEqual(self.handle_keys(self.rig1, move1), [(1, 0.0), (49, round(move1.rail, 4))])
+        # The copy plays the hundred frames it was given, 6 m along.
+        self.assertEqual(self.handle_keys(rig2, move2), [(1, 0.0), (101, round(move2.rail, 4))])
+        for frame, share in ((1, 0.0), (101, 1.0)):
+            bpy.context.scene.frame_set(frame)
+            self.assertLess(drift(part2, [self.OFF @ p for p in self.plays[share]]), TOLERANCE,
+                            "the copy on frame {:d}".format(frame))
+
+    def test_keying_the_copys_control_leaves_the_original_playing_and_the_copy_has_the_key(self):
+        rig2, _part2 = self.animated_and_copied()
+        move1, move2 = self.rig1.rigmoves.moves[0], rig2.rigmoves.moves[0]
+        bpy.context.scene.frame_set(30)
+        rig2.pose.bones[move2.handle_name].location.y = move2.rail * 0.5
+        bpy.context.view_layer.update()
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.key_control(index=0), {"FINISHED"})
+        self.check_they_play([self.lid], self.was, "Key the Control on the copy")
+        self.assertEqual(self.handle_keys(self.rig1, move1), [(1, 0.0), (49, round(move1.rail, 4))])
+        self.assertEqual(self.handle_keys(rig2, move2),
+                         [(1, 0.0), (30, round(move2.rail * 0.5, 4)), (49, round(move2.rail, 4))])
+
+    def stretch_the_copys_path(self, linked):
+        rig2, part2 = self.copy_everything(linked=linked)
+        move1, move2 = self.rig1.rigmoves.moves[0], rig2.rigmoves.moves[0]
+        # Until a button is pressed on it, the copy plays the original's path.
+        self.assertEqual(move2.action_name, move1.action_name)
+        move2.frames = 40
+        bpy.context.view_layer.update()
+        self.check_original()
+        # The copy was given a path of its own to stretch, and plays it from its
+        # Build on.
+        self.assertNotEqual(move2.action_name, move1.action_name)
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_original()
+        self.check_copy(rig2, part2)
+
+    def test_a_longer_path_on_an_alt_d_copy_leaves_the_original_playing(self):
+        self.stretch_the_copys_path(linked=True)
+
+    def test_a_longer_path_on_a_shift_d_copy_leaves_the_original_playing(self):
+        self.stretch_the_copys_path(linked=False)
+
+    def test_a_rig_whose_nla_is_being_tweaked_still_builds(self):
+        # Not a fault of 0.19.1's but of making the rig's Action its own at every
+        # button: tweaking, the Action is a strip's and Blender will not swap it.
+        select(self.rig1)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        animation = self.rig1.animation_data
+        track = animation.nla_tracks.new()
+        strip = track.strips.new("Opening", 1, animation.action)
+        animation.nla_tracks.active = track
+        strip.select = True
+        animation.use_tweak_mode = True
+        self.assertTrue(animation.use_tweak_mode)
+        action = animation.action
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertTrue(animation.use_tweak_mode)
+        self.assertIs(animation.action, action)
+
+
+class TestAnAltDCopyMadeWithItsPathCurvesBendsOnlyItsOwn(CopiedModel):
+    """Select All - the path curves too - and Alt+D: the copy has curve objects of
+    its own, but linked ones, which share the originals' Curve. Bent on the copy,
+    the original's curve was bent as well, and its lid moved 3 m at its next
+    Build. (The first button pressed on a copy parts them; a bend made before
+    any is made on both, and nothing can tell.)"""
+
+    def setUp(self):
+        super().setUp()
+        self.chest()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.curve = self.rig1.rigmoves.moves[0].parts[0].path_curve
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.keep(self.lid)
+        self.shape = self.points_of(self.curve)
+
+    @staticmethod
+    def points_of(curve):
+        return [tuple(round(c, 5) for c in point.co)
+                for point in curve.data.splines[0].bezier_points]
+
+    @staticmethod
+    def bend(curve, height):
+        """Pull the middle point up, handles with it, as Edit Mode does."""
+        middle = curve.data.splines[0].bezier_points[1]
+        for point in (middle.co, middle.handle_left, middle.handle_right):
+            point.z += height
+
+    def test_bending_the_copys_curve_leaves_the_originals_lid_where_it_was(self):
+        rig2, part2 = self.copy_everything(True, self.curve)
+        curve2 = rig2.rigmoves.moves[0].parts[0].path_curve
+        # The copy's curve is an object of its own, on the original's Curve.
+        self.assertIsNot(curve2, self.curve)
+        self.assertIs(curve2.data, self.curve.data)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.bend(curve2, 3.0)
+        select(part2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        bpy.context.scene.rigmoves_rig = self.rig1
+        select(self.part)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_original()
+        self.assertEqual(self.points_of(self.curve), self.shape)
+        self.assertIsNot(curve2.data, self.curve.data)
+        # The copy's lid goes up the 3 m its curve was bent.
+        now = self.play(rig2, part2)
+        raised = [self.OFF @ (p + Vector((0.0, 0.0, 3.0))) for p in self.plays[0.5]]
+        self.assertLess(max((a - b).length for a, b in zip(now[0.5], raised)), 0.01)
+
+
+class TestTheSelectIconBesideAPart(CopyThatCase):
+    """The icon beside a part in the Timing list picks that part in the viewport:
+    a bone in pose mode, an object in object mode. Beside a bone it set
+    Bone.select, which Blender 5.0 took away (the pose bone has it now), and
+    raised AttributeError on 5.0 and 5.2. The button had no test at all."""
+
+    def select_bones(self, holder, *names):
+        """Select exactly these bones, as clicking them would."""
+        for pose_bone in holder.pose.bones:
+            if hasattr(pose_bone, "select"):
+                pose_bone.select = pose_bone.name in names
+            else:
+                pose_bone.bone.select = pose_bone.name in names
+        holder.data.bones.active = holder.data.bones[names[0]]
+
+    def hand_built_arm(self):
+        """An armature made by hand, in pose mode, with a move on two of its bones
+        recorded and built."""
+        armature = bpy.data.armatures.new("Arm")
+        self.arm = bpy.data.objects.new("Hand rig", armature)
+        bpy.context.scene.collection.objects.link(self.arm)
+        select(self.arm)
+        bpy.ops.object.mode_set(mode="EDIT")
+        for number, name in enumerate(("Upper", "Fore", "Hand")):
+            bone = armature.edit_bones.new(name)
+            bone.head = (float(number), 0.0, 0.0)
+            bone.tail = (number + 1.0, 0.0, 0.0)
+        bpy.ops.object.mode_set(mode="POSE")
+        self.select_bones(self.arm, "Upper", "Fore")
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        for name, degrees in (("Upper", 40.0), ("Fore", 30.0)):
+            pose_bone = self.arm.pose.bones[name]
+            pose_bone.rotation_mode = "XYZ"
+            pose_bone.rotation_euler.z = math.radians(degrees)
+        bpy.context.view_layer.update()
+        self.select_bones(self.arm, "Upper", "Fore")
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = self.arm.rigmoves.moves[0]
+        self.assertEqual([part.kind for part in self.move.parts], ["BONE", "BONE"])
+        self.assertEqual(bpy.context.mode, "POSE")
+
+    def two_boxes(self):
+        """A lid and a latch in one move, built; the rig is what is selected."""
+        self.lid = cube("Lid", (0.0, 0.0, 1.0))
+        self.latch = cube("Latch", (3.0, 0.0, 1.0))
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        self.lid.location.z += 1.0
+        self.latch.location.z += 1.0
+        bpy.context.view_layer.update()
+        select(self.lid, self.latch)
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(rig())
+
+    def test_the_icon_beside_a_bone_selects_just_that_bone(self):
+        self.hand_built_arm()
+        for name in ("Fore", "Upper"):
+            number = self.move.parts.find(name)
+            self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=number), {"FINISHED"})
+            self.assertEqual([bone.name for bone in bpy.context.selected_pose_bones], [name])
+            self.assertEqual(self.arm.data.bones.active.name, name)
+            self.assertEqual(self.arm.rigmoves.report, "Selected '{:s}'.".format(name))
+
+    def test_a_bone_is_not_picked_from_object_mode(self):
+        self.hand_built_arm()
+        bpy.ops.object.mode_set(mode="OBJECT")
+        self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=0), {"CANCELLED"})
+        self.assertEqual(self.arm.rigmoves.report, "Go into pose mode on the rig to pick 'Upper'.")
+        self.assertEqual(bpy.context.mode, "OBJECT")
+
+    def test_the_icon_beside_an_object_selects_and_activates_just_that_object(self):
+        self.two_boxes()
+        move = rig().rigmoves.moves[0]
+        for obj in (self.latch, self.lid):
+            number = move.parts.find(obj.name)
+            self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=number), {"FINISHED"})
+            self.assertEqual([o.name for o in bpy.context.selected_objects], [obj.name])
+            self.assertIs(bpy.context.view_layer.objects.active, obj)
+            self.assertEqual(rig().rigmoves.report, "Selected '{:s}'.".format(obj.name))
+
+    def test_an_object_is_not_picked_from_pose_mode(self):
+        self.two_boxes()
+        bpy.ops.object.mode_set(mode="POSE")
+        self.assertEqual(bpy.ops.rigmoves.pick_part(index=0, part=0), {"CANCELLED"})
+        self.assertEqual(rig().rigmoves.report, "Leave pose mode to pick 'Lid'.")
+        self.assertEqual(bpy.context.mode, "POSE")
+
+
+class TestAMoveWithALongName(CopyThatCase):
+    """A move's slider is a custom property named after it, and so is a combined
+    control's, and Blender holds a property's name to 63 bytes. A move named with
+    64 bytes or more - 92 letters, 32 accented ones, 22 CJK - failed its Build at
+    the slider with a KeyError, after the parts were bound and before anything
+    played them; so did two moves of one 62-byte name, the second slider being
+    given a " 2", and a combined control named with 70 characters."""
+
+    @staticmethod
+    def lift(obj):
+        def pose():
+            obj.location.z += 1.0
+        return pose
+
+    def moves_named(self, *names):
+        """A box of its own for each name, risen 1 m by a move of that name, and
+        recorded; not built."""
+        boxes = []
+        for number, name in enumerate(names):
+            box = cube("Box {:d}".format(number + 1), (3.0 * number, 0.0, 1.0))
+            record_move([box], self.lift(box))
+            rig().rigmoves.moves[number].name = name
+            boxes.append(box)
+        return boxes
+
+    def check_plays(self, carrier, box, others=()):
+        """The control raises this box 1 m, and no other."""
+        drive(carrier, 1.0)
+        self.assertAlmostEqual(centre(box).z, 2.0, places=4)
+        for other in others:
+            self.assertAlmostEqual(centre(other).z, 1.0, places=4)
+        drive(carrier, 0.0)
+        self.assertAlmostEqual(centre(box).z, 1.0, places=4)
+
+    def check_a_name(self, name, kept):
+        """A move of this name builds, with a slider named `kept`, and plays."""
+        (box,) = self.moves_named(name)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        move = rig().rigmoves.moves[0]
+        self.assertEqual(move.name, name)
+        self.assertEqual(move.prop, kept)
+        self.assertIn(kept, rig().pose.bones[move.control].keys())
+        self.check_plays(move, box)
+
+    def test_a_name_of_ninety_two_characters_builds_and_plays(self):
+        self.check_a_name("a" * 92, "a" * 56)
+
+    def test_thirty_two_accented_letters_build_and_play(self):
+        # 64 bytes, cut to the 56 that leave room: 28 letters, none of them split.
+        self.check_a_name("é" * 32, "é" * 28)
+
+    def test_twenty_two_cjk_characters_build_and_play(self):
+        # 66 bytes, cut to 54: 18 characters of 3 bytes.
+        self.check_a_name("移" * 22, "移" * 18)
+
+    def test_a_name_whose_cut_falls_inside_a_letter_builds_and_plays(self):
+        # 64 bytes, and the 63rd, where Blender 4.5 cuts a bone's name, is the
+        # second of a letter's three. The slider's name keeps 55 of them.
+        self.check_a_name("a" + "移" * 21, "a" + "移" * 18)
+        self.assertIn(rig().rigmoves.moves[0].handle_name, rig().data.bones)
+
+    def test_two_moves_named_alike_at_sixty_two_bytes_build_and_play_alone(self):
+        # Two names that make one slider name ("!" and "?" are both made "_"):
+        # the second slider is given a " 2" after its 62 bytes.
+        first, second = self.moves_named("n" * 61 + "!", "n" * 61 + "?")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        one, two = rig().rigmoves.moves
+        self.assertEqual((one.prop, two.prop), ("n" * 56, "n" * 56 + " 2"))
+        self.check_plays(one, first, (second,))
+        self.check_plays(two, second, (first,))
+
+    def test_two_moves_of_one_name_at_sixty_two_bytes_get_a_slider_each(self):
+        alike = "n" * 62
+        self.moves_named(alike, alike)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        one, two = rig().rigmoves.moves
+        self.assertNotEqual(one.prop, two.prop)
+        for move in (one, two):
+            self.assertLessEqual(len(move.prop.encode()), 63)
+            self.assertIn(move.prop, rig().pose.bones[move.control].keys())
+
+    def test_a_combined_control_named_with_seventy_characters_builds_and_plays(self):
+        first, second = self.moves_named("Lid", "Latch")
+        self.assertEqual(bpy.ops.rigmoves.combine(), {"FINISHED"})
+        group = rig().rigmoves.groups[0]
+        group.name = "g" * 70
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(group.prop, "g" * 56)
+        self.assertTrue(group.built)
+        self.assertIn(group.prop, rig().pose.bones[group.control].keys())
+        drive(group, 1.0)
+        for box in (first, second):
+            self.assertAlmostEqual(centre(box).z, 2.0, places=4)
+        drive(group, 0.0)
+        for box in (first, second):
+            self.assertAlmostEqual(centre(box).z, 1.0, places=4)
+
+    def test_a_name_too_long_for_a_property_that_a_file_holds_is_made_again(self):
+        # What a file saved after a Build that failed on a long name holds.
+        (box,) = self.moves_named("Lid opens")
+        move = rig().rigmoves.moves[0]
+        move.prop = "q" * 70
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(move.prop, "Lid opens")
+        self.check_plays(move, box)
+
+    def test_a_name_that_fits_is_kept_whole(self):
+        self.check_a_name("Open the big lid", "Open the big lid")
+
+
 def drift_of(points, expected):
     """How far the furthest of these points is from the same one of the others."""
     return max((a - b).length for a, b in zip(points, expected))

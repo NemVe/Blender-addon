@@ -494,7 +494,7 @@ def sync_handles(rig, data):
     # knowing where its members already are.
     for carrier, names in carriers(data):
         if carrier.handle and names:
-            wanted[carrier.handle_name or (carrier.name + " handle")] = (carrier, names)
+            wanted[carrier.handle_name or fit_name(carrier.name + " handle")] = (carrier, names)
     wanted = dict(sorted(wanted.items(),
                          key=lambda row: 1 if hasattr(row[1][0], "members") else 0))
     stale = [b.name for b in rig.data.bones
@@ -663,7 +663,9 @@ def ensure_slider(rig, carrier):
     carrier.control = control
     if not control:
         return None
-    if not carrier.prop:
+    # A name too long for a property is made again. A file saved after a Build
+    # that failed on one holds it, and nothing was ever written under it.
+    if not carrier.prop or len(carrier.prop.encode()) > 63:
         carrier.prop = unique_prop_name(rig, carrier, safe_prop_name(carrier.name))
     bone = rig.pose.bones[control]
     if carrier.prop not in bone.keys():
@@ -1176,6 +1178,11 @@ def own_curves(rig, data):
     Action's copy is; the only thing that points at one is the part's pointer.
     A drawn line is let go of: the next Build or Show Paths draws this rig's
     own, and nothing here deletes the other's.
+
+    With the curves selected too, Alt+D gives the copy curve objects of its own,
+    but they share the originals' Curve: bent in Edit Mode on the copy, the
+    original's bent as well, and its lid moved at its next Build. Those get a
+    Curve of their own here.
     """
     others = [o for o in bpy.data.objects
               if o.type == "ARMATURE" and o is not rig and len(o.rigmoves.moves)]
@@ -1188,7 +1195,13 @@ def own_curves(rig, data):
             move.paths_object = None
         for part in move.parts:
             curve = part.path_curve
-            if curve is None or curve not in curves:
+            if curve is None:
+                continue
+            if curve not in curves:
+                # A fake user alone does not make a Curve shared.
+                if (curve.type == "CURVE" and curve.data is not None
+                        and curve.data.users - int(curve.data.use_fake_user) > 1):
+                    curve.data = curve.data.copy()
                 continue
             fresh = curve.copy()
             fresh.name = "{:s} {:s}".format(curve.name, rig.name)
@@ -1501,8 +1514,20 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
                     "put it into effect")
 
 
+def fit_name(text, limit=63):
+    """The text cut to `limit` bytes, on the edge of a letter. Blender keeps 63
+    bytes of a name; Blender 4.5 cuts a longer one wherever the byte falls,
+    through an accented or CJK letter, and the name cannot be read after that
+    (Python raises UnicodeDecodeError), where 5.0 cuts at a letter."""
+    return text.encode()[:limit].decode("utf-8", "ignore")
+
+
 def safe_prop_name(text):
     kept = "".join(c if (c.isalnum() or c in " _-") else "_" for c in text).strip()
+    # Blender holds the name of a custom property to 63 bytes - bytes, so 32
+    # accented letters are one too many - and unique_prop_name may add a number
+    # after it. Cut short of that.
+    kept = fit_name(kept, 56).strip()
     return kept or "Move"
 
 
@@ -1545,6 +1570,11 @@ def _frames_changed(self, context):
     """Keep the recorded path when its length is changed."""
     wanted = max(1, self.frames)
     if self.frames_applied and self.frames_applied != wanted:
+        # Before the keys are stretched, and before any button has been pressed:
+        # a copy of the whole model plays the Action of the model it was copied
+        # from until it takes one of its own, and stretching that one stretched
+        # the original's path too.
+        own_actions(self.id_data, self.id_data.rigmoves)
         rescale_keys(self, self.frames_applied, wanted)
     self.frames_applied = wanted
 
@@ -2004,6 +2034,20 @@ def own_action(obj):
         mine.slots.remove(other)
     animation.action = mine
     animation.action_slot = next((s for s in mine.slots if s.identifier == identifier), None)
+
+
+def own_rig_action(rig):
+    """own_action for the rig itself, whose Action holds the handles' keys: what
+    Animate and a handle keyed by hand leave.
+
+    Not while its NLA is being tweaked: the Action is then a strip's, which
+    Blender will not swap for another (own_action would fail on it at every
+    button), and keys written into it are the strip's by design.
+    """
+    animation = rig.animation_data
+    if animation is not None and animation.use_tweak_mode:
+        return
+    own_action(rig)
 
 
 def our_bone_names(data):
@@ -2929,6 +2973,10 @@ def catch_up(rig, data=None, reframe=True):
     follow_renames(rig, data)
     point_at_objects(rig, data)
     own_actions(rig, data)
+    # The rig's own keys too - what Animate and a handle keyed by hand leave. An
+    # Alt+D copy of the whole model plays the same Action, so Remove on the copy
+    # took the handle's keys out of the original's as well.
+    own_rig_action(rig)
     own_armature(rig)
     own_curves(rig, data)
     now = seat_of(rig)
@@ -6335,7 +6383,12 @@ class RIGMOVES_OT_pick_part(bpy.types.Operator):
                 self.report({"WARNING"}, data.report)
                 return {"CANCELLED"}
             for pose_bone in rig.pose.bones:
-                pose_bone.bone.select = pose_bone.name == part_bone(part)
+                picked = pose_bone.name == part_bone(part)
+                # Blender 5.0 moved the selection from the bone to the pose bone.
+                if hasattr(pose_bone, "select"):
+                    pose_bone.select = picked
+                else:
+                    pose_bone.bone.select = picked
             rig.data.bones.active = rig.data.bones.get(part_bone(part))
             data.report = "Selected '{:s}'.".format(short(part.name, 24))
             return {"FINISHED"}
@@ -9182,6 +9235,10 @@ class RIGMOVES_OT_animate(bpy.types.Operator):
             data.report = "Build first: there is no control to animate yet."
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
+        # The keys go into the rig's own Action, which no button has made its
+        # own yet on a rig that was just copied with Alt+D: written there, they
+        # moved the original's too.
+        own_rig_action(rig)
         # Whatever the control was keyed to do before goes: two keys, start
         # and end, are the whole of the instruction.
         full = owner.path_from_id(path)
@@ -9230,6 +9287,9 @@ class RIGMOVES_OT_key_control(bpy.types.Operator):
         carrier = carriers[self.index]
         handle, bone = control_of(carrier)
         frame = context.scene.frame_current
+        # As in Animate: the key goes into the rig's own Action, which is the
+        # original's too on a copy no button has been pressed on.
+        own_rig_action(rig)
         if handle is not None:
             handle.keyframe_insert("location", index=1, frame=frame)
         elif bone is not None and carrier.prop in bone.keys():
