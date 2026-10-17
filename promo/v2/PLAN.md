@@ -324,3 +324,205 @@ Keep them under the voice. The ticks and pops stay as they are.
 - **The whooshes** are 9 dB below v2.1's in the finished mix (measured: -8.9 dB); the clicks, ticks and pops are as loud as before.
 - **Re-rendered:** the opening and the logo (its glow follows the word "slider"). The other segments are v2.1's, renamed to their new
   numbers (`dist/promo/v2/segments_v21/` keeps the old set).
+
+---
+
+# v2.3 (NemVe3D, 2026-10-17): the opening as an exact walkthrough, with a timer
+
+NemVe3D, on v2.2's opening:
+- "I saw you pull the 3 leaves with one pull, same with inner and outer ...
+  that's not realistic Blender behavior."
+- "I want the intro to EXACTLY show how the customer can do it too, because
+  there will be a blend file attached where they can also rig it this fast, so
+  anything that the user can't do, remove it."
+- "instead of clicks it's a timer"
+- "no speed clicks like clicking 3 things in 1 second, make it normal like what
+  a normal user would do"
+- "keep the same voice", "keep the artistic style", "100% (can be copied)
+  walkthrough".
+
+Everything from the logo beat on stays as v2.2.
+
+## The rule
+Every action on screen is one a customer does with
+`promo/files/CopyThat_flower_fast.blend` and CopyThat 0.20.2:
+- in the order of `promo/files/FLOWER_FAST.md` steps 1-9, leaving out Animate
+  and Play;
+- at the pace of a person who knows the steps.
+
+Nothing is done that Blender does not do: one part posed per typed value, each
+dialog field set on screen, each selection a click.
+
+## Layout (the artistic style kept)
+The dark stage and gold accents of v2.1/v2.2, at 2560x1440:
+- **The flower** (`assets/flower.glb`), in the camera's view, centre-left.
+- **An Outliner card.**
+  - It lists the scene's parts under "CopyThat Flower": Core, Inner Leader,
+    Leaf 1, Leaf 2, Leaf 3, Outer Leader, Pedestal, Promo Camera, Stem.
+  - The copies and "CopyThat Rig" join the list as they are made.
+  - Selected rows highlight the way Blender does, the active one brighter.
+- **A Properties card:** the Object tab's Transform panel for the active part.
+  - Location X/Y/Z and Rotation X/Y/Z.
+  - The real file's values: Core Location Z 1.29, rotations 0.
+- **The CopyThat panel as 0.20.2 draws it at the sidebar's usual width.**
+  - References: the real screenshots `20_panel.png`, `23_panel.png`,
+    `24_panel.png` and `30_view.png` in `dist/promo/live_test/shots/`.
+  - Before and After as a checklist: "✓ Before [Record] [eye]".
+  - Spread… at the top of TIMING.
+  - In COPIES: Ring… and Spread… side by side, then "Riding along (N)", then
+    rows with the Lead as a number.
+  - The rig line "CopyThat Rig", with "N parts" under it.
+- **The real dialogs,** where Blender opens them, by the panel.
+  - **Ring:**
+    - "Use" with three buttons: Make copies | Use what's there | Fill the gaps,
+      the last one lit;
+    - then Count, Round (3D Cursor / World Origin), About (World Z), Linked
+      copies (ticked) and Lead step;
+    - then OK.
+  - **Spread (Delays):**
+    - Order (Down a chain), Only the selected (a tick box), By (Step | Range),
+      Start Delay, Delay step;
+    - then OK.
+  - For their look, use frames of the real recording
+    `dist/promo/rec/main/capture.mkv`. Its panel is older, but the dialogs and
+    editors are the same.
+
+## The timer (replaces the click counter)
+"RIG TIME" and a big mm:ss in the counter's place, running at real time:
+- it starts at the first click and stops when Build Sliders is pressed;
+- then it turns gold and reads "RIGGED IN m:ss", the real time of the
+  walkthrough as it plays;
+- the step label under it says what is being done: SELECT THE PARTS, NEW MOVE,
+  MAKE CHAIN, POSE · OUTER LEADER, RECORD AFTER, RING · OUTER PETALS, SPREAD ·
+  DELAYS, BUILD SLIDERS, and so on.
+
+## The walkthrough, click by click (FLOWER_FAST.md)
+1. **New Move.**
+   - In the Outliner, click Outer Leader, then Ctrl+click Inner Leader, Core,
+     Leaf 1, Leaf 2 and Leaf 3. Press **New Move**.
+   - Panel: Move 1, "✓ Before", "• After", "6 parts".
+   - Report: "'Move 1': 6 part(s). Where they stand now is Before. Move them,
+     then Record After."
+2. **Make Chain.**
+   - In the Outliner, click Leaf 3, then Ctrl+click Leaf 2 and Leaf 1.
+   - Click the **CHAINS** title and press **Make Chain**.
+   - Report: "Chain: Leaf 1 > Leaf 2 > Leaf 3".
+   - In the Outliner, Leaf 2 sits inside Leaf 1 and Leaf 3 inside Leaf 2.
+3. **Pose, one value at a time.** For each value:
+   - click the part in the Outliner;
+   - double-click its field in the Properties card;
+   - type the value and press Enter; the part moves at Enter.
+
+   The values:
+   - Outer Leader Rotation X 75; Inner Leader Rotation X 45; Core Location
+     Z 1.47; Core Rotation Z 60.
+   - Leaf 1 Rotation X 28: the whole leaf swings, carried by the chain.
+   - Leaf 2 Rotation X -145: it and Leaf 3 unfold.
+   - Leaf 3 Rotation X 172.
+
+   The leaf's three segments are three separate edits; nothing is pulled.
+4. **Record After.** Press **Record** on the After row.
+   - Panel: "✓ After".
+   - Report: "'Move 1': After recorded for 6 part(s)."
+5. **Ring the outer petals.** Click the **COPIES** title, click Outer Leader,
+   press **Ring…**. In the dialog:
+   - Count: double-click, type 8, Enter (it showed 6);
+   - Round: open it and pick World Origin;
+   - Lead step: type 9;
+   - OK.
+
+   Seven shut petals appear. Panel: "Riding along (7)", "13 parts". Report: "7
+   copies of 'Outer Leader' round the world origin ride along with it. Leads
+   step by 9, out from it both ways round."
+6. **Ring the inner petals.** Click Inner Leader, press **Ring…**. In the
+   dialog:
+   - Count shows 8: type 6;
+   - Round already says World Origin;
+   - Lead step opens at 0: type 14;
+   - OK.
+
+   Panel: "Riding along (12)", "18 parts". Report: "5 copies of 'Inner
+   Leader'…".
+7. **Ring the leaf.** Click Leaf 1, press **Ring…**. In the dialog:
+   - Count shows 6: type 2;
+   - Lead step stays 0;
+   - OK.
+
+   Panel: "Riding along (13)", "21 parts". Report: "1 copy of 'Leaf 1' (3
+   joints each) round the world origin rides along with it, joint for joint."
+8. **Spread on the leaf.**
+   - In the Outliner, click Leaf 3, then Ctrl+click Leaf 2 and Leaf 1.
+   - Click the **TIMING** title, then **Spread…** at its top.
+   - In the dialog: Order says Down a chain. Tick Only the selected. Start Delay
+     0.10, Delay step 0.15. OK.
+   - Report: "Spread the Delays of 3 parts in steps of 0.15 from 0.1, down the
+     chain."
+   - Then in the TIMING list, double-click Inner Leader's delay, type 0.34,
+     Enter. Then Core's: 0.40.
+9. **Build.** Click the **PATH** title, click **Smooth**, press **Build
+   Sliders**.
+   - The flower goes back to its shut pose, and the Move 1 slider appears at
+     0%.
+   - Panel: "21 parts · 1 slider".
+   - Report: "21 part(s) on 1 slider(s). 6 object(s) were given a bone and
+     bound. 15 object(s) now ride along. 2 part(s) hung from the part they
+     follow."
+   - The timer stops.
+10. **Bloom.** Drag the Move 1 slider to 100 % over about 2.5 s: the real bloom
+    (`flower_motion.json`).
+
+## Pace: a normal user who knows the steps
+- **Cursor travel:** 0.45-0.8 s on a gently curved, eased path, with a short
+  pause (0.15-0.3 s) before each click.
+- **Never two clicks within 0.35 s,** except a double-click into a field.
+- **Typing:** about 7 characters a second, with the caret shown, then Enter.
+- **Dialogs:** they stay open while their fields are set, one by one, then OK.
+- **Sections:** they open by a click on their title, as a user must.
+- **Length:** about 60-80 s from the first click to Build. Do not hurry to
+  shorten it, and do not pad it.
+
+## The voice: the same voice
+Chatterbox 0.1.7, default voice, exaggeration 0.65, cfg 0.4, temperature 0.8,
+as in v2.2: `gen_vo.py`, `cut_vo.py`, and the venv `cb_venv` in the session
+scratchpad.
+
+The new opening lines are one continuous passage. Each line is cut out and
+placed at the start of its step. Keep them short, so the steps can be seen and
+heard:
+- "Let's rig this flower from scratch. Clock's running!"
+- "Select the six parts, and hit New Move."
+- "Make the leaf a chain."
+- "Now pose it open, one part at a time."
+- "Record After."
+- "Ring the outer petals." / "Now the inner ones." / "And the leaf."
+- "Spread the timing down the leaf, and give the inner petals and the core a
+  delay."
+- "Smooth... and Build!"
+- "One slider, and it blooms. Rigged in" + the real time, said naturally
+  ("fifty-eight seconds", "a minute and twelve seconds") + "!"
+
+The lines from the logo on stay v2.2's.
+
+## Sound
+- Mouse clicks on every click, as before.
+- Soft, quiet keyboard ticks for typed values.
+- Whooshes as in v2.2.
+- No click-counter sound.
+
+## Outputs
+- **The opening,** rebuilt in `web/src/beats_open.mjs` or a new
+  `beats_walk.mjs`, with its timeline and captions.
+- **The film,** `dist/promo/v2/CopyThat_promo_v2_1440p60.mp4`. Keep v2.2 as
+  `CopyThat_promo_v2.2_1440p60.mp4`.
+- **The After Effects project,** rebuilt.
+- **A review folder,** `promo_v2_review/v23/` in the session scratchpad:
+  - a contact sheet of the opening at 1 fps;
+  - stills of:
+    - the six-part selection in the Outliner;
+    - typing Leaf 2's -145;
+    - each Ring dialog with its values set;
+    - the Spread dialog;
+    - the typed delays;
+    - Build;
+    - the timer's final card;
+    - the bloom.
