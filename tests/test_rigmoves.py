@@ -8124,8 +8124,9 @@ class TestAnAltDCopyMadeWithItsPathCurvesBendsOnlyItsOwn(CopiedModel):
     """Select All - the path curves too - and Alt+D: the copy has curve objects of
     its own, but linked ones, which share the originals' Curve. Bent on the copy,
     the original's curve was bent as well, and its lid moved 3 m at its next
-    Build. (The first button pressed on a copy parts them; a bend made before
-    any is made on both, and nothing can tell.)"""
+    Build. (The scene parts them when it first shows the copy, and the first
+    button does if it has not; a bend made before either is covered in
+    TestBendingTheCurveOnACopyOfTheWholeModel.)"""
 
     def setUp(self):
         super().setUp()
@@ -8153,9 +8154,10 @@ class TestAnAltDCopyMadeWithItsPathCurvesBendsOnlyItsOwn(CopiedModel):
     def test_bending_the_copys_curve_leaves_the_originals_lid_where_it_was(self):
         rig2, part2 = self.copy_everything(True, self.curve)
         curve2 = rig2.rigmoves.moves[0].parts[0].path_curve
-        # The copy's curve is an object of its own, on the original's Curve.
+        # The copy's curve is an object of its own, and the scene parted its Curve from
+        # the original's as soon as it showed the copy.
         self.assertIsNot(curve2, self.curve)
-        self.assertIs(curve2.data, self.curve.data)
+        self.assertIsNot(curve2.data, self.curve.data)
         select(part2)
         self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
         self.bend(curve2, 3.0)
@@ -12077,6 +12079,16 @@ class TestGeometryAddedToABuiltPart(ChestCase):
                 self.assertNotIn("new geometry", rig().rigmoves.report)
 
     def test_vertices_in_another_group_are_somebodys_weights_and_are_left(self):
+        # Weights on a bone of the artist's own, which deforms: a group named after
+        # no bone moves nothing, and is not somebody's weight (see
+        # TestAMeshWithGroupsJoinedIntoABuiltPart).
+        select(rig())
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bone = rig().data.edit_bones.new("Somebody")
+            bone.head, bone.tail = (3.0, 0.0, 0.0), (3.0, 0.0, 1.0)
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
         self.add_a_cube()
         other = self.lid.vertex_groups.new(name="Somebody")
         other.add(range(8, 16), 0.5, "REPLACE")
@@ -12098,6 +12110,311 @@ class TestGeometryAddedToABuiltPart(ChestCase):
         finally:
             bpy.ops.object.mode_set(mode="OBJECT")
         self.assertEqual(rigmoves.bind_new_geometry(rig().rigmoves), ["Lid"])
+
+
+class TestTheModelScaledOrTurnedThenApplied(ChestCase):
+    """The built chest is made twice the size with S 2 on the rig, or turned a
+    quarter with R Z 90 - its lid goes with it - and then Ctrl+A > Scale or
+    Rotation is pressed on the rig, with no button between. Blender puts the
+    scale or the turn into the bones and the object back to the matrix the rig
+    kept for it, and 0.19.2 took that for an edited Root bone: nothing was
+    carried, every Before and After stayed at the old size and place, and Build
+    put the lid back there, 1.57 m off for the scale and 2.21 m for the turn.
+    (0.19.1 got it right.)"""
+
+    HOWS = ("scale", "turn")
+
+    def change_and_apply(self, how):
+        """S 2 or R Z 90 on the rig alone, about its origin, and then Ctrl+A on it:
+        what that did to the world, as a matrix."""
+        stood = rig().matrix_world.copy()
+        origin = stood.translation.copy()
+        select(rig())
+        if how == "scale":
+            self.assertEqual(bpy.ops.transform.resize(value=(2.0, 2.0, 2.0)), {"FINISHED"})
+            change = Matrix.Translation(origin) @ Matrix.Scale(2.0, 4) @ Matrix.Translation(-origin)
+            kinds = dict(location=False, rotation=False, scale=True)
+        else:
+            # R Z 90, about the rig's origin, without asking which way the operator turns.
+            rig().rotation_euler.z += math.radians(90.0)
+            change = turn_about(origin, "Z", 90.0)
+            kinds = dict(location=False, rotation=True, scale=False)
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.object.transform_apply(**kinds), {"FINISHED"})
+        bpy.context.view_layer.update()
+        # The case itself: the rig object is where the rig kept it.
+        self.assertTrue(rigmoves.same_matrix(rig().matrix_world, stood, 1e-5), how)
+        # And Blender's own part of it, before any button of ours: the lid went with
+        # the model. If a Blender does not keep it there, there is nothing of ours to
+        # test (none of 4.5, 5.0 and 5.2 does that).
+        if drift(self.lid, self.lid_at(0.0, change)) > TOLERANCE:
+            self.skipTest("Blender {:s} moves the lid itself when the rotation of a rig is "
+                          "applied".format(bpy.app.version_string))
+        return change
+
+    def test_the_lid_goes_with_the_model_and_nothing_has_been_pressed_yet(self):
+        for how in self.HOWS:
+            with self.subTest(how):
+                self.setUp()
+                change = self.change_and_apply(how)
+                self.assertLess(drift(self.lid, self.lid_at(0.0, change)), TOLERANCE)
+                # What the next button will carry everything by.
+                shift = rigmoves.moved_since(rig(), rig().rigmoves)
+                self.assertIsNotNone(shift)
+                self.assertTrue(rigmoves.same_matrix(shift, change, 1e-4))
+
+    def test_the_next_build_leaves_the_lid_where_it_is_and_opens_it_about_the_hinge(self):
+        for how in self.HOWS:
+            with self.subTest(how):
+                self.setUp()
+                change = self.change_and_apply(how)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertNotIn("put back", rig().rigmoves.report)
+                self.check_lid(change)
+
+    def test_the_eye_shows_the_lid_open_at_the_new_size_and_place(self):
+        for how in self.HOWS:
+            with self.subTest(how):
+                self.setUp()
+                change = self.change_and_apply(how)
+                select(self.lid)
+                self.assertEqual(bpy.ops.rigmoves.show(index=0, which="AFTER"), {"FINISHED"})
+                self.assertLess(drift(self.lid, self.lid_at(1.0, change)), TOLERANCE)
+
+    def test_an_edit_of_the_root_after_it_is_still_no_move(self):
+        change = self.change_and_apply("scale")
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        select(rig())
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bone = rig().data.edit_bones["Root"]
+            bone.tail = bone.head + (bone.tail - bone.head) * 2.0
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.context.view_layer.update()
+        self.assertIsNone(rigmoves.moved_since(rig(), rig().rigmoves))
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertNotIn("put back", rig().rigmoves.report)
+        self.check_lid(change)
+
+
+class TestAMeshWithGroupsJoinedIntoABuiltPart(CopyThatCase):
+    """A lid and its knob are two parts of one move, built. The knob is joined
+    into the lid with Ctrl+J, and Build is pressed: the lid keeps the knob's
+    vertex group "Knob", for a bone Build has just taken out, and 0.19.2 counted
+    a vertex in any group as weighted. The knob's vertices were left alone, in a
+    group that moves nothing, and stayed 2.23 m behind at full share. So did the
+    vertices of any mesh joined in with a group of its own ("Pin")."""
+
+    def setUp(self):
+        super().setUp()
+        self.lid = cube("Lid", (0.0, 0.0, 1.1))
+        self.lid.scale = (2.0, 1.2, 0.2)
+        self.knob = cube("Knob", (0.0, -0.7, 1.3))
+        self.knob.scale = (0.3, 0.2, 0.2)
+        bpy.context.view_layer.update()
+        self.hinge = Vector((0.0, 0.6, 1.0))
+        homes = {obj: obj.matrix_world.copy() for obj in (self.lid, self.knob)}
+        select(self.lid, self.knob)
+        self.assertEqual(bpy.ops.rigmoves.new_move(), {"FINISHED"})
+        bpy.context.scene.cursor.location = self.hinge
+        select(self.lid, self.knob)
+        self.assertEqual(bpy.ops.rigmoves.set_pivot(index=0, kind="CURSOR"), {"FINISHED"})
+        for obj, home in homes.items():
+            obj.matrix_world = turn_about(self.hinge, "X", -100.0) @ home
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.rigmoves.record(index=0, which="AFTER"), {"FINISHED"})
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def join_into_the_lid(self, other):
+        """Ctrl+J, the lid being the active object."""
+        select(self.lid, other)
+        self.assertEqual(bpy.ops.object.join(), {"FINISHED"})
+        bpy.context.view_layer.update()
+
+    def build_and_check(self, shut):
+        """Build, and the lid, every vertex of it, swings as one piece."""
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            turn = turn_about(self.hinge, "X", -eased(100.0, share))
+            self.assertLess(drift(self.lid, [turn @ p for p in shut]), TOLERANCE,
+                            "at {:.0%}".format(share))
+        drive(self.move, 0.0)
+
+    def test_a_knob_that_was_a_part_swings_with_the_lid_it_is_joined_into(self):
+        shut = rest_points(self.lid) + rest_points(self.knob)
+        self.join_into_the_lid(self.knob)
+        self.assertEqual(len(self.lid.data.vertices), 16)
+        self.assertIn("Knob", self.lid.vertex_groups)
+        self.build_and_check(shut)
+        self.assertIn("'Lid' had new geometry; it moves with it now.", rig().rigmoves.report)
+        # Said once, and nothing is undone by the next Build.
+        self.build_and_check(shut)
+        self.assertNotIn("new geometry", rig().rigmoves.report)
+
+    def test_a_mesh_with_a_group_of_its_own_swings_with_the_lid_it_is_joined_into(self):
+        pin = cube("Pin", (0.0, 0.1, 1.3))
+        pin.scale = (0.1, 0.1, 0.3)
+        bpy.context.view_layer.update()
+        pin.vertex_groups.new(name="Pin").add(range(8), 1.0, "REPLACE")
+        shut = rest_points(self.lid) + rest_points(pin)
+        self.join_into_the_lid(pin)
+        self.build_and_check(shut)
+        # The group it came with is kept, beside the lid's own.
+        group = self.lid.vertex_groups["Pin"]
+        self.assertEqual(sum(1 for v in self.lid.data.vertices
+                             if any(g.group == group.index for g in v.groups)), 8)
+        self.assertIn("'Lid' had new geometry; it moves with it now.", rig().rigmoves.report)
+
+    def test_only_a_weight_on_a_bone_that_deforms_is_somebodys_weight(self):
+        # (label, a bone of that name, that deforms, the weight, joins the lid's group)
+        cases = (("a bone that deforms, weight 0.5", True, True, 0.5, False),
+                 ("a bone that deforms, weight 0", True, True, 0.0, True),
+                 ("a bone that does not deform", True, False, 0.5, True),
+                 ("no such bone", False, True, 0.5, True))
+        for label, has_bone, deforms, weight, joins in cases:
+            with self.subTest(label):
+                self.setUp()
+                if has_bone:
+                    select(rig())
+                    bpy.ops.object.mode_set(mode="EDIT")
+                    try:
+                        bone = rig().data.edit_bones.new("Somebody")
+                        bone.head, bone.tail = (3.0, 0.0, 0.0), (3.0, 0.0, 1.0)
+                        bone.use_deform = deforms
+                    finally:
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                select(self.lid)
+                bpy.ops.object.mode_set(mode="EDIT")
+                bpy.ops.mesh.select_all(action="DESELECT")
+                bpy.ops.mesh.primitive_cube_add(size=0.2, location=(0.0, -0.3, 1.3))
+                bpy.ops.object.mode_set(mode="OBJECT")
+                other = self.lid.vertex_groups.new(name="Somebody")
+                other.add(range(8, 16), weight, "REPLACE")
+                select(self.lid)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                own = self.lid.vertex_groups[self.move.parts["Lid"].bone_name]
+                for vertex in list(self.lid.data.vertices)[8:]:
+                    held = {g.group: g.weight for g in vertex.groups}
+                    # Whatever it was painted to is kept.
+                    self.assertAlmostEqual(held[other.index], weight, places=5)
+                    self.assertEqual(own.index in held, joins, label)
+                    if joins:
+                        self.assertAlmostEqual(held[own.index], 1.0, places=5)
+                self.assertEqual("new geometry" in rig().rigmoves.report, joins, label)
+
+
+class TestBendingTheCurveOnACopyOfTheWholeModel(ChestCase):
+    """A built lid goes along a curve (Curve the Path). The whole model is copied
+    with Alt+D, the curve and all - the copy's curve object shares the original's
+    Curve - and the copy is moved. The artist bends the copy's curve with the
+    panel's Edit the Curve, or with Tab, and the original's bent as well: its lid
+    played 3.0 m off at its next Build. The Curve was parted from the original's
+    only by a button that catches the rig up, and neither of these is one. (Copied
+    without its curve, the copy points at the original's curve object.)"""
+
+    def setUp(self):
+        super().setUp()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.curve_path(index=0), {"FINISHED"})
+        self.rig1 = rig()
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.shape = self.shape_of(self.rig1)
+        self.kept = self.play(self.rig1, self.lid)
+        # The original has been seen by the scene's handler long before it is copied.
+        rigmoves.follow_renames_handler()
+
+    @staticmethod
+    def curve_of(owner):
+        return owner.rigmoves.moves[0].parts[0].path_curve
+
+    def shape_of(self, owner):
+        points = self.curve_of(owner).data.splines[0].bezier_points
+        return [tuple(round(c, 5) for c in point.co) for point in points]
+
+    @staticmethod
+    def bend(curve):
+        middle = curve.data.splines[0].bezier_points[1]
+        for point in (middle.co, middle.handle_left, middle.handle_right):
+            point.z += 3.0
+
+    @staticmethod
+    def play(owner, part):
+        """Where the part is, point by point, at the start, the middle and the end."""
+        move = owner.rigmoves.moves[0]
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            owner.pose.bones[move.handle_name].location.y = move.rail * share
+            bpy.context.view_layer.update()
+            out[share] = [p.copy() for p in world_points(part)]
+        owner.pose.bones[move.handle_name].location.y = 0.0
+        bpy.context.view_layer.update()
+        return out
+
+    def copy_the_model(self, with_curve):
+        """Alt+D of the rig, the lid and (or not) the curve, the copy 6 m along."""
+        chosen = [self.rig1, self.lid] + ([self.curve_of(self.rig1)] if with_curve else [])
+        select(*chosen)
+        self.assertEqual(bpy.ops.object.duplicate_move_linked(
+            TRANSFORM_OT_translate={"value": (6.0, 0.0, 0.0)}), {"FINISHED"})
+        bpy.context.view_layer.update()
+        made = list(bpy.context.selected_objects)
+        self.rig2 = next(o for o in made if o.type == "ARMATURE")
+        self.lid2 = next(o for o in made if o.type == "MESH")
+        bpy.context.scene.rigmoves_rig = self.rig2
+
+    def check_the_original_is_as_it_was(self):
+        """Its curve is the shape it was, and its lid plays as it did, built again."""
+        self.assertEqual(self.shape_of(self.rig1), self.shape, "its curve")
+        bpy.context.scene.rigmoves_rig = self.rig1
+        select(self.lid)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertEqual(self.shape_of(self.rig1), self.shape, "its curve, built")
+        now = self.play(self.rig1, self.lid)
+        for share, places in self.kept.items():
+            self.assertLess(max((a - b).length for a, b in zip(now[share], places)),
+                            TOLERANCE, "its lid at {:.0%}".format(share))
+
+    def test_edit_the_curve_on_the_copy_bends_the_copys_curve_and_not_the_originals(self):
+        for with_curve in (True, False):
+            with self.subTest(with_curve=with_curve):
+                self.setUp()
+                # The scene's handler, which would part them as soon as the copy is seen
+                # (the next test), is out of the way: the button has to do it itself.
+                with mock.patch.object(rigmoves, "look_over"):
+                    self.copy_the_model(with_curve)
+                    select(self.lid2)
+                    self.assertEqual(bpy.ops.rigmoves.edit_curve(index=0, part=0),
+                                     {"FINISHED"})
+                    editing = bpy.context.object
+                    self.assertEqual(editing.mode, "EDIT")
+                    self.bend(editing)
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                self.assertIs(editing, self.curve_of(self.rig2))
+                self.assertIsNot(editing, self.curve_of(self.rig1))
+                self.check_the_original_is_as_it_was()
+                # The copy plays along the curve it bent: well above the original's.
+                bpy.context.scene.rigmoves_rig = self.rig2
+                select(self.lid2)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                played = self.play(self.rig2, self.lid2)
+                rise = max((a - b).z for a, b in zip(played[0.5], self.kept[0.5]))
+                self.assertGreater(rise, 1.0)
+
+    def test_a_curve_bent_with_tab_on_the_copy_does_not_bend_the_originals(self):
+        # Only with the curve copied: without it the copy's part points at the original's
+        # curve object itself, and to bend that is to bend the original's (Edit the Curve
+        # makes the copy a curve of its own first, in the test above).
+        self.copy_the_model(True)
+        # The copy is seen as soon as the scene updates after Alt+D.
+        rigmoves.follow_renames_handler()
+        self.assertIsNot(self.curve_of(self.rig2).data, self.curve_of(self.rig1).data)
+        self.bend(self.curve_of(self.rig2))
+        self.check_the_original_is_as_it_was()
 
 
 if __name__ == "__main__":

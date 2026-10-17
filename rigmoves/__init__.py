@@ -1184,7 +1184,7 @@ def own_armature(rig):
     return True
 
 
-def own_curves(rig, data):
+def own_curves(rig, data, objects=True):
     """The path curves and drawn path lines a rig shares with another rig get
     copies for this one.
 
@@ -1201,6 +1201,12 @@ def own_curves(rig, data):
     but they share the originals' Curve: bent in Edit Mode on the copy, the
     original's bent as well, and its lid moved at its next Build. Those get a
     Curve of their own here.
+
+    Run by every button (catch_up) and by Edit the Curve, and the first time the
+    scene shows a rig (settle_old_rig) - but then with `objects` off, and only the
+    Curves are parted: a curve is bent with Tab as well, and no button comes
+    before that. No curve object is made for a part that may be deleted before
+    any button is pressed, which would leave one standing that nothing owns.
     """
     others = [o for o in bpy.data.objects
               if o.type == "ARMATURE" and o is not rig and len(o.rigmoves.moves)]
@@ -1220,6 +1226,8 @@ def own_curves(rig, data):
                 if (curve.type == "CURVE" and curve.data is not None
                         and curve.data.users - int(curve.data.use_fake_user) > 1):
                     curve.data = curve.data.copy()
+                continue
+            if not objects:
                 continue
             fresh = curve.copy()
             fresh.name = "{:s} {:s}".format(curve.name, rig.name)
@@ -2877,10 +2885,48 @@ def rig_stayed(rig, data):
     it; Apply and Set Origin on the rig change the object but not the bone, so
     neither is this. Not told for a seat kept the old way, or by a version that
     did not keep the object's matrix: there is nothing to tell it by.
+
+    Not enough by itself: scale or turn the whole model on the rig and apply it
+    (Ctrl+A > Scale or Rotation) and the object is back where it was as well, with
+    the scale or turn in the bones and the parts gone with it
+    (see model_went_with_the_seat).
     """
     was = as_matrix(data.seat_world)
     return (data.seat_on_root and not is_singular(was)
             and same_place(rig.matrix_world, was, rig.matrix_world.translation.length))
+
+
+def model_went_with_the_seat(data, now):
+    """Whether the bound parts went with the Root bone when the rig object stayed
+    where it was and the seat, where that bone stands (`now`), is not where it
+    was kept - a model scaled or turned on the rig and then applied, and not a
+    Root edited in Edit Mode.
+
+    S 2 or R Z 90 on the rig takes its parts with it, and Ctrl+A > Scale or
+    Rotation puts the numbers into the bones and the object back to the matrix it
+    was kept at, the parts where they went: rig_stayed took that for a Root edited
+    and carried nothing, so every Before and After stayed at the old size and
+    place and Build put the parts back there. An edited Root leaves the parts on
+    their Before. They are asked: more standing where the seat's change carries
+    their Before than still on it is a model that was moved, and that change is
+    what to carry by. A part standing in neither place was dragged, and does not
+    vote; with no bound part there is nobody to ask, and the Root was edited.
+    """
+    was = as_matrix(data.seat)
+    shift = now @ was.inverted_safe()
+    if same_place(shift, Matrix.Identity(4), max(now.translation.length, was.translation.length)):
+        return False
+    carried = stayed = 0
+    for move in data.moves:
+        for part in bound_parts(move):
+            obj, world = hand_moved(part)
+            if obj is None:
+                continue
+            if world is None:
+                stayed += 1
+            elif hand_moved(part, shift)[1] is None:
+                carried += 1
+    return carried > stayed
 
 
 def moved_since(rig, data):
@@ -2891,7 +2937,9 @@ def moved_since(rig, data):
         return None
     now = seat_of(rig) if data.seat_on_root else rig.matrix_world
     was = as_matrix(data.seat)
-    if is_singular(rig.matrix_world) or is_singular(was) or rig_stayed(rig, data):
+    if is_singular(rig.matrix_world) or is_singular(was):
+        return None
+    if rig_stayed(rig, data) and not model_went_with_the_seat(data, now):
         return None
     return now @ was.inverted_safe()
 
@@ -2921,6 +2969,12 @@ def settle_old_rig(rig, data):
 
     The seat is changed only for a rig that stands where the seat says. One
     that was moved since is carried by the first button, as it was.
+
+    A rig is looked over when the scene first shows it after Alt+D as well, and
+    the Curves of its curve objects are parted from the original's then
+    (own_curves, with no object made): bent with Tab on the copy, which no button
+    comes before, the shared Curve was the original's too. Not for a rig from a
+    library, which cannot be written to.
     """
     if data.seated:
         if not data.seat_on_root:
@@ -2931,6 +2985,8 @@ def settle_old_rig(rig, data):
                 data.seat_world = flat(rig.matrix_world)
     point_at_objects(rig, data)
     retake_marks(data, shift=moved_since(rig, data), old=True)
+    if rig.library is None:
+        own_curves(rig, data, objects=False)
 
 
 def look_over(rig):
@@ -2995,7 +3051,8 @@ def catch_up(rig, data=None, reframe=True):
     Build then put every part back where the model used to be. Where the rig
     stands is told by its Root bone (seat_of), so that Apply and Set Origin on
     the rig, which move nothing, are not taken for a move; nor is that bone
-    edited with the rig object where it was (rig_stayed).
+    edited with the rig object where it was and the parts on their Before
+    (rig_stayed, model_went_with_the_seat).
     """
     data = rig.rigmoves if data is None else data
     bpy.context.view_layer.update()
@@ -3022,13 +3079,16 @@ def catch_up(rig, data=None, reframe=True):
         # stands, and what it remembers is taken to be true of that. So is a seat
         # that was kept as nothing, by 0.19.0: there is nowhere to carry from.
         store_seat(rig, data)
-    elif rig_stayed(rig, data):
-        # The rig object is where it was, so the model has not moved, whatever the
-        # Root bone says: it was edited. Nothing is carried; the seat is kept where
-        # the bone stands now, for a move of the model after this to be measured
-        # from there.
+    elif rig_stayed(rig, data) and not model_went_with_the_seat(data, now):
+        # The rig object is where it was and the parts stand on their Before, so the
+        # model has not moved, whatever the Root bone says: it was edited. Nothing is
+        # carried; the seat is kept where the bone stands now, for a move of the
+        # model after this to be measured from there.
         store_seat(rig, data)
     else:
+        # (A model scaled or turned on the rig and applied comes here as well: the
+        # object is back where it was, and the parts are where the scale or turn took
+        # them.)
         # A seat kept by 0.19.0 is the rig object's matrix: measured against
         # that this once, then kept on the Root bone.
         where, was = now if data.seat_on_root else rig.matrix_world, as_matrix(data.seat)
@@ -3478,12 +3538,20 @@ def bind_new_geometry(data, leave=()):
     Binding put every vertex there was in the part's group, and a vertex added
     since - a cube made with Shift+A in Edit Mode, a handle joined with Ctrl+J -
     is in none: the Armature modifier moves only what is in a group, so at full
-    share the part swung off and left them where they were. One that is in a
-    group already is somebody's weight - extruded or subdivided from a vertex
-    that was weighted, or painted to another bone - and is left alone. An object
-    in Edit Mode is waited for, as its mesh does not hold what is being edited,
-    and one that is a part of two moves is left as heal_bindings leaves it.
+    share the part swung off and left them where they were. One that is weighted
+    already is somebody's weight - extruded or subdivided from a vertex that was
+    weighted, or painted to another bone - and is left alone. An object in Edit
+    Mode is waited for, as its mesh does not hold what is being edited, and one
+    that is a part of two moves is left as heal_bindings leaves it.
+
+    Weighted is a weight above nothing in a group named after a bone of this rig
+    that deforms. A mesh joined in brings its groups along: the knob's, for a bone
+    Build has just taken out, or a "Pin" for a modifier or a cloth. Those move
+    nothing, and a vertex in no other group was left behind as if it were weighted.
+    It is put in the part's group like any other, and keeps the rest.
     """
+    rig = data.id_data
+    deforming = {bone.name for bone in rig.data.bones if bone.use_deform}
     grown = []
     for move in data.moves:
         for part in bound_parts(move):
@@ -3493,7 +3561,16 @@ def bind_new_geometry(data, leave=()):
             group = obj.vertex_groups.get(part.bone_name)
             if group is None:
                 continue
-            loose = [vertex.index for vertex in obj.data.vertices if not vertex.groups]
+            pulling = {g.index for g in obj.vertex_groups if g.name in deforming}
+            # A walk in Python over every vertex at every Build, so no generator
+            # per vertex: a part of half a million of them took three times as long.
+            loose = []
+            for vertex in obj.data.vertices:
+                for held in vertex.groups:
+                    if held.weight > 0.0 and held.group in pulling:
+                        break
+                else:
+                    loose.append(vertex.index)
             if loose:
                 group.add(loose, 1.0, "REPLACE")
                 grown.append(part.name)
@@ -7335,7 +7412,7 @@ class RIGMOVES_OT_edit_curve(bpy.types.Operator):
     part: bpy.props.IntProperty()
 
     def execute(self, context):
-        rig, _data, move = move_at(context, self.index)
+        rig, data, move = move_at(context, self.index)
         if move is None or not 0 <= self.part < len(move.parts):
             return {"CANCELLED"}
         obj = move.parts[self.part].path_curve
@@ -7343,6 +7420,15 @@ class RIGMOVES_OT_edit_curve(bpy.types.Operator):
             return {"CANCELLED"}
         if context.object is not None and context.object.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
+        # A copy of the whole model shares the original's Curve until a button that
+        # catches the rig up parts them, and this is not one: bent here, the
+        # original's bent as well and its lid played off at its next Build. After
+        # the mode is left, as the Curve of an object in Edit Mode cannot be swapped;
+        # and the pointer is read again, as it may be a curve of the copy's own now,
+        # which the view layer does not list until it has been brought up to date.
+        own_curves(rig, data)
+        context.view_layer.update()
+        obj = move.parts[self.part].path_curve
         for other in context.selected_objects:
             other.select_set(False)
         obj.hide_set(False)
