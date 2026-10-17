@@ -52,7 +52,7 @@ function build() {
 
     var segFolder = app.project.items.addFolder("Rendered segments");
     var audioFolder = app.project.items.addFolder("Audio stems");
-    var main = app.project.items.addComp("CopyThat promo v2.2", W, H, 1, T.duration, FPS);
+    var main = app.project.items.addComp("CopyThat promo v2.3", W, H, 1, T.duration, FPS);
     main.bgColor = [0.04, 0.04, 0.05];
 
     // one layer per beat, in order, each at its start time

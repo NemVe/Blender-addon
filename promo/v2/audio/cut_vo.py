@@ -1,6 +1,6 @@
-"""Cut the takes of Chatterbox into the lines of promo v2.2, and write vo.json.
+"""Cut the takes of Chatterbox into the lines of promo v2.3, and write vo.json.
 
-    python cut_vo.py --takes <folder of gen_vo.py's takes> [--model small.en] [--cache <folder for the Whisper model>]
+    python cut_vo.py --takes <folder of gen_vo.py's takes> [--model small.en] [--cache <folder for the Whisper model>] [--only open]
 
 Run it where kokoro-onnx (make_vo.py's audio helpers need it), faster-whisper, soundfile, scipy and pyloudnorm are installed.
 For each passage of vo_script.py:
@@ -13,6 +13,8 @@ For each passage of vo_script.py:
   3. Each line of it is sped up (by at most 8%) if it is too long for its beat, brought to about -16 LUFS and limited, and
      written as <line>.wav (48 kHz, mono) next to this script.
 vo.json gets the words and phrases of every line, in seconds from the start of its WAV: what make_timeline.py reads.
+With --only <passage ids> only those passages are cut, and every other line of vo.json (and its WAV) is kept as it was: v2.3 re-spoke
+the opening alone, and the lines from the logo on are v2.2's.
 At the end Whisper listens to the finished WAVs and says whether each one still says what the script says.
 """
 
@@ -217,7 +219,9 @@ def main():
     ap.add_argument("--takes", required=True)
     ap.add_argument("--model", default="small.en")
     ap.add_argument("--cache", default=None)
+    ap.add_argument("--only", default="", help="comma-separated passage ids to cut; the other lines of vo.json are kept")
     args = ap.parse_args()
+    only = set(x for x in args.only.split(",") if x)
 
     model = WhisperModel(args.model, device="cpu", compute_type="int8", download_root=args.cache)
     room = {}                       # the longest speech a beat takes: its length less the lead and the tail, plus the nudge
@@ -227,6 +231,8 @@ def main():
 
     lines, final, too_long = {}, {}, []
     for name, plines in PASSAGES.items():
+        if only and name not in only:
+            continue
         print(name)
         best = choose(model, name, args.takes)
         for (line_id, shown, spoken), cut in zip(plines, best["cut"]):
@@ -271,14 +277,20 @@ def main():
         print("   {:9s} {}  {}".format(line_id, "ok  " if same else "DIFF", " ".join(said)))
 
     order = [lid for plines in PASSAGES.values() for lid, _s, _p in plines]
+    if only:                                    # the lines that were not cut are the ones already in vo.json
+        with open(os.path.join(HERE, "vo.json"), encoding="utf-8") as fh:
+            old = json.load(fh)["lines"]
+        for lid in order:
+            if lid not in lines:
+                lines[lid] = old[lid]
     data = {"engine": "Chatterbox (Resemble AI, MIT), local on an RTX 3090", "voice": "the default voice, in continuous passages cut at the word times",
             "settings": SETTINGS, "sample_rate": RATE, "channels": 1, "bit_depth": 16, "lufs_per_line": LUFS,
             "processing": "high-pass 70 Hz, +2.5 dB at 3 kHz, 1.6:1 compressor, limiter at -1.5 dBFS",
-            "order": order, "lines": {lid: lines[lid] for lid in order}, "total": round(sum(v["duration"] for v in lines.values()), 3)}
+            "order": order, "lines": {lid: lines[lid] for lid in order}, "total": round(sum(lines[lid]["duration"] for lid in order), 3)}
     with open(os.path.join(HERE, "vo.json"), "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=1, ensure_ascii=False)
         fh.write("\n")
-    print("{:d} line(s) differ from the script; {:.1f} s of voice in {:d} lines".format(wrong, data["total"], len(lines)))
+    print("{:d} line(s) differ from the script; {:.1f} s of voice in {:d} lines".format(wrong, data["total"], len(data["lines"])))
     for msg in too_long:
         print("TOO LONG", msg)
 

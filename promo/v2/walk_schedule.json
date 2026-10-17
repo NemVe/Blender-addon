@@ -1,0 +1,616 @@
+{
+ "marks": {
+  "go": 0,
+  "first": 0.18,
+  "first_arrive": 0,
+  "newmove": 4.7,
+  "newmove_arrive": 4.5200000000000005,
+  "chain": 5.72,
+  "chain_arrive": 5.54,
+  "makechain": 8.86,
+  "makechain_arrive": 8.68,
+  "pose": 9.879999999999999,
+  "pose_arrive": 9.7,
+  "v_outer": 11.940000000000001,
+  "v_outer_arrive": 10.799999999999999,
+  "v_leaf2": 27.07,
+  "v_leaf2_arrive": 25.630000000000006,
+  "v_leaf3": 30.3,
+  "v_leaf3_arrive": 29.01,
+  "record": 31.450000000000003,
+  "record_arrive": 31.270000000000003,
+  "ring1": 32.17000000000001,
+  "ring1_arrive": 31.990000000000006,
+  "ring1_press": 34.21,
+  "ring1_press_arrive": 34.03,
+  "ring1_ok": 39.919999999999995,
+  "ring1_ok_arrive": 39.739999999999995,
+  "ring2": 40.93999999999999,
+  "ring2_arrive": 40.75999999999999,
+  "ring2_ok": 47.099999999999994,
+  "ring2_ok_arrive": 46.919999999999995,
+  "ring3": 48.11999999999999,
+  "ring3_arrive": 47.93999999999999,
+  "ring3_ok": 52.54999999999999,
+  "ring3_ok_arrive": 52.36999999999999,
+  "spread": 53.569999999999986,
+  "spread_arrive": 53.389999999999986,
+  "spread_press": 56.70999999999997,
+  "spread_press_arrive": 56.52999999999997,
+  "spread_ok": 63.43,
+  "spread_ok_arrive": 63.25,
+  "delays": 65.78999999999999,
+  "delays_arrive": 64.35,
+  "path": 68.52000000000001,
+  "path_arrive": 68.34,
+  "smooth": 69.22000000000003,
+  "smooth_arrive": 69.04000000000002,
+  "build": 70.42000000000004,
+  "build_arrive": 70.24000000000004,
+  "grab": 71.67000000000004,
+  "end": 74.17000000000004
+ },
+ "riggedIn": 70.42000000000004,
+ "end": 74.17000000000004,
+ "drag": 2.5,
+ "ops": [
+  {
+   "i": 0,
+   "kind": "click",
+   "target": "ol:Outer Leader",
+   "t": 0.18,
+   "arrive": 0,
+   "step": 1,
+   "label": "SELECT THE PARTS"
+  },
+  {
+   "i": 1,
+   "kind": "click",
+   "target": "ol:Inner Leader",
+   "t": 0.88,
+   "arrive": 0.7,
+   "step": 1,
+   "label": "SELECT THE PARTS"
+  },
+  {
+   "i": 2,
+   "kind": "click",
+   "target": "ol:Core",
+   "t": 1.58,
+   "arrive": 1.4,
+   "step": 1,
+   "label": "SELECT THE PARTS"
+  },
+  {
+   "i": 3,
+   "kind": "click",
+   "target": "ol:Leaf 1",
+   "t": 2.28,
+   "arrive": 2.1,
+   "step": 1,
+   "label": "SELECT THE PARTS"
+  },
+  {
+   "i": 4,
+   "kind": "click",
+   "target": "ol:Leaf 2",
+   "t": 2.98,
+   "arrive": 2.8,
+   "step": 1,
+   "label": "SELECT THE PARTS"
+  },
+  {
+   "i": 5,
+   "kind": "click",
+   "target": "ol:Leaf 3",
+   "t": 3.68,
+   "arrive": 3.5,
+   "step": 1,
+   "label": "SELECT THE PARTS"
+  },
+  {
+   "i": 6,
+   "kind": "click",
+   "target": "pn:newmove",
+   "t": 4.7,
+   "arrive": 4.52,
+   "step": 1,
+   "label": "NEW MOVE"
+  },
+  {
+   "i": 7,
+   "kind": "click",
+   "target": "ol:Leaf 3",
+   "t": 5.72,
+   "arrive": 5.54,
+   "step": 2,
+   "label": "MAKE CHAIN"
+  },
+  {
+   "i": 8,
+   "kind": "click",
+   "target": "ol:Leaf 2",
+   "t": 6.42,
+   "arrive": 6.24,
+   "step": 2,
+   "label": "MAKE CHAIN"
+  },
+  {
+   "i": 9,
+   "kind": "click",
+   "target": "ol:Leaf 1",
+   "t": 7.12,
+   "arrive": 6.94,
+   "step": 2,
+   "label": "MAKE CHAIN"
+  },
+  {
+   "i": 10,
+   "kind": "click",
+   "target": "sec:chains",
+   "t": 8.14,
+   "arrive": 7.96,
+   "step": 2,
+   "label": "MAKE CHAIN"
+  },
+  {
+   "i": 11,
+   "kind": "click",
+   "target": "pn:makechain",
+   "t": 8.86,
+   "arrive": 8.68,
+   "step": 2,
+   "label": "MAKE CHAIN"
+  },
+  {
+   "i": 12,
+   "kind": "click",
+   "target": "ol:Outer Leader",
+   "t": 9.88,
+   "arrive": 9.7,
+   "step": 3,
+   "label": "POSE · OUTER LEADER"
+  },
+  {
+   "i": 13,
+   "kind": "edit",
+   "target": "pp:rotx",
+   "t": 11.94,
+   "arrive": 10.8,
+   "step": 3,
+   "label": "POSE · OUTER LEADER"
+  },
+  {
+   "i": 14,
+   "kind": "click",
+   "target": "ol:Inner Leader",
+   "t": 12.96,
+   "arrive": 12.78,
+   "step": 3,
+   "label": "POSE · INNER LEADER"
+  },
+  {
+   "i": 15,
+   "kind": "edit",
+   "target": "pp:rotx",
+   "t": 15.02,
+   "arrive": 13.88,
+   "step": 3,
+   "label": "POSE · INNER LEADER"
+  },
+  {
+   "i": 16,
+   "kind": "click",
+   "target": "ol:Core",
+   "t": 16.04,
+   "arrive": 15.86,
+   "step": 3,
+   "label": "POSE · CORE"
+  },
+  {
+   "i": 17,
+   "kind": "edit",
+   "target": "pp:locz",
+   "t": 18.4,
+   "arrive": 16.96,
+   "step": 3,
+   "label": "POSE · CORE"
+  },
+  {
+   "i": 18,
+   "kind": "edit",
+   "target": "pp:rotz",
+   "t": 20.11,
+   "arrive": 18.97,
+   "step": 3,
+   "label": "POSE · CORE"
+  },
+  {
+   "i": 19,
+   "kind": "click",
+   "target": "ol:Leaf 1",
+   "t": 21.13,
+   "arrive": 20.95,
+   "step": 3,
+   "label": "POSE · LEAF 1"
+  },
+  {
+   "i": 20,
+   "kind": "edit",
+   "target": "pp:rotx",
+   "t": 23.19,
+   "arrive": 22.05,
+   "step": 3,
+   "label": "POSE · LEAF 1"
+  },
+  {
+   "i": 21,
+   "kind": "click",
+   "target": "olx:Leaf 1",
+   "t": 23.99,
+   "arrive": 23.81,
+   "step": 3,
+   "label": "OPEN THE LEAF"
+  },
+  {
+   "i": 22,
+   "kind": "click",
+   "target": "ol:Leaf 2",
+   "t": 24.71,
+   "arrive": 24.53,
+   "step": 3,
+   "label": "POSE · LEAF 2"
+  },
+  {
+   "i": 23,
+   "kind": "edit",
+   "target": "pp:rotx",
+   "t": 27.07,
+   "arrive": 25.63,
+   "step": 3,
+   "label": "POSE · LEAF 2"
+  },
+  {
+   "i": 24,
+   "kind": "click",
+   "target": "ol:Leaf 3",
+   "t": 28.09,
+   "arrive": 27.91,
+   "step": 3,
+   "label": "POSE · LEAF 3"
+  },
+  {
+   "i": 25,
+   "kind": "edit",
+   "target": "pp:rotx",
+   "t": 30.3,
+   "arrive": 29.01,
+   "step": 3,
+   "label": "POSE · LEAF 3"
+  },
+  {
+   "i": 26,
+   "kind": "click",
+   "target": "pn:record_after",
+   "t": 31.45,
+   "arrive": 31.27,
+   "step": 4,
+   "label": "RECORD AFTER"
+  },
+  {
+   "i": 27,
+   "kind": "click",
+   "target": "sec:copies",
+   "t": 32.17,
+   "arrive": 31.99,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 28,
+   "kind": "click",
+   "target": "ol:Outer Leader",
+   "t": 33.19,
+   "arrive": 33.01,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 29,
+   "kind": "click",
+   "target": "pn:ring",
+   "t": 34.21,
+   "arrive": 34.03,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 30,
+   "kind": "edit",
+   "target": "dlg:count",
+   "t": 36.12,
+   "arrive": 35.13,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 31,
+   "kind": "click",
+   "target": "dlg:round",
+   "t": 36.84,
+   "arrive": 36.66,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 32,
+   "kind": "click",
+   "target": "dlg:round:World Origin",
+   "t": 37.54,
+   "arrive": 37.36,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 33,
+   "kind": "edit",
+   "target": "dlg:lead",
+   "t": 39.2,
+   "arrive": 38.21,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 34,
+   "kind": "click",
+   "target": "dlg:ok",
+   "t": 39.92,
+   "arrive": 39.74,
+   "step": 5,
+   "label": "RING · OUTER PETALS"
+  },
+  {
+   "i": 35,
+   "kind": "click",
+   "target": "ol:Inner Leader",
+   "t": 40.94,
+   "arrive": 40.76,
+   "step": 6,
+   "label": "RING · INNER PETALS"
+  },
+  {
+   "i": 36,
+   "kind": "click",
+   "target": "pn:ring",
+   "t": 41.96,
+   "arrive": 41.78,
+   "step": 6,
+   "label": "RING · INNER PETALS"
+  },
+  {
+   "i": 37,
+   "kind": "edit",
+   "target": "dlg:count",
+   "t": 43.87,
+   "arrive": 42.88,
+   "step": 6,
+   "label": "RING · INNER PETALS"
+  },
+  {
+   "i": 38,
+   "kind": "hover",
+   "target": "dlg:round",
+   "t": 44.79,
+   "arrive": 44.39,
+   "step": 6,
+   "label": "RING · INNER PETALS"
+  },
+  {
+   "i": 39,
+   "kind": "edit",
+   "target": "dlg:lead",
+   "t": 46.38,
+   "arrive": 45.24,
+   "step": 6,
+   "label": "RING · INNER PETALS"
+  },
+  {
+   "i": 40,
+   "kind": "click",
+   "target": "dlg:ok",
+   "t": 47.1,
+   "arrive": 46.92,
+   "step": 6,
+   "label": "RING · INNER PETALS"
+  },
+  {
+   "i": 41,
+   "kind": "click",
+   "target": "ol:Leaf 1",
+   "t": 48.12,
+   "arrive": 47.94,
+   "step": 7,
+   "label": "RING · THE LEAF"
+  },
+  {
+   "i": 42,
+   "kind": "click",
+   "target": "pn:ring",
+   "t": 49.14,
+   "arrive": 48.96,
+   "step": 7,
+   "label": "RING · THE LEAF"
+  },
+  {
+   "i": 43,
+   "kind": "edit",
+   "target": "dlg:count",
+   "t": 51.05,
+   "arrive": 50.06,
+   "step": 7,
+   "label": "RING · THE LEAF"
+  },
+  {
+   "i": 44,
+   "kind": "hover",
+   "target": "dlg:lead",
+   "t": 51.97,
+   "arrive": 51.57,
+   "step": 7,
+   "label": "RING · THE LEAF"
+  },
+  {
+   "i": 45,
+   "kind": "click",
+   "target": "dlg:ok",
+   "t": 52.55,
+   "arrive": 52.37,
+   "step": 7,
+   "label": "RING · THE LEAF"
+  },
+  {
+   "i": 46,
+   "kind": "click",
+   "target": "ol:Leaf 3",
+   "t": 53.57,
+   "arrive": 53.39,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 47,
+   "kind": "click",
+   "target": "ol:Leaf 2",
+   "t": 54.27,
+   "arrive": 54.09,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 48,
+   "kind": "click",
+   "target": "ol:Leaf 1",
+   "t": 54.97,
+   "arrive": 54.79,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 49,
+   "kind": "click",
+   "target": "sec:timing",
+   "t": 55.99,
+   "arrive": 55.81,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 50,
+   "kind": "click",
+   "target": "pn:spread_timing",
+   "t": 56.71,
+   "arrive": 56.53,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 51,
+   "kind": "hover",
+   "target": "dlg:order",
+   "t": 57.98,
+   "arrive": 57.53,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 52,
+   "kind": "click",
+   "target": "dlg:only",
+   "t": 58.56,
+   "arrive": 58.38,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 53,
+   "kind": "edit",
+   "target": "dlg:start",
+   "t": 60.67,
+   "arrive": 59.23,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 54,
+   "kind": "edit",
+   "target": "dlg:step",
+   "t": 62.68,
+   "arrive": 61.24,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 55,
+   "kind": "click",
+   "target": "dlg:ok",
+   "t": 63.43,
+   "arrive": 63.25,
+   "step": 8,
+   "label": "SPREAD · DELAYS"
+  },
+  {
+   "i": 56,
+   "kind": "edit",
+   "target": "tim:Inner Leader",
+   "t": 65.79,
+   "arrive": 64.35,
+   "step": 8,
+   "label": "TYPE THE DELAYS"
+  },
+  {
+   "i": 57,
+   "kind": "edit",
+   "target": "tim:Core",
+   "t": 67.8,
+   "arrive": 66.36,
+   "step": 8,
+   "label": "TYPE THE DELAYS"
+  },
+  {
+   "i": 58,
+   "kind": "click",
+   "target": "sec:path",
+   "t": 68.52,
+   "arrive": 68.34,
+   "step": 9,
+   "label": "EASE · SMOOTH"
+  },
+  {
+   "i": 59,
+   "kind": "click",
+   "target": "pn:smooth",
+   "t": 69.22,
+   "arrive": 69.04,
+   "step": 9,
+   "label": "EASE · SMOOTH"
+  },
+  {
+   "i": 60,
+   "kind": "click",
+   "target": "pn:build",
+   "t": 70.42,
+   "arrive": 70.24,
+   "step": 9,
+   "label": "BUILD SLIDERS"
+  },
+  {
+   "i": 61,
+   "kind": "drag",
+   "target": "pn:slider",
+   "t": 71.67,
+   "arrive": 71.49,
+   "step": 10,
+   "label": "DONE · ONE SLIDER"
+  }
+ ]
+}

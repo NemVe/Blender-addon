@@ -3,7 +3,7 @@
 import * as ui from './ui.mjs';
 import { K as K3, loadFlower, render, THREE } from './stage3d.mjs';
 import { clamp, ramp } from './lib.mjs';
-import openBeats from './beats_open.mjs';
+import openBeats from './beats_walk.mjs';
 import hookBeats from './beats_hook.mjs';
 import ideaBeats from './beats_idea.mjs';
 import featBeats from './beats_feat.mjs';

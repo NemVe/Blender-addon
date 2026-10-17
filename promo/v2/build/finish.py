@@ -1,4 +1,4 @@
-"""Audio mix, captions and the final film of promo v2.2.
+"""Audio mix, captions and the final film of promo v2.3.
 
     python promo/v2/build/finish.py audio     vo.wav, sfx.wav (stems, no music) and the mix, about -14 LUFS, true peak -1 dB
     python promo/v2/build/finish.py srt       captions.srt
@@ -6,7 +6,7 @@
 
 Everything lands in dist/promo/v2/. The voice and the sound effects are placed on the film's clock by timeline.json:
 the voice lines where the beats put them, a whoosh on every stripe wipe, a tick as each headline lands, a click on
-every cursor click (a press and a release for a drag), a pop for every Ring copy.
+every cursor click (a press and a release for a drag), a soft tick for every typed key of the opening, a pop for every Ring copy.
 """
 
 import json
@@ -61,7 +61,12 @@ def stems(T):
         place(sfx, fx["whoosh"], w["whoosh"], 0.9 * FX * WHOOSH)
     for tk in T["ticks"]:
         place(sfx, fx["tick"], tk["t"], FX)
+    typed = 0
     for c in T["clicks"]:
+        if c["kind"] == "key":                                           # three little variations, in turn: a hand does not type one sound
+            place(sfx, fx[("key", "key_2", "key_3")[typed % 3]], c["t"], FX)
+            typed += 1
+            continue
         place(sfx, fx[{"click": "click", "down": "click_down", "up": "click_up"}[c["kind"]]], c["t"], FX)
     for p in T.get("pops", []):
         place(sfx, fx[p["name"]], p["t"], 0.9 * FX)

@@ -1,4 +1,4 @@
-"""The voiceover script of promo v2.2: what the voice is given, in continuous passages, and the lines that are cut out of them.
+"""The voiceover script of promo v2.3: what the voice is given, in continuous passages, and the lines that are cut out of them.
 
 A line is (id, what the screen and the captions show, what is said). The id names the beat it goes on (promo/v2/make_timeline.py).
 "CopyThat" is said as two words: as one it is read "copythat", with the stress in the wrong place.
@@ -6,11 +6,54 @@ Each passage is spoken in one take, so its sentences carry one intonation from s
 one, and each reset its pitch: "like reading from a script"). gen_vo.py speaks the passages; cut_vo.py cuts the lines out.
 """
 
+import json
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
+        "nineteen").split()
+TENS = "x x twenty thirty forty fifty".split()
+
+
+def number_words(n):
+    return ONES[n] if n < 20 else TENS[n // 10] + ("-" + ONES[n % 10] if n % 10 else "")
+
+
+def spoken_time(seconds):
+    """The time the timer stops at, as a person says it: 'a minute and ten seconds', 'fifty-eight seconds'."""
+    whole = int(seconds + 1e-9)
+    minutes, rest = divmod(whole, 60)
+    parts = []
+    if minutes:
+        parts.append("a minute" if minutes == 1 else number_words(minutes) + " minutes")
+    if rest or not minutes:
+        parts.append(number_words(rest) + (" second" if rest == 1 else " seconds"))
+    return " and ".join(parts)
+
+
+def rigged_in():
+    """What the opening's last line says: the real time of the walkthrough, from promo/v2/walk_schedule.json (walk_schedule_json.mjs)."""
+    with open(os.path.join(HERE, "..", "walk_schedule.json"), encoding="utf-8") as fh:
+        return spoken_time(json.load(fh)["riggedIn"])
+
+
 # passage id -> its lines
 PASSAGES = {
+    # v2.3: the walkthrough's narration, one continuous passage. Each line is placed at its step by make_timeline.py. The sentence
+    # "Spread the timing down the leaf, and give ..." is cut in two at its comma: the second half is said as the delays are typed.
     "open": (
-        ("open_a", "Let's rig this flower in twelve clicks. Watch this!", None),
-        ("open_b", "Done! One slider, and it blooms.", None),
+        ("open_1", "Let's rig this flower from scratch. Clock's running!", None),
+        ("open_2", "Select the six parts, and hit New Move.", None),
+        ("open_3", "Make the leaf a chain.", None),
+        ("open_4", "Now pose it open, one part at a time.", None),
+        ("open_5", "Record After.", None),
+        ("open_6", "Ring the outer petals.", None),
+        ("open_7", "Now the inner ones.", None),
+        ("open_8", "And the leaf.", None),
+        ("open_9a", "Spread the timing down the leaf", "Spread the timing down the leaf,"),
+        ("open_9b", "and give the inner petals and the core a delay.", None),
+        ("open_10", "Smooth... and Build!", None),
+        ("open_11", "One slider, and it blooms. Rigged in " + rigged_in() + "!", None),
     ),
     "idea": (
         ("logo", "This is CopyThat: record a move, and get a slider.", "This is Copy That: record a move, and get a slider."),

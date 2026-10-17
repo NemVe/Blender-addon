@@ -1,6 +1,6 @@
-Voice and sound of promo v2.2: where each comes from, and under what licence.
+Voice and sound of promo v2.3: where each comes from, and under what licence.
 
-Voiceover (open_a.wav ... end.wav, vo.json)
+Voiceover (open_1.wav ... end.wav, vo.json)
   Spoken by Chatterbox (Resemble AI, MIT, https://github.com/resemble-ai/chatterbox,
   chatterbox-tts 0.1.7, the ResembleAI/chatterbox weights, MIT) with its default
   voice, on the GPU, in a few continuous passages (vo_script.py), exaggeration 0.65,
@@ -12,12 +12,12 @@ Voiceover (open_a.wav ... end.wav, vo.json)
   v2.1's voice was Kokoro-82M (Apache-2.0) through kokoro-onnx (MIT); make_vo.py is
   kept as the fallback and for the audio helpers cut_vo.py uses.
 
-Sound effects (click*.wav, whoosh.wav, pop*.wav, tick.wav, sfx.json)
+Sound effects (click*.wav, whoosh.wav, pop*.wav, tick.wav, key*.wav, sfx.json)
   Made by make_sfx.py from numpy noise and sine waves. Nothing is sampled from
   a recording or a sound pack, so they are CC0 1.0 (public domain): use them
-  anywhere, no credit needed.
+  anywhere, no credit needed. The soft keyboard ticks of the opening (key.wav, key_2.wav, key_3.wav, v2.3) are made the same way.
 
 Rebuild:  <python 3.11 venv with chatterbox-tts> gen_vo.py --out <takes folder>
-          python cut_vo.py --takes <takes folder> --cache <folder for the Whisper model>
+          python cut_vo.py --takes <takes folder> --cache <folder for the Whisper model> [--only open]
           python make_sfx.py
           python ../make_timeline.py

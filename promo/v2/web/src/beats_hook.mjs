@@ -1,4 +1,4 @@
-// 9-13 s: the logo over the Cycles bloom. (The opening that comes before it is beats_open.mjs; v2.1's three hooks are in git history.)
+// 9-13 s: the logo over the Cycles bloom. (The opening that comes before it is beats_walk.mjs; v2.1's three hooks and v2.2's opening, beats_open.mjs, are in git history.)
 import { clamp, ramp, e3, hump, bk } from './lib.mjs';
 
 // ---- the logo, over the Cycles bloom (hook C), the flower pushed to the right so the name has room ----

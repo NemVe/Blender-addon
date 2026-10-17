@@ -1,4 +1,4 @@
-"""The sound effects of promo v2.1, made from nothing: numpy noise and sine waves.
+"""The sound effects of promo v2.3, made from nothing: numpy noise and sine waves.
 
     python make_sfx.py            (writes the WAVs and sfx.json next to this script)
 
@@ -12,6 +12,7 @@ voice sits near -16 LUFS: the film's mixer may still scale them.
   whoosh      a soft sweep for the stripe wipe between two beats; its loudest point is 0.26 s in
   pop         a light bubble pop, for each copy a Ring makes; pop_2 and pop_3 are a little higher
   tick        a soft wooden tick, for a headline landing
+  key         a soft keyboard tick, for each typed character of the opening's walkthrough (v2.3); key_2 and key_3 are a little different
 Needs: pip install numpy scipy soundfile
 """
 
@@ -112,6 +113,14 @@ def tick():
     return peak_to(x, -17.0)
 
 
+def key(seed, ring, body):
+    """A typed key, quiet: a short band-limited tick, a small low thock under it and a faint ring of the plastic."""
+    t = times(0.06)
+    tick = band(noise(len(t), seed), 1500, 6500) * np.exp(-t / 0.0015)
+    thock = 0.6 * np.sin(2 * np.pi * body * t) * np.exp(-t / 0.008) + 0.22 * np.sin(2 * np.pi * ring * t) * np.exp(-t / 0.003)
+    return peak_to((0.8 * tick / np.abs(tick).max() + thock) * attack(t, 0.0002), -23.0)
+
+
 # name -> (samples, what it is for, moment inside the file that must meet the picture)
 EFFECTS = {
     "click_down": (click_down(), "mouse button down: the press-scale pulse", {"hit": 0.0}),
@@ -122,6 +131,9 @@ EFFECTS = {
     "pop_2": (pop(2.0), "a Ring copy appears, a little higher", {"hit": 0.0}),
     "pop_3": (pop(4.0), "a Ring copy appears, higher still", {"hit": 0.0}),
     "tick": (tick(), "a headline lands", {"hit": 0.0}),
+    "key": (key(41, 1900.0, 230.0), "a typed character: a soft keyboard tick", {"hit": 0.0}),
+    "key_2": (key(42, 2100.0, 260.0), "a typed character, a little higher", {"hit": 0.0}),
+    "key_3": (key(43, 1750.0, 205.0), "a typed character, a little lower", {"hit": 0.0}),
 }
 
 

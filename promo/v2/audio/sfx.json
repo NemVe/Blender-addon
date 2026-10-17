@@ -75,6 +75,33 @@
    "marks": {
     "hit": 0.0
    }
+  },
+  "key": {
+   "file": "key.wav",
+   "duration": 0.06,
+   "use": "a typed character: a soft keyboard tick",
+   "peak_db": -23.0,
+   "marks": {
+    "hit": 0.0
+   }
+  },
+  "key_2": {
+   "file": "key_2.wav",
+   "duration": 0.06,
+   "use": "a typed character, a little higher",
+   "peak_db": -23.0,
+   "marks": {
+    "hit": 0.0
+   }
+  },
+  "key_3": {
+   "file": "key_3.wav",
+   "duration": 0.06,
+   "use": "a typed character, a little lower",
+   "peak_db": -23.0,
+   "marks": {
+    "hit": 0.0
+   }
   }
  }
 }

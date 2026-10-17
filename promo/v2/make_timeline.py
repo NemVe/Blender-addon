@@ -1,4 +1,4 @@
-"""The timeline of promo v2.2: the beat grid of the plan, the voiceover placed on it, the sound-effect cues.
+"""The timeline of promo v2.3: the beat grid of the plan, the voiceover placed on it, the sound-effect cues.
 
     python promo/v2/make_timeline.py          writes promo/v2/timeline.json
 
@@ -10,10 +10,10 @@ headline is on screen as the first words are heard; a line that is too long for 
 beat starts up to NUDGE s earlier. The line lengths come from audio/vo.json (made by
 audio/gen_vo.py and audio/cut_vo.py, which also stretch a line that still does not fit).
 
-The opening has no fixed length. Its first line ("Let's rig this flower in twelve
-clicks. Watch this!") comes first, the cursor's clicks follow it (the schedule OPEN_STEPS,
-read by web/src/beats_open.mjs from timeline.json), and its second line ("Done! One
-slider, and it blooms.") lands on the last click. The beat ends a moment after that.
+The opening has no fixed length. Its first line ("Let's rig this flower from scratch. Clock's running!") comes first and the first click
+follows it. From there the walkthrough runs on its own clock, walk_schedule.json (made from web/src/walk_schedule.mjs by
+build/walk_schedule_json.mjs, and read by the page too): every other line of the opening is placed at its step (OPEN_LINES), and the beat
+ends a moment after the slider's drag and the last line.
 
 Written for the film's builder to read and to change:
   beats    id, name, section, start, end, the voice lines in it
@@ -39,18 +39,30 @@ MIN_TAIL = 0.15     # the voice is done at least this long before its beat ends
 NUDGE = 0.3         # a line that does not fit may start this much earlier than its lead says
 
 OPEN_LEAD = 0.35    # the first word of the opening comes this long into it
-OPEN_GAP = 0.12     # the first click comes this long after "Watch this!"
-OPEN_DONE = 0.1     # "Done!" starts this long after the last click
+OPEN_GAP = 0.35     # the first click comes this long after "Clock's running!"
+OPEN_APART = 0.12   # a line of the opening starts at least this long after the one before it ended
+OPEN_HOLD = 1.0     # the picture stays this long after the slider's drag
 OPEN_TAIL = 0.5     # air after the last word of the opening, before the wipe
-OPEN_DRAG = 1.8     # the slider drag of the last click (DRAG in web/src/beats_open.mjs)
-# The cursor's clicks of the opening, in seconds after the first one. The twelve counted ones are new .. build; "pose" is the
-# first of four quick drags (a drag every 0.25 s) that are shown and not counted; "drag" is the slider, once the flower is built.
-OPEN_STEPS = (("new", 0.0), ("chain", 0.42), ("pose", 0.84), ("rec", 1.95), ("r1", 2.35), ("o1", 2.78), ("r2", 3.15), ("o2", 3.58),
-              ("r3", 3.95), ("o3", 4.38), ("sp", 4.75), ("o4", 5.18), ("build", 5.6), ("drag", 5.95))
+# The lines of the opening after the first: (id, mark of walk_schedule.json, "start" or "end", offset in seconds). The line's speech
+# starts (or ends) at that mark, in seconds after the first click, plus the offset. The marks of the walkthrough are its presses
+# ("newmove", "record", "build", ...) and the moments the pointer arrives at a step ("pose_arrive", ...).
+OPEN_LINES = (
+    ("open_2", "newmove", "end", 0.20),          # "... and hit New Move." ends as the button is pressed
+    ("open_3", "makechain", "end", 0.20),        # "Make the leaf a chain." ends on Make Chain
+    ("open_4", "pose_arrive", "start", 0.0),     # said as the first part is clicked
+    ("open_5", "record", "end", 0.15),           # "Record After." ends on the press
+    ("open_6", "ring1_arrive", "start", 0.0),
+    ("open_7", "ring2_arrive", "start", 0.0),
+    ("open_8", "ring3_arrive", "start", 0.0),
+    ("open_9a", "spread_arrive", "start", 0.0),
+    ("open_9b", "delays_arrive", "start", -0.2),  # said while the two delays are typed
+    ("open_10", "smooth_arrive", "start", 0.05),  # "Smooth" as Smooth is pressed; "... and Build!" then ends on Build Sliders
+    ("open_11", "grab", "start", 0.0),           # "One slider, and it blooms." as the slider is dragged
+)
 
 # id, name, section, length (s), voice line, seconds from the start of the beat to the first word.
 BEATS = (
-    ("open", "Opening", "Opening", None, "open_a", OPEN_LEAD),      # its length comes from the voice, see opening()
+    ("open", "Opening", "Opening", None, "open_1", OPEN_LEAD),      # its length comes from the walkthrough, see opening()
     ("logo", "Logo", "Logo", 4.0, "logo", 0.35),
     ("idea1", "The idea 1/3", "The idea", 4.0, "idea1", 0.4),
     ("idea2", "The idea 2/3", "The idea", 4.0, "idea2", 0.3),
@@ -78,15 +90,26 @@ def put(vo, line_id, beat_id, wav_start):
             "words": [{"w": w["w"], "start": at(w["start"]), "end": at(w["end"])} for w in line["words"]]}
 
 
-def opening(vo):
-    """The opening's own clock (seconds from its start): where its two lines go, the cursor's schedule, and how long it lasts."""
-    a, b = vo["lines"]["open_a"], vo["lines"]["open_b"]
-    a_wav = OPEN_LEAD - a["phrases"][0]["start"]
-    go = a_wav + a["phrases"][-1]["end"] + OPEN_GAP
-    steps = {k: round(go + dt, 3) for k, dt in OPEN_STEPS}
-    b_wav = steps["build"] + OPEN_DONE - b["phrases"][0]["start"]               # "Done!" lands on the last click
-    length = max(steps["drag"] + OPEN_DRAG + 0.45, b_wav + b["phrases"][-1]["end"] + OPEN_TAIL)
-    return math.ceil(length * FPS - 1e-6) / FPS, a_wav, b_wav, steps           # whole frames, so the beats after it stay on theirs
+def opening(vo, sched):
+    """The opening's own clock (seconds from its start): where each line goes, when the first click is, and how long it lasts."""
+    marks = sched["marks"]
+    first = vo["lines"]["open_1"]
+    speech = lambda line: (line["phrases"][0]["start"], line["phrases"][-1]["end"])      # noqa: E731
+    s0, s1 = speech(first)
+    wavs = {"open_1": OPEN_LEAD - s0}
+    go = OPEN_LEAD + (s1 - s0) + OPEN_GAP                                              # the first click
+    prev_end = OPEN_LEAD + (s1 - s0)
+    for line_id, mark, edge, offset in OPEN_LINES:
+        a, b = speech(vo["lines"][line_id])
+        at = go + marks[mark] + offset
+        begin = at if edge == "start" else at - (b - a)
+        if begin < prev_end + OPEN_APART:                                              # a line never talks over the one before it
+            print("  note: {} is moved {:.2f} s later, after the line before it".format(line_id, prev_end + OPEN_APART - begin))
+            begin = prev_end + OPEN_APART
+        wavs[line_id] = begin - a
+        prev_end = begin + (b - a)
+    length = max(go + sched["end"] + OPEN_HOLD, prev_end + OPEN_TAIL)
+    return math.ceil(length * FPS - 1e-6) / FPS, wavs, go        # whole frames, so the beats after it stay on theirs
 
 
 def main():
@@ -94,6 +117,8 @@ def main():
         vo = json.load(fh)
     with open(os.path.join(AUDIO, "sfx.json"), encoding="utf-8") as fh:
         sfx = json.load(fh)["effects"]
+    with open(os.path.join(HERE, "walk_schedule.json"), encoding="utf-8") as fh:
+        sched = json.load(fh)
     hit = sfx["whoosh"]["marks"]["hit"]     # the whoosh is loudest this far into its file
 
     beats, lines, wipes, ticks, markers = [], {}, [], [], []
@@ -102,10 +127,11 @@ def main():
         start = t
         beat = {"id": bid, "name": name, "section": section}
         if bid == "open":
-            length, a_wav, b_wav, steps = opening(vo)
-            lines["open_a"] = put(vo, "open_a", bid, start + a_wav)
-            lines["open_b"] = put(vo, "open_b", bid, start + b_wav)
-            beat.update({"lines": ["open_a", "open_b"], "steps": steps})      # relative to the beat, for the page
+            length, wavs, go = opening(vo, sched)
+            ids = ["open_1"] + [x[0] for x in OPEN_LINES]
+            for lid in ids:
+                lines[lid] = put(vo, lid, bid, start + wavs[lid])
+            beat.update({"lines": ids, "steps": {"go": round(go, 3)}})          # relative to the beat, for the page
         else:
             line = vo["lines"][line_id]
             first, last = line["phrases"][0]["start"], line["phrases"][-1]["end"]   # the WAV has a little silence round the speech
@@ -128,7 +154,7 @@ def main():
         t = end
 
     data = {
-        "version": "2.2", "fps": FPS, "width": 2560, "height": 1440, "duration": round(t, 3),
+        "version": "2.3", "fps": FPS, "width": 2560, "height": 1440, "duration": round(t, 3),
         "voice": {k: vo[k] for k in ("engine", "voice", "settings", "lufs_per_line", "total", "sample_rate") if k in vo},
         "defaults": {"wipe_length": WIPE, "tick_after_beat_start": TICK_AT, "feature_beat": FEATURE,
                      "whoosh_loudest_at": hit, "min_tail_after_voice": MIN_TAIL},

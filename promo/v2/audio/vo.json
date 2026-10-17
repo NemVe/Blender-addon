@@ -12,8 +12,18 @@
  "lufs_per_line": -16.0,
  "processing": "high-pass 70 Hz, +2.5 dB at 3 kHz, 1.6:1 compressor, limiter at -1.5 dBFS",
  "order": [
-  "open_a",
-  "open_b",
+  "open_1",
+  "open_2",
+  "open_3",
+  "open_4",
+  "open_5",
+  "open_6",
+  "open_7",
+  "open_8",
+  "open_9a",
+  "open_9b",
+  "open_10",
+  "open_11",
   "logo",
   "idea1",
   "idea2",
@@ -35,134 +45,654 @@
   "end"
  ],
  "lines": {
-  "open_a": {
-   "beat": "open_a",
-   "text": "Let's rig this flower in twelve clicks. Watch this!",
-   "spoken": "Let's rig this flower in twelve clicks. Watch this!",
-   "file": "open_a.wav",
-   "duration": 2.7,
+  "open_1": {
+   "beat": "open_1",
+   "text": "Let's rig this flower from scratch. Clock's running!",
+   "spoken": "Let's rig this flower from scratch. Clock's running!",
+   "file": "open_1.wav",
+   "duration": 2.34,
    "tempo": 1.0,
-   "take": "open_1000",
-   "lufs": -16.1,
+   "take": "open_2005",
+   "lufs": -16.0,
    "peak_db": -1.5,
-   "limiter_dip_db": 3.7,
+   "limiter_dip_db": 2.9,
    "phrases": [
     {
-     "text": "Let's rig this flower in twelve clicks.",
+     "text": "Let's rig this flower from scratch.",
      "start": 0.04,
-     "end": 1.62
+     "end": 1.375
     },
     {
-     "text": "Watch this!",
-     "start": 2.04,
-     "end": 2.625
+     "text": "Clock's running!",
+     "start": 1.775,
+     "end": 2.31
     }
    ],
    "words": [
     {
      "w": "let's",
      "start": 0.04,
-     "end": 0.28
+     "end": 0.295
     },
     {
      "w": "rig",
-     "start": 0.28,
-     "end": 0.38
+     "start": 0.295,
+     "end": 0.415
     },
     {
      "w": "this",
-     "start": 0.38,
-     "end": 0.6
+     "start": 0.415,
+     "end": 0.615
     },
     {
      "w": "flower",
-     "start": 0.6,
-     "end": 0.82
+     "start": 0.615,
+     "end": 0.835
     },
     {
-     "w": "in",
-     "start": 0.82,
-     "end": 1.06
+     "w": "from",
+     "start": 0.835,
+     "end": 1.055
     },
     {
-     "w": "twelve",
-     "start": 1.06,
-     "end": 1.3
+     "w": "scratch",
+     "start": 1.055,
+     "end": 1.375
     },
     {
-     "w": "clicks",
-     "start": 1.3,
-     "end": 1.62
+     "w": "clock's",
+     "start": 1.775,
+     "end": 1.875
     },
     {
-     "w": "watch",
-     "start": 2.04,
-     "end": 2.16
-    },
-    {
-     "w": "this",
-     "start": 2.16,
-     "end": 2.625
+     "w": "running",
+     "start": 1.875,
+     "end": 2.31
     }
    ],
-   "heard": "let's rig this flower in twelve clicks watch this"
+   "heard": "let's rig this flower from scratch clock's running"
   },
-  "open_b": {
-   "beat": "open_b",
-   "text": "Done! One slider, and it blooms.",
-   "spoken": "Done! One slider, and it blooms.",
-   "file": "open_b.wav",
-   "duration": 1.86,
+  "open_2": {
+   "beat": "open_2",
+   "text": "Select the six parts, and hit New Move.",
+   "spoken": "Select the six parts, and hit New Move.",
+   "file": "open_2.wav",
+   "duration": 1.84,
    "tempo": 1.0,
-   "take": "open_1000",
+   "take": "open_2005",
    "lufs": -16.0,
    "peak_db": -1.5,
-   "limiter_dip_db": 2.7,
+   "limiter_dip_db": 1.7,
    "phrases": [
     {
-     "text": "Done!",
-     "start": 0.025,
-     "end": 0.2
-    },
-    {
-     "text": "One slider, and it blooms.",
-     "start": 0.48,
-     "end": 1.76
+     "text": "Select the six parts, and hit New Move.",
+     "start": 0.04,
+     "end": 1.78
     }
    ],
    "words": [
     {
-     "w": "done",
-     "start": 0.025,
-     "end": 0.2
+     "w": "select",
+     "start": 0.04,
+     "end": 0.255
     },
     {
-     "w": "one",
-     "start": 0.48,
-     "end": 0.6
+     "w": "the",
+     "start": 0.255,
+     "end": 0.415
     },
     {
-     "w": "slider",
-     "start": 0.6,
-     "end": 0.86
+     "w": "six",
+     "start": 0.415,
+     "end": 0.555
+    },
+    {
+     "w": "parts",
+     "start": 0.555,
+     "end": 0.835
     },
     {
      "w": "and",
-     "start": 0.86,
-     "end": 1.14
+     "start": 0.835,
+     "end": 1.055
+    },
+    {
+     "w": "hit",
+     "start": 1.055,
+     "end": 1.195
+    },
+    {
+     "w": "new",
+     "start": 1.195,
+     "end": 1.375
+    },
+    {
+     "w": "move",
+     "start": 1.375,
+     "end": 1.78
+    }
+   ],
+   "heard": "select the six parts and hit new move"
+  },
+  "open_3": {
+   "beat": "open_3",
+   "text": "Make the leaf a chain.",
+   "spoken": "Make the leaf a chain.",
+   "file": "open_3.wav",
+   "duration": 1.005,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 0.9,
+   "phrases": [
+    {
+     "text": "Make the leaf a chain.",
+     "start": 0.04,
+     "end": 0.99
+    }
+   ],
+   "words": [
+    {
+     "w": "make",
+     "start": 0.04,
+     "end": 0.17
+    },
+    {
+     "w": "the",
+     "start": 0.17,
+     "end": 0.31
+    },
+    {
+     "w": "leaf",
+     "start": 0.31,
+     "end": 0.47
+    },
+    {
+     "w": "a",
+     "start": 0.47,
+     "end": 0.59
+    },
+    {
+     "w": "chain",
+     "start": 0.59,
+     "end": 0.99
+    }
+   ],
+   "heard": "make the leaf a chain"
+  },
+  "open_4": {
+   "beat": "open_4",
+   "text": "Now pose it open, one part at a time.",
+   "spoken": "Now pose it open, one part at a time.",
+   "file": "open_4.wav",
+   "duration": 1.855,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 4.3,
+   "phrases": [
+    {
+     "text": "Now pose it open, one part at a time.",
+     "start": 0.03,
+     "end": 1.83
+    }
+   ],
+   "words": [
+    {
+     "w": "now",
+     "start": 0.03,
+     "end": 0.165
+    },
+    {
+     "w": "pose",
+     "start": 0.165,
+     "end": 0.345
     },
     {
      "w": "it",
-     "start": 1.14,
-     "end": 1.26
+     "start": 0.345,
+     "end": 0.465
+    },
+    {
+     "w": "open",
+     "start": 0.465,
+     "end": 0.685
+    },
+    {
+     "w": "one",
+     "start": 0.865,
+     "end": 1.065
+    },
+    {
+     "w": "part",
+     "start": 1.065,
+     "end": 1.245
+    },
+    {
+     "w": "at",
+     "start": 1.245,
+     "end": 1.365
+    },
+    {
+     "w": "a",
+     "start": 1.365,
+     "end": 1.465
+    },
+    {
+     "w": "time",
+     "start": 1.465,
+     "end": 1.83
+    }
+   ],
+   "heard": "now pose it open one part at a time"
+  },
+  "open_5": {
+   "beat": "open_5",
+   "text": "Record After.",
+   "spoken": "Record After.",
+   "file": "open_5.wav",
+   "duration": 0.9,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 3.8,
+   "phrases": [
+    {
+     "text": "Record After.",
+     "start": 0.035,
+     "end": 0.9
+    }
+   ],
+   "words": [
+    {
+     "w": "record",
+     "start": 0.035,
+     "end": 0.29
+    },
+    {
+     "w": "after",
+     "start": 0.29,
+     "end": 0.9
+    }
+   ],
+   "heard": "record after"
+  },
+  "open_6": {
+   "beat": "open_6",
+   "text": "Ring the outer petals.",
+   "spoken": "Ring the outer petals.",
+   "file": "open_6.wav",
+   "duration": 0.99,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.6,
+   "phrases": [
+    {
+     "text": "Ring the outer petals.",
+     "start": 0.0,
+     "end": 0.965
+    }
+   ],
+   "words": [
+    {
+     "w": "ring",
+     "start": 0.0,
+     "end": 0.13
+    },
+    {
+     "w": "the",
+     "start": 0.13,
+     "end": 0.29
+    },
+    {
+     "w": "outer",
+     "start": 0.29,
+     "end": 0.49
+    },
+    {
+     "w": "petals",
+     "start": 0.49,
+     "end": 0.965
+    }
+   ],
+   "heard": "ring the outer petals"
+  },
+  "open_7": {
+   "beat": "open_7",
+   "text": "Now the inner ones.",
+   "spoken": "Now the inner ones.",
+   "file": "open_7.wav",
+   "duration": 0.92,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 4.6,
+   "phrases": [
+    {
+     "text": "Now the inner ones.",
+     "start": 0.02,
+     "end": 0.895
+    }
+   ],
+   "words": [
+    {
+     "w": "now",
+     "start": 0.02,
+     "end": 0.16
+    },
+    {
+     "w": "the",
+     "start": 0.16,
+     "end": 0.3
+    },
+    {
+     "w": "inner",
+     "start": 0.3,
+     "end": 0.48
+    },
+    {
+     "w": "ones",
+     "start": 0.48,
+     "end": 0.895
+    }
+   ],
+   "heard": "now the inner ones"
+  },
+  "open_8": {
+   "beat": "open_8",
+   "text": "And the leaf.",
+   "spoken": "And the leaf.",
+   "file": "open_8.wav",
+   "duration": 0.685,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 2.9,
+   "phrases": [
+    {
+     "text": "And the leaf.",
+     "start": 0.015,
+     "end": 0.645
+    }
+   ],
+   "words": [
+    {
+     "w": "and",
+     "start": 0.015,
+     "end": 0.16
+    },
+    {
+     "w": "the",
+     "start": 0.16,
+     "end": 0.28
+    },
+    {
+     "w": "leaf",
+     "start": 0.28,
+     "end": 0.645
+    }
+   ],
+   "heard": "and the leaf"
+  },
+  "open_9a": {
+   "beat": "open_9a",
+   "text": "Spread the timing down the leaf",
+   "spoken": "Spread the timing down the leaf,",
+   "file": "open_9a.wav",
+   "duration": 1.17,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.0,
+   "peak_db": -2.2,
+   "limiter_dip_db": -0.0,
+   "phrases": [
+    {
+     "text": "Spread the timing down the leaf",
+     "start": 0.015,
+     "end": 1.17
+    }
+   ],
+   "words": [
+    {
+     "w": "spread",
+     "start": 0.015,
+     "end": 0.215
+    },
+    {
+     "w": "the",
+     "start": 0.215,
+     "end": 0.375
+    },
+    {
+     "w": "timing",
+     "start": 0.375,
+     "end": 0.555
+    },
+    {
+     "w": "down",
+     "start": 0.555,
+     "end": 0.775
+    },
+    {
+     "w": "the",
+     "start": 0.775,
+     "end": 0.915
+    },
+    {
+     "w": "leaf",
+     "start": 0.915,
+     "end": 1.17
+    }
+   ],
+   "heard": "spread the timing down the leaf"
+  },
+  "open_9b": {
+   "beat": "open_9b",
+   "text": "and give the inner petals and the core a delay.",
+   "spoken": "and give the inner petals and the core a delay.",
+   "file": "open_9b.wav",
+   "duration": 1.94,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 2.8,
+   "phrases": [
+    {
+     "text": "and give the inner petals and the core a delay.",
+     "start": 0.0,
+     "end": 1.9
+    }
+   ],
+   "words": [
+    {
+     "w": "and",
+     "start": 0.0,
+     "end": 0.165
+    },
+    {
+     "w": "give",
+     "start": 0.165,
+     "end": 0.285
+    },
+    {
+     "w": "the",
+     "start": 0.285,
+     "end": 0.425
+    },
+    {
+     "w": "inner",
+     "start": 0.425,
+     "end": 0.625
+    },
+    {
+     "w": "petals",
+     "start": 0.625,
+     "end": 0.925
+    },
+    {
+     "w": "and",
+     "start": 0.925,
+     "end": 1.065
+    },
+    {
+     "w": "the",
+     "start": 1.065,
+     "end": 1.165
+    },
+    {
+     "w": "core",
+     "start": 1.165,
+     "end": 1.345
+    },
+    {
+     "w": "a",
+     "start": 1.345,
+     "end": 1.485
+    },
+    {
+     "w": "delay",
+     "start": 1.485,
+     "end": 1.9
+    }
+   ],
+   "heard": "and give the inner pedals and the core a delay"
+  },
+  "open_10": {
+   "beat": "open_10",
+   "text": "Smooth... and Build!",
+   "spoken": "Smooth... and Build!",
+   "file": "open_10.wav",
+   "duration": 1.25,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.1,
+   "peak_db": -1.5,
+   "limiter_dip_db": 5.1,
+   "phrases": [
+    {
+     "text": "Smooth...",
+     "start": 0.015,
+     "end": 0.325
+    },
+    {
+     "text": "and Build!",
+     "start": 0.665,
+     "end": 1.2
+    }
+   ],
+   "words": [
+    {
+     "w": "smooth",
+     "start": 0.015,
+     "end": 0.325
+    },
+    {
+     "w": "and",
+     "start": 0.665,
+     "end": 0.825
+    },
+    {
+     "w": "build",
+     "start": 0.825,
+     "end": 1.2
+    }
+   ],
+   "heard": "smooth and build"
+  },
+  "open_11": {
+   "beat": "open_11",
+   "text": "One slider, and it blooms. Rigged in a minute and ten seconds!",
+   "spoken": "One slider, and it blooms. Rigged in a minute and ten seconds!",
+   "file": "open_11.wav",
+   "duration": 3.13,
+   "tempo": 1.0,
+   "take": "open_2005",
+   "lufs": -16.0,
+   "peak_db": -1.5,
+   "limiter_dip_db": 1.7,
+   "phrases": [
+    {
+     "text": "One slider, and it blooms.",
+     "start": 0.035,
+     "end": 1.355
+    },
+    {
+     "text": "Rigged in a minute and ten seconds!",
+     "start": 1.635,
+     "end": 3.03
+    }
+   ],
+   "words": [
+    {
+     "w": "one",
+     "start": 0.035,
+     "end": 0.195
+    },
+    {
+     "w": "slider",
+     "start": 0.195,
+     "end": 0.455
+    },
+    {
+     "w": "and",
+     "start": 0.775,
+     "end": 0.915
+    },
+    {
+     "w": "it",
+     "start": 0.915,
+     "end": 1.015
     },
     {
      "w": "blooms",
-     "start": 1.26,
-     "end": 1.76
+     "start": 1.015,
+     "end": 1.355
+    },
+    {
+     "w": "rigged",
+     "start": 1.635,
+     "end": 1.795
+    },
+    {
+     "w": "in",
+     "start": 1.795,
+     "end": 1.875
+    },
+    {
+     "w": "a",
+     "start": 1.875,
+     "end": 1.995
+    },
+    {
+     "w": "minute",
+     "start": 1.995,
+     "end": 2.095
+    },
+    {
+     "w": "and",
+     "start": 2.095,
+     "end": 2.295
+    },
+    {
+     "w": "ten",
+     "start": 2.295,
+     "end": 2.455
+    },
+    {
+     "w": "seconds",
+     "start": 2.455,
+     "end": 3.03
     }
    ],
-   "heard": "done one slider and it blooms"
+   "heard": "one slider and it blooms rigged in a minute and ten seconds"
   },
   "logo": {
    "beat": "logo",
@@ -1238,5 +1768,5 @@
    "heard": "copy that now on super hive"
   }
  },
- "total": 38.16
+ "total": 51.625
 }

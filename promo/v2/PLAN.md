@@ -526,3 +526,34 @@ The lines from the logo on stay v2.2's.
     - Build;
     - the timer's final card;
     - the bloom.
+
+## v2.3 as built
+- **The opening** is `web/src/beats_walk.mjs` (the beat), `web/src/walk_ui.mjs` + `web/walk.css` (Blender's Outliner, Properties editor,
+  the CopyThat 0.20.2 panel at its usual 205 px width, and the Ring and Spread dialogs, drawn at Blender's own pixel size and scaled
+  1.9x) and `web/src/walk_schedule.mjs` (the script of the walkthrough). v2.2's `beats_open.mjs` is gone (git history has it).
+- **The script is data.** `walk_schedule.mjs` is pure (no DOM): 62 actions, each with its time in seconds after the first click. The page
+  reads it, and `node promo/v2/build/walk_schedule_json.mjs` writes `promo/v2/walk_schedule.json` for `make_timeline.py` and
+  `audio/vo_script.py` (which says the real time). Pace: 42 clicks (9 with Ctrl, 1 with Shift), 16 typed values (41 characters at 6.7 a
+  second, the double-click first, then Enter), 3 pauses to read a dialog row, the slider drag. The pointer travels 0.4-0.9 s and rests
+  0.18 s before a press; no two presses are closer than 0.7 s, except the 0.17 s of a double-click; no three presses in 1 s.
+- **What a customer does is what is shown.** The six parts are selected by a click and five Ctrl+clicks in the Outliner; New Move; Leaf 3,
+  Leaf 2, Leaf 1 selected, the CHAINS title, Make Chain; each of the 7 values is a click on the part, a double-click into its field in
+  the Properties editor and a typed number, and the flower follows at Enter (one part per value; the leaf's segments are carried by the
+  chain, checked against `flower_motion.json` frame 150: 1e-6 m and 0.13 degrees); the leaf is opened with Shift+click on the arrow;
+  Record After; COPIES, a Ring dialog set row by row three times (Count, Round from its menu, Lead step, OK); the leaf selected, TIMING,
+  Spread, its dialog (Order, Only the selected, Start Delay, Delay step), two delays typed; PATH, Smooth, Build Sliders; the sidebar
+  scrolls like Blender's (wheel over it) when a button is off screen (down to Build, up to the slider). The reports are the add-on's
+  own words in the REPORT box and in a status line along the bottom. The Properties values are the file's (read with Blender 5.2).
+- **The timer** starts at the first click and stops on Build Sliders: **1:10** (70.4 s), "RIGGED IN 1:10" in gold. The camera is the
+  file's Promo Camera, still (pulled back 8% to leave room for the editors).
+- **The voice** is the same Chatterbox (default voice, exaggeration 0.65, cfg 0.4, temperature 0.8): one passage of 12 lines, 10 takes
+  (seeds 2000-2009), take 2005 chosen by Whisper small.en and cut at the quietest moments (`cut_vo.py --only open`, which keeps the
+  other lines as v2.2 had them). The last line says the real time, "a minute and ten seconds", made from `walk_schedule.json`.
+  `make_timeline.py` places each line at its step (`OPEN_LINES`); the opening is 78.15 s, the film 145.15 s. Whisper hears 11 of the 12
+  lines exactly in the finished voice stem; in the twelfth it hears "pedals" for "petals" (a homophone, the audio is the take's).
+- **Sound:** a mouse click on every press, a soft keyboard tick (`key*.wav`, made by `make_sfx.py`, CC0) on every typed character and
+  Enter, the whooshes as in v2.2; no pops, no counter sound. The mix is -13.9 LUFS, true peak -1.5 dB. `render.js film` can now render a
+  long beat as parallel slices (`parts=N`, and `from=s to=s` for one stretch of it).
+- **Re-rendered:** only the opening (`segments/01_open.mp4`); the other 19 segments are v2.2's (`segments_v22/` keeps the whole v2.2 set,
+  and `CopyThat_promo_v2.2_1440p60.mp4` the v2.2 film). The logo's timing did not change, so it was not re-rendered.
+

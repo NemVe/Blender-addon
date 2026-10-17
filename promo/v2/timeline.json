@@ -1,9 +1,9 @@
 {
- "version": "2.2",
+ "version": "2.3",
  "fps": 60,
  "width": 2560,
  "height": 1440,
- "duration": 78.267,
+ "duration": 145.15,
  "voice": {
   "engine": "Chatterbox (Resemble AI, MIT), local on an RTX 3090",
   "voice": "the default voice, in continuous passages cut at the word times",
@@ -13,7 +13,7 @@
    "temperature": 0.8
   },
   "lufs_per_line": -16,
-  "total": 38.16,
+  "total": 51.625,
   "sample_rate": 48000
  },
  "defaults": {
@@ -31,7 +31,10 @@
   "pop": "audio/pop.wav",
   "pop_2": "audio/pop_2.wav",
   "pop_3": "audio/pop_3.wav",
-  "tick": "audio/tick.wav"
+  "tick": "audio/tick.wav",
+  "key": "audio/key.wav",
+  "key_2": "audio/key_2.wav",
+  "key_3": "audio/key_3.wav"
  },
  "beats": [
   {
@@ -39,27 +42,24 @@
    "name": "Opening",
    "section": "Opening",
    "lines": [
-    "open_a",
-    "open_b"
+    "open_1",
+    "open_2",
+    "open_3",
+    "open_4",
+    "open_5",
+    "open_6",
+    "open_7",
+    "open_8",
+    "open_9a",
+    "open_9b",
+    "open_10",
+    "open_11"
    ],
    "steps": {
-    "new": 3.055,
-    "chain": 3.475,
-    "pose": 3.895,
-    "rec": 5.005,
-    "r1": 5.405,
-    "o1": 5.835,
-    "r2": 6.205,
-    "o2": 6.635,
-    "r3": 7.005,
-    "o3": 7.435,
-    "sp": 7.805,
-    "o4": 8.235,
-    "build": 8.655,
-    "drag": 9.005
+    "go": 2.97
    },
    "start": 0,
-   "end": 11.267
+   "end": 78.15
   },
   {
    "id": "logo",
@@ -68,8 +68,8 @@
    "lines": [
     "logo"
    ],
-   "start": 11.267,
-   "end": 15.267
+   "start": 78.15,
+   "end": 82.15
   },
   {
    "id": "idea1",
@@ -78,8 +78,8 @@
    "lines": [
     "idea1"
    ],
-   "start": 15.267,
-   "end": 19.267
+   "start": 82.15,
+   "end": 86.15
   },
   {
    "id": "idea2",
@@ -88,8 +88,8 @@
    "lines": [
     "idea2"
    ],
-   "start": 19.267,
-   "end": 23.267
+   "start": 86.15,
+   "end": 90.15
   },
   {
    "id": "idea3",
@@ -98,8 +98,8 @@
    "lines": [
     "idea3"
    ],
-   "start": 23.267,
-   "end": 27.267
+   "start": 90.15,
+   "end": 94.15
   },
   {
    "id": "f01",
@@ -108,8 +108,8 @@
    "lines": [
     "f01"
    ],
-   "start": 27.267,
-   "end": 30.017
+   "start": 94.15,
+   "end": 96.9
   },
   {
    "id": "f02",
@@ -118,8 +118,8 @@
    "lines": [
     "f02"
    ],
-   "start": 30.017,
-   "end": 32.767
+   "start": 96.9,
+   "end": 99.65
   },
   {
    "id": "f03",
@@ -128,8 +128,8 @@
    "lines": [
     "f03"
    ],
-   "start": 32.767,
-   "end": 35.517
+   "start": 99.65,
+   "end": 102.4
   },
   {
    "id": "f04",
@@ -138,8 +138,8 @@
    "lines": [
     "f04"
    ],
-   "start": 35.517,
-   "end": 38.267
+   "start": 102.4,
+   "end": 105.15
   },
   {
    "id": "f05",
@@ -148,8 +148,8 @@
    "lines": [
     "f05"
    ],
-   "start": 38.267,
-   "end": 41.017
+   "start": 105.15,
+   "end": 107.9
   },
   {
    "id": "f06",
@@ -158,8 +158,8 @@
    "lines": [
     "f06"
    ],
-   "start": 41.017,
-   "end": 43.767
+   "start": 107.9,
+   "end": 110.65
   },
   {
    "id": "f07",
@@ -168,8 +168,8 @@
    "lines": [
     "f07"
    ],
-   "start": 43.767,
-   "end": 46.517
+   "start": 110.65,
+   "end": 113.4
   },
   {
    "id": "f08",
@@ -178,8 +178,8 @@
    "lines": [
     "f08"
    ],
-   "start": 46.517,
-   "end": 49.267
+   "start": 113.4,
+   "end": 116.15
   },
   {
    "id": "f09",
@@ -188,8 +188,8 @@
    "lines": [
     "f09"
    ],
-   "start": 49.267,
-   "end": 52.017
+   "start": 116.15,
+   "end": 118.9
   },
   {
    "id": "f10",
@@ -198,8 +198,8 @@
    "lines": [
     "f10"
    ],
-   "start": 52.017,
-   "end": 54.767
+   "start": 118.9,
+   "end": 121.65
   },
   {
    "id": "f11",
@@ -208,8 +208,8 @@
    "lines": [
     "f11"
    ],
-   "start": 54.767,
-   "end": 57.517
+   "start": 121.65,
+   "end": 124.4
   },
   {
    "id": "f12",
@@ -218,8 +218,8 @@
    "lines": [
     "f12"
    ],
-   "start": 57.517,
-   "end": 60.267
+   "start": 124.4,
+   "end": 127.15
   },
   {
    "id": "together",
@@ -228,8 +228,8 @@
    "lines": [
     "together"
    ],
-   "start": 60.267,
-   "end": 70.267
+   "start": 127.15,
+   "end": 137.15
   },
   {
    "id": "real",
@@ -238,8 +238,8 @@
    "lines": [
     "real"
    ],
-   "start": 70.267,
-   "end": 73.267
+   "start": 137.15,
+   "end": 140.15
   },
   {
    "id": "end",
@@ -248,131 +248,621 @@
    "lines": [
     "end"
    ],
-   "start": 73.267,
-   "end": 78.267
+   "start": 140.15,
+   "end": 145.15
   }
  ],
  "lines": {
-  "open_a": {
+  "open_1": {
    "beat": "open",
-   "file": "audio/open_a.wav",
-   "text": "Let's rig this flower in twelve clicks. Watch this!",
+   "file": "audio/open_1.wav",
+   "text": "Let's rig this flower from scratch. Clock's running!",
    "start": 0.31,
-   "end": 3.01,
+   "end": 2.65,
    "speech_start": 0.35,
-   "speech_end": 2.935,
-   "duration": 2.7,
+   "speech_end": 2.62,
+   "duration": 2.34,
    "phrases": [
     {
-     "text": "Let's rig this flower in twelve clicks.",
+     "text": "Let's rig this flower from scratch.",
      "start": 0.35,
-     "end": 1.93
+     "end": 1.685
     },
     {
-     "text": "Watch this!",
-     "start": 2.35,
-     "end": 2.935
+     "text": "Clock's running!",
+     "start": 2.085,
+     "end": 2.62
     }
    ],
    "words": [
     {
      "w": "let's",
      "start": 0.35,
-     "end": 0.59
+     "end": 0.605
     },
     {
      "w": "rig",
-     "start": 0.59,
-     "end": 0.69
+     "start": 0.605,
+     "end": 0.725
     },
     {
      "w": "this",
-     "start": 0.69,
-     "end": 0.91
+     "start": 0.725,
+     "end": 0.925
     },
     {
      "w": "flower",
-     "start": 0.91,
-     "end": 1.13
+     "start": 0.925,
+     "end": 1.145
     },
     {
-     "w": "in",
-     "start": 1.13,
-     "end": 1.37
+     "w": "from",
+     "start": 1.145,
+     "end": 1.365
     },
     {
-     "w": "twelve",
-     "start": 1.37,
-     "end": 1.61
+     "w": "scratch",
+     "start": 1.365,
+     "end": 1.685
     },
     {
-     "w": "clicks",
-     "start": 1.61,
-     "end": 1.93
+     "w": "clock's",
+     "start": 2.085,
+     "end": 2.185
     },
     {
-     "w": "watch",
-     "start": 2.35,
-     "end": 2.47
-    },
-    {
-     "w": "this",
-     "start": 2.47,
-     "end": 2.935
+     "w": "running",
+     "start": 2.185,
+     "end": 2.62
     }
    ]
   },
-  "open_b": {
+  "open_2": {
    "beat": "open",
-   "file": "audio/open_b.wav",
-   "text": "Done! One slider, and it blooms.",
-   "start": 8.73,
-   "end": 10.59,
-   "speech_start": 8.755,
-   "speech_end": 10.49,
-   "duration": 1.86,
+   "file": "audio/open_2.wav",
+   "text": "Select the six parts, and hit New Move.",
+   "start": 6.09,
+   "end": 7.93,
+   "speech_start": 6.13,
+   "speech_end": 7.87,
+   "duration": 1.84,
    "phrases": [
     {
-     "text": "Done!",
-     "start": 8.755,
-     "end": 8.93
-    },
-    {
-     "text": "One slider, and it blooms.",
-     "start": 9.21,
-     "end": 10.49
+     "text": "Select the six parts, and hit New Move.",
+     "start": 6.13,
+     "end": 7.87
     }
    ],
    "words": [
     {
-     "w": "done",
-     "start": 8.755,
-     "end": 8.93
+     "w": "select",
+     "start": 6.13,
+     "end": 6.345
     },
     {
-     "w": "one",
-     "start": 9.21,
-     "end": 9.33
+     "w": "the",
+     "start": 6.345,
+     "end": 6.505
     },
     {
-     "w": "slider",
-     "start": 9.33,
-     "end": 9.59
+     "w": "six",
+     "start": 6.505,
+     "end": 6.645
+    },
+    {
+     "w": "parts",
+     "start": 6.645,
+     "end": 6.925
     },
     {
      "w": "and",
-     "start": 9.59,
-     "end": 9.87
+     "start": 6.925,
+     "end": 7.145
+    },
+    {
+     "w": "hit",
+     "start": 7.145,
+     "end": 7.285
+    },
+    {
+     "w": "new",
+     "start": 7.285,
+     "end": 7.465
+    },
+    {
+     "w": "move",
+     "start": 7.465,
+     "end": 7.87
+    }
+   ]
+  },
+  "open_3": {
+   "beat": "open",
+   "file": "audio/open_3.wav",
+   "text": "Make the leaf a chain.",
+   "start": 11.04,
+   "end": 12.045,
+   "speech_start": 11.08,
+   "speech_end": 12.03,
+   "duration": 1.005,
+   "phrases": [
+    {
+     "text": "Make the leaf a chain.",
+     "start": 11.08,
+     "end": 12.03
+    }
+   ],
+   "words": [
+    {
+     "w": "make",
+     "start": 11.08,
+     "end": 11.21
+    },
+    {
+     "w": "the",
+     "start": 11.21,
+     "end": 11.35
+    },
+    {
+     "w": "leaf",
+     "start": 11.35,
+     "end": 11.51
+    },
+    {
+     "w": "a",
+     "start": 11.51,
+     "end": 11.63
+    },
+    {
+     "w": "chain",
+     "start": 11.63,
+     "end": 12.03
+    }
+   ]
+  },
+  "open_4": {
+   "beat": "open",
+   "file": "audio/open_4.wav",
+   "text": "Now pose it open, one part at a time.",
+   "start": 12.64,
+   "end": 14.495,
+   "speech_start": 12.67,
+   "speech_end": 14.47,
+   "duration": 1.855,
+   "phrases": [
+    {
+     "text": "Now pose it open, one part at a time.",
+     "start": 12.67,
+     "end": 14.47
+    }
+   ],
+   "words": [
+    {
+     "w": "now",
+     "start": 12.67,
+     "end": 12.805
+    },
+    {
+     "w": "pose",
+     "start": 12.805,
+     "end": 12.985
     },
     {
      "w": "it",
-     "start": 9.87,
-     "end": 9.99
+     "start": 12.985,
+     "end": 13.105
+    },
+    {
+     "w": "open",
+     "start": 13.105,
+     "end": 13.325
+    },
+    {
+     "w": "one",
+     "start": 13.505,
+     "end": 13.705
+    },
+    {
+     "w": "part",
+     "start": 13.705,
+     "end": 13.885
+    },
+    {
+     "w": "at",
+     "start": 13.885,
+     "end": 14.005
+    },
+    {
+     "w": "a",
+     "start": 14.005,
+     "end": 14.105
+    },
+    {
+     "w": "time",
+     "start": 14.105,
+     "end": 14.47
+    }
+   ]
+  },
+  "open_5": {
+   "beat": "open",
+   "file": "audio/open_5.wav",
+   "text": "Record After.",
+   "start": 33.67,
+   "end": 34.57,
+   "speech_start": 33.705,
+   "speech_end": 34.57,
+   "duration": 0.9,
+   "phrases": [
+    {
+     "text": "Record After.",
+     "start": 33.705,
+     "end": 34.57
+    }
+   ],
+   "words": [
+    {
+     "w": "record",
+     "start": 33.705,
+     "end": 33.96
+    },
+    {
+     "w": "after",
+     "start": 33.96,
+     "end": 34.57
+    }
+   ]
+  },
+  "open_6": {
+   "beat": "open",
+   "file": "audio/open_6.wav",
+   "text": "Ring the outer petals.",
+   "start": 34.96,
+   "end": 35.95,
+   "speech_start": 34.96,
+   "speech_end": 35.925,
+   "duration": 0.99,
+   "phrases": [
+    {
+     "text": "Ring the outer petals.",
+     "start": 34.96,
+     "end": 35.925
+    }
+   ],
+   "words": [
+    {
+     "w": "ring",
+     "start": 34.96,
+     "end": 35.09
+    },
+    {
+     "w": "the",
+     "start": 35.09,
+     "end": 35.25
+    },
+    {
+     "w": "outer",
+     "start": 35.25,
+     "end": 35.45
+    },
+    {
+     "w": "petals",
+     "start": 35.45,
+     "end": 35.925
+    }
+   ]
+  },
+  "open_7": {
+   "beat": "open",
+   "file": "audio/open_7.wav",
+   "text": "Now the inner ones.",
+   "start": 43.71,
+   "end": 44.63,
+   "speech_start": 43.73,
+   "speech_end": 44.605,
+   "duration": 0.92,
+   "phrases": [
+    {
+     "text": "Now the inner ones.",
+     "start": 43.73,
+     "end": 44.605
+    }
+   ],
+   "words": [
+    {
+     "w": "now",
+     "start": 43.73,
+     "end": 43.87
+    },
+    {
+     "w": "the",
+     "start": 43.87,
+     "end": 44.01
+    },
+    {
+     "w": "inner",
+     "start": 44.01,
+     "end": 44.19
+    },
+    {
+     "w": "ones",
+     "start": 44.19,
+     "end": 44.605
+    }
+   ]
+  },
+  "open_8": {
+   "beat": "open",
+   "file": "audio/open_8.wav",
+   "text": "And the leaf.",
+   "start": 50.895,
+   "end": 51.58,
+   "speech_start": 50.91,
+   "speech_end": 51.54,
+   "duration": 0.685,
+   "phrases": [
+    {
+     "text": "And the leaf.",
+     "start": 50.91,
+     "end": 51.54
+    }
+   ],
+   "words": [
+    {
+     "w": "and",
+     "start": 50.91,
+     "end": 51.055
+    },
+    {
+     "w": "the",
+     "start": 51.055,
+     "end": 51.175
+    },
+    {
+     "w": "leaf",
+     "start": 51.175,
+     "end": 51.54
+    }
+   ]
+  },
+  "open_9a": {
+   "beat": "open",
+   "file": "audio/open_9a.wav",
+   "text": "Spread the timing down the leaf",
+   "start": 56.345,
+   "end": 57.515,
+   "speech_start": 56.36,
+   "speech_end": 57.515,
+   "duration": 1.17,
+   "phrases": [
+    {
+     "text": "Spread the timing down the leaf",
+     "start": 56.36,
+     "end": 57.515
+    }
+   ],
+   "words": [
+    {
+     "w": "spread",
+     "start": 56.36,
+     "end": 56.56
+    },
+    {
+     "w": "the",
+     "start": 56.56,
+     "end": 56.72
+    },
+    {
+     "w": "timing",
+     "start": 56.72,
+     "end": 56.9
+    },
+    {
+     "w": "down",
+     "start": 56.9,
+     "end": 57.12
+    },
+    {
+     "w": "the",
+     "start": 57.12,
+     "end": 57.26
+    },
+    {
+     "w": "leaf",
+     "start": 57.26,
+     "end": 57.515
+    }
+   ]
+  },
+  "open_9b": {
+   "beat": "open",
+   "file": "audio/open_9b.wav",
+   "text": "and give the inner petals and the core a delay.",
+   "start": 67.12,
+   "end": 69.06,
+   "speech_start": 67.12,
+   "speech_end": 69.02,
+   "duration": 1.94,
+   "phrases": [
+    {
+     "text": "and give the inner petals and the core a delay.",
+     "start": 67.12,
+     "end": 69.02
+    }
+   ],
+   "words": [
+    {
+     "w": "and",
+     "start": 67.12,
+     "end": 67.285
+    },
+    {
+     "w": "give",
+     "start": 67.285,
+     "end": 67.405
+    },
+    {
+     "w": "the",
+     "start": 67.405,
+     "end": 67.545
+    },
+    {
+     "w": "inner",
+     "start": 67.545,
+     "end": 67.745
+    },
+    {
+     "w": "petals",
+     "start": 67.745,
+     "end": 68.045
+    },
+    {
+     "w": "and",
+     "start": 68.045,
+     "end": 68.185
+    },
+    {
+     "w": "the",
+     "start": 68.185,
+     "end": 68.285
+    },
+    {
+     "w": "core",
+     "start": 68.285,
+     "end": 68.465
+    },
+    {
+     "w": "a",
+     "start": 68.465,
+     "end": 68.605
+    },
+    {
+     "w": "delay",
+     "start": 68.605,
+     "end": 69.02
+    }
+   ]
+  },
+  "open_10": {
+   "beat": "open",
+   "file": "audio/open_10.wav",
+   "text": "Smooth... and Build!",
+   "start": 72.045,
+   "end": 73.295,
+   "speech_start": 72.06,
+   "speech_end": 73.245,
+   "duration": 1.25,
+   "phrases": [
+    {
+     "text": "Smooth...",
+     "start": 72.06,
+     "end": 72.37
+    },
+    {
+     "text": "and Build!",
+     "start": 72.71,
+     "end": 73.245
+    }
+   ],
+   "words": [
+    {
+     "w": "smooth",
+     "start": 72.06,
+     "end": 72.37
+    },
+    {
+     "w": "and",
+     "start": 72.71,
+     "end": 72.87
+    },
+    {
+     "w": "build",
+     "start": 72.87,
+     "end": 73.245
+    }
+   ]
+  },
+  "open_11": {
+   "beat": "open",
+   "file": "audio/open_11.wav",
+   "text": "One slider, and it blooms. Rigged in a minute and ten seconds!",
+   "start": 74.605,
+   "end": 77.735,
+   "speech_start": 74.64,
+   "speech_end": 77.635,
+   "duration": 3.13,
+   "phrases": [
+    {
+     "text": "One slider, and it blooms.",
+     "start": 74.64,
+     "end": 75.96
+    },
+    {
+     "text": "Rigged in a minute and ten seconds!",
+     "start": 76.24,
+     "end": 77.635
+    }
+   ],
+   "words": [
+    {
+     "w": "one",
+     "start": 74.64,
+     "end": 74.8
+    },
+    {
+     "w": "slider",
+     "start": 74.8,
+     "end": 75.06
+    },
+    {
+     "w": "and",
+     "start": 75.38,
+     "end": 75.52
+    },
+    {
+     "w": "it",
+     "start": 75.52,
+     "end": 75.62
     },
     {
      "w": "blooms",
-     "start": 9.99,
-     "end": 10.49
+     "start": 75.62,
+     "end": 75.96
+    },
+    {
+     "w": "rigged",
+     "start": 76.24,
+     "end": 76.4
+    },
+    {
+     "w": "in",
+     "start": 76.4,
+     "end": 76.48
+    },
+    {
+     "w": "a",
+     "start": 76.48,
+     "end": 76.6
+    },
+    {
+     "w": "minute",
+     "start": 76.6,
+     "end": 76.7
+    },
+    {
+     "w": "and",
+     "start": 76.7,
+     "end": 76.9
+    },
+    {
+     "w": "ten",
+     "start": 76.9,
+     "end": 77.06
+    },
+    {
+     "w": "seconds",
+     "start": 77.06,
+     "end": 77.635
     }
    ]
   },
@@ -380,78 +870,78 @@
    "beat": "logo",
    "file": "audio/logo.wav",
    "text": "This is CopyThat: record a move, and get a slider.",
-   "start": 11.577,
-   "end": 14.207,
-   "speech_start": 11.617,
-   "speech_end": 14.107,
+   "start": 78.46,
+   "end": 81.09,
+   "speech_start": 78.5,
+   "speech_end": 80.99,
    "duration": 2.63,
    "phrases": [
     {
      "text": "This is CopyThat:",
-     "start": 11.617,
-     "end": 12.522
+     "start": 78.5,
+     "end": 79.405
     },
     {
      "text": "record a move, and get a slider.",
-     "start": 12.702,
-     "end": 14.107
+     "start": 79.585,
+     "end": 80.99
     }
    ],
    "words": [
     {
      "w": "this",
-     "start": 11.617,
-     "end": 11.922
+     "start": 78.5,
+     "end": 78.805
     },
     {
      "w": "is",
-     "start": 11.922,
-     "end": 12.082
+     "start": 78.805,
+     "end": 78.965
     },
     {
      "w": "copy",
-     "start": 12.082,
-     "end": 12.262
+     "start": 78.965,
+     "end": 79.145
     },
     {
      "w": "that",
-     "start": 12.262,
-     "end": 12.522
+     "start": 79.145,
+     "end": 79.405
     },
     {
      "w": "record",
-     "start": 12.702,
-     "end": 12.942
+     "start": 79.585,
+     "end": 79.825
     },
     {
      "w": "a",
-     "start": 12.942,
-     "end": 13.102
+     "start": 79.825,
+     "end": 79.985
     },
     {
      "w": "move",
-     "start": 13.102,
-     "end": 13.242
+     "start": 79.985,
+     "end": 80.125
     },
     {
      "w": "and",
-     "start": 13.242,
-     "end": 13.482
+     "start": 80.125,
+     "end": 80.365
     },
     {
      "w": "get",
-     "start": 13.482,
-     "end": 13.582
+     "start": 80.365,
+     "end": 80.465
     },
     {
      "w": "a",
-     "start": 13.582,
-     "end": 13.682
+     "start": 80.465,
+     "end": 80.565
     },
     {
      "w": "slider",
-     "start": 13.682,
-     "end": 14.107
+     "start": 80.565,
+     "end": 80.99
     }
    ]
   },
@@ -459,48 +949,48 @@
    "beat": "idea1",
    "file": "audio/idea1.wav",
    "text": "Pose your object, and hit Record.",
-   "start": 15.632,
-   "end": 17.177,
-   "speech_start": 15.667,
-   "speech_end": 17.117,
+   "start": 82.515,
+   "end": 84.06,
+   "speech_start": 82.55,
+   "speech_end": 84,
    "duration": 1.545,
    "phrases": [
     {
      "text": "Pose your object, and hit Record.",
-     "start": 15.667,
-     "end": 17.117
+     "start": 82.55,
+     "end": 84
     }
    ],
    "words": [
     {
      "w": "pose",
-     "start": 15.667,
-     "end": 15.807
+     "start": 82.55,
+     "end": 82.69
     },
     {
      "w": "your",
-     "start": 15.807,
-     "end": 16.007
+     "start": 82.69,
+     "end": 82.89
     },
     {
      "w": "object",
-     "start": 16.007,
-     "end": 16.307
+     "start": 82.89,
+     "end": 83.19
     },
     {
      "w": "and",
-     "start": 16.307,
-     "end": 16.527
+     "start": 83.19,
+     "end": 83.41
     },
     {
      "w": "hit",
-     "start": 16.527,
-     "end": 16.647
+     "start": 83.41,
+     "end": 83.53
     },
     {
      "w": "record",
-     "start": 16.647,
-     "end": 17.117
+     "start": 83.53,
+     "end": 84
     }
    ]
   },
@@ -508,68 +998,68 @@
    "beat": "idea2",
    "file": "audio/idea2.wav",
    "text": "Press Build, and the whole move lives on one slider.",
-   "start": 19.527,
-   "end": 22.227,
-   "speech_start": 19.567,
-   "speech_end": 22.172,
+   "start": 86.41,
+   "end": 89.11,
+   "speech_start": 86.45,
+   "speech_end": 89.055,
    "duration": 2.7,
    "phrases": [
     {
      "text": "Press Build, and the whole move lives on one slider.",
-     "start": 19.567,
-     "end": 22.172
+     "start": 86.45,
+     "end": 89.055
     }
    ],
    "words": [
     {
      "w": "press",
-     "start": 19.567,
-     "end": 19.982
+     "start": 86.45,
+     "end": 86.865
     },
     {
      "w": "build",
-     "start": 19.982,
-     "end": 20.262
+     "start": 86.865,
+     "end": 87.145
     },
     {
      "w": "and",
-     "start": 20.262,
-     "end": 20.562
+     "start": 87.145,
+     "end": 87.445
     },
     {
      "w": "the",
-     "start": 20.562,
-     "end": 20.662
+     "start": 87.445,
+     "end": 87.545
     },
     {
      "w": "whole",
-     "start": 20.662,
-     "end": 20.822
+     "start": 87.545,
+     "end": 87.705
     },
     {
      "w": "move",
-     "start": 20.822,
-     "end": 21.042
+     "start": 87.705,
+     "end": 87.925
     },
     {
      "w": "lives",
-     "start": 21.042,
-     "end": 21.262
+     "start": 87.925,
+     "end": 88.145
     },
     {
      "w": "on",
-     "start": 21.262,
-     "end": 21.442
+     "start": 88.145,
+     "end": 88.325
     },
     {
      "w": "one",
-     "start": 21.442,
-     "end": 21.662
+     "start": 88.325,
+     "end": 88.545
     },
     {
      "w": "slider",
-     "start": 21.662,
-     "end": 22.172
+     "start": 88.545,
+     "end": 89.055
     }
    ]
   },
@@ -577,83 +1067,83 @@
    "beat": "idea3",
    "file": "audio/idea3.wav",
    "text": "Select as many parts as you like; they all share one move.",
-   "start": 23.527,
-   "end": 26.262,
-   "speech_start": 23.567,
-   "speech_end": 26.262,
+   "start": 90.41,
+   "end": 93.145,
+   "speech_start": 90.45,
+   "speech_end": 93.145,
    "duration": 2.735,
    "phrases": [
     {
      "text": "Select as many parts as you like;",
-     "start": 23.567,
-     "end": 24.782
+     "start": 90.45,
+     "end": 91.665
     },
     {
      "text": "they all share one move.",
-     "start": 24.902,
-     "end": 26.262
+     "start": 91.785,
+     "end": 93.145
     }
    ],
    "words": [
     {
      "w": "select",
-     "start": 23.567,
-     "end": 23.782
+     "start": 90.45,
+     "end": 90.665
     },
     {
      "w": "as",
-     "start": 23.782,
-     "end": 23.922
+     "start": 90.665,
+     "end": 90.805
     },
     {
      "w": "many",
-     "start": 23.922,
-     "end": 24.122
+     "start": 90.805,
+     "end": 91.005
     },
     {
      "w": "parts",
-     "start": 24.122,
-     "end": 24.322
+     "start": 91.005,
+     "end": 91.205
     },
     {
      "w": "as",
-     "start": 24.322,
-     "end": 24.482
+     "start": 91.205,
+     "end": 91.365
     },
     {
      "w": "you",
-     "start": 24.482,
-     "end": 24.582
+     "start": 91.365,
+     "end": 91.465
     },
     {
      "w": "like",
-     "start": 24.582,
-     "end": 24.782
+     "start": 91.465,
+     "end": 91.665
     },
     {
      "w": "they",
-     "start": 24.902,
-     "end": 24.982
+     "start": 91.785,
+     "end": 91.865
     },
     {
      "w": "all",
-     "start": 24.982,
-     "end": 25.162
+     "start": 91.865,
+     "end": 92.045
     },
     {
      "w": "share",
-     "start": 25.162,
-     "end": 25.402
+     "start": 92.045,
+     "end": 92.285
     },
     {
      "w": "one",
-     "start": 25.402,
-     "end": 25.662
+     "start": 92.285,
+     "end": 92.545
     },
     {
      "w": "move",
-     "start": 25.662,
-     "end": 26.262
+     "start": 92.545,
+     "end": 93.145
     }
    ]
   },
@@ -661,48 +1151,48 @@
    "beat": "f01",
    "file": "audio/f01.wav",
    "text": "Give every part its own delay.",
-   "start": 27.427,
-   "end": 29.167,
-   "speech_start": 27.467,
-   "speech_end": 29.102,
+   "start": 94.31,
+   "end": 96.05,
+   "speech_start": 94.35,
+   "speech_end": 95.985,
    "duration": 1.74,
    "phrases": [
     {
      "text": "Give every part its own delay.",
-     "start": 27.467,
-     "end": 29.102
+     "start": 94.35,
+     "end": 95.985
     }
    ],
    "words": [
     {
      "w": "give",
-     "start": 27.467,
-     "end": 27.657
+     "start": 94.35,
+     "end": 94.54
     },
     {
      "w": "every",
-     "start": 27.657,
-     "end": 27.997
+     "start": 94.54,
+     "end": 94.88
     },
     {
      "w": "part",
-     "start": 27.997,
-     "end": 28.197
+     "start": 94.88,
+     "end": 95.08
     },
     {
      "w": "its",
-     "start": 28.197,
-     "end": 28.417
+     "start": 95.08,
+     "end": 95.3
     },
     {
      "w": "own",
-     "start": 28.417,
-     "end": 28.617
+     "start": 95.3,
+     "end": 95.5
     },
     {
      "w": "delay",
-     "start": 28.617,
-     "end": 29.102
+     "start": 95.5,
+     "end": 95.985
     }
    ]
   },
@@ -710,48 +1200,48 @@
    "beat": "f02",
    "file": "audio/f02.wav",
    "text": "Spread the timing into a wave.",
-   "start": 30.187,
-   "end": 31.717,
-   "speech_start": 30.217,
-   "speech_end": 31.617,
+   "start": 97.07,
+   "end": 98.6,
+   "speech_start": 97.1,
+   "speech_end": 98.5,
    "duration": 1.53,
    "phrases": [
     {
      "text": "Spread the timing into a wave.",
-     "start": 30.217,
-     "end": 31.617
+     "start": 97.1,
+     "end": 98.5
     }
    ],
    "words": [
     {
      "w": "spread",
-     "start": 30.217,
-     "end": 30.457
+     "start": 97.1,
+     "end": 97.34
     },
     {
      "w": "the",
-     "start": 30.457,
-     "end": 30.597
+     "start": 97.34,
+     "end": 97.48
     },
     {
      "w": "timing",
-     "start": 30.597,
-     "end": 30.817
+     "start": 97.48,
+     "end": 97.7
     },
     {
      "w": "into",
-     "start": 30.817,
-     "end": 31.077
+     "start": 97.7,
+     "end": 97.96
     },
     {
      "w": "a",
-     "start": 31.077,
-     "end": 31.237
+     "start": 97.96,
+     "end": 98.12
     },
     {
      "w": "wave",
-     "start": 31.237,
-     "end": 31.617
+     "start": 98.12,
+     "end": 98.5
     }
    ]
   },
@@ -759,48 +1249,48 @@
    "beat": "f03",
    "file": "audio/f03.wav",
    "text": "Turn around any point you want.",
-   "start": 32.947,
-   "end": 34.382,
-   "speech_start": 32.967,
-   "speech_end": 34.302,
+   "start": 99.83,
+   "end": 101.265,
+   "speech_start": 99.85,
+   "speech_end": 101.185,
    "duration": 1.435,
    "phrases": [
     {
      "text": "Turn around any point you want.",
-     "start": 32.967,
-     "end": 34.302
+     "start": 99.85,
+     "end": 101.185
     }
    ],
    "words": [
     {
      "w": "turn",
-     "start": 32.967,
-     "end": 33.082
+     "start": 99.85,
+     "end": 99.965
     },
     {
      "w": "around",
-     "start": 33.082,
-     "end": 33.342
+     "start": 99.965,
+     "end": 100.225
     },
     {
      "w": "any",
-     "start": 33.342,
-     "end": 33.602
+     "start": 100.225,
+     "end": 100.485
     },
     {
      "w": "point",
-     "start": 33.602,
-     "end": 33.782
+     "start": 100.485,
+     "end": 100.665
     },
     {
      "w": "you",
-     "start": 33.782,
-     "end": 33.922
+     "start": 100.665,
+     "end": 100.805
     },
     {
      "w": "want",
-     "start": 33.922,
-     "end": 34.302
+     "start": 100.805,
+     "end": 101.185
     }
    ]
   },
@@ -808,38 +1298,38 @@
    "beat": "f04",
    "file": "audio/f04.wav",
    "text": "Add steps in between.",
-   "start": 35.687,
-   "end": 36.962,
-   "speech_start": 35.717,
-   "speech_end": 36.927,
+   "start": 102.57,
+   "end": 103.845,
+   "speech_start": 102.6,
+   "speech_end": 103.81,
    "duration": 1.275,
    "phrases": [
     {
      "text": "Add steps in between.",
-     "start": 35.717,
-     "end": 36.927
+     "start": 102.6,
+     "end": 103.81
     }
    ],
    "words": [
     {
      "w": "add",
-     "start": 35.717,
-     "end": 35.867
+     "start": 102.6,
+     "end": 102.75
     },
     {
      "w": "steps",
-     "start": 35.867,
-     "end": 36.147
+     "start": 102.75,
+     "end": 103.03
     },
     {
      "w": "in",
-     "start": 36.147,
-     "end": 36.327
+     "start": 103.03,
+     "end": 103.21
     },
     {
      "w": "between",
-     "start": 36.327,
-     "end": 36.927
+     "start": 103.21,
+     "end": 103.81
     }
    ]
   },
@@ -847,53 +1337,53 @@
    "beat": "f05",
    "file": "audio/f05.wav",
    "text": "Curve the path, then edit the curve.",
-   "start": 38.437,
-   "end": 40.212,
-   "speech_start": 38.467,
-   "speech_end": 40.142,
+   "start": 105.32,
+   "end": 107.095,
+   "speech_start": 105.35,
+   "speech_end": 107.025,
    "duration": 1.775,
    "phrases": [
     {
      "text": "Curve the path, then edit the curve.",
-     "start": 38.467,
-     "end": 40.142
+     "start": 105.35,
+     "end": 107.025
     }
    ],
    "words": [
     {
      "w": "curve",
-     "start": 38.467,
-     "end": 38.622
+     "start": 105.35,
+     "end": 105.505
     },
     {
      "w": "the",
-     "start": 38.622,
-     "end": 38.782
+     "start": 105.505,
+     "end": 105.665
     },
     {
      "w": "path",
-     "start": 38.782,
-     "end": 39.022
+     "start": 105.665,
+     "end": 105.905
     },
     {
      "w": "then",
-     "start": 39.342,
-     "end": 39.382
+     "start": 106.225,
+     "end": 106.265
     },
     {
      "w": "edit",
-     "start": 39.382,
-     "end": 39.622
+     "start": 106.265,
+     "end": 106.505
     },
     {
      "w": "the",
-     "start": 39.622,
-     "end": 39.762
+     "start": 106.505,
+     "end": 106.645
     },
     {
      "w": "curve",
-     "start": 39.762,
-     "end": 40.142
+     "start": 106.645,
+     "end": 107.025
     }
    ]
   },
@@ -901,38 +1391,38 @@
    "beat": "f06",
    "file": "audio/f06.wav",
    "text": "Smooth, or perfectly even.",
-   "start": 41.192,
-   "end": 42.842,
-   "speech_start": 41.217,
-   "speech_end": 42.827,
+   "start": 108.075,
+   "end": 109.725,
+   "speech_start": 108.1,
+   "speech_end": 109.71,
    "duration": 1.65,
    "phrases": [
     {
      "text": "Smooth, or perfectly even.",
-     "start": 41.217,
-     "end": 42.827
+     "start": 108.1,
+     "end": 109.71
     }
    ],
    "words": [
     {
      "w": "smooth",
-     "start": 41.217,
-     "end": 41.502
+     "start": 108.1,
+     "end": 108.385
     },
     {
      "w": "or",
-     "start": 41.502,
-     "end": 41.862
+     "start": 108.385,
+     "end": 108.745
     },
     {
      "w": "perfectly",
-     "start": 41.862,
-     "end": 42.182
+     "start": 108.745,
+     "end": 109.065
     },
     {
      "w": "even",
-     "start": 42.182,
-     "end": 42.827
+     "start": 109.065,
+     "end": 109.71
     }
    ]
   },
@@ -940,48 +1430,48 @@
    "beat": "f07",
    "file": "audio/f07.wav",
    "text": "Chain parts, so the joints follow.",
-   "start": 43.927,
-   "end": 45.447,
-   "speech_start": 43.967,
-   "speech_end": 45.412,
+   "start": 110.81,
+   "end": 112.33,
+   "speech_start": 110.85,
+   "speech_end": 112.295,
    "duration": 1.52,
    "phrases": [
     {
      "text": "Chain parts, so the joints follow.",
-     "start": 43.967,
-     "end": 45.412
+     "start": 110.85,
+     "end": 112.295
     }
    ],
    "words": [
     {
      "w": "chain",
-     "start": 43.967,
-     "end": 44.182
+     "start": 110.85,
+     "end": 111.065
     },
     {
      "w": "parts",
-     "start": 44.182,
-     "end": 44.462
+     "start": 111.065,
+     "end": 111.345
     },
     {
      "w": "so",
-     "start": 44.622,
-     "end": 44.762
+     "start": 111.505,
+     "end": 111.645
     },
     {
      "w": "the",
-     "start": 44.762,
-     "end": 44.882
+     "start": 111.645,
+     "end": 111.765
     },
     {
      "w": "joints",
-     "start": 44.882,
-     "end": 45.022
+     "start": 111.765,
+     "end": 111.905
     },
     {
      "w": "follow",
-     "start": 45.022,
-     "end": 45.412
+     "start": 111.905,
+     "end": 112.295
     }
    ]
   },
@@ -989,48 +1479,48 @@
    "beat": "f08",
    "file": "audio/f08.wav",
    "text": "Curl a whole chain at once.",
-   "start": 46.677,
-   "end": 47.762,
-   "speech_start": 46.717,
-   "speech_end": 47.722,
+   "start": 113.56,
+   "end": 114.645,
+   "speech_start": 113.6,
+   "speech_end": 114.605,
    "duration": 1.085,
    "phrases": [
     {
      "text": "Curl a whole chain at once.",
-     "start": 46.717,
-     "end": 47.722
+     "start": 113.6,
+     "end": 114.605
     }
    ],
    "words": [
     {
      "w": "curl",
-     "start": 46.717,
-     "end": 46.887
+     "start": 113.6,
+     "end": 113.77
     },
     {
      "w": "a",
-     "start": 46.887,
-     "end": 46.967
+     "start": 113.77,
+     "end": 113.85
     },
     {
      "w": "whole",
-     "start": 46.967,
-     "end": 47.087
+     "start": 113.85,
+     "end": 113.97
     },
     {
      "w": "chain",
-     "start": 47.087,
-     "end": 47.267
+     "start": 113.97,
+     "end": 114.15
     },
     {
      "w": "at",
-     "start": 47.267,
-     "end": 47.407
+     "start": 114.15,
+     "end": 114.29
     },
     {
      "w": "once",
-     "start": 47.407,
-     "end": 47.722
+     "start": 114.29,
+     "end": 114.605
     }
    ]
   },
@@ -1038,43 +1528,43 @@
    "beat": "f09",
    "file": "audio/f09.wav",
    "text": "Ring one part into many.",
-   "start": 49.447,
-   "end": 50.507,
-   "speech_start": 49.467,
-   "speech_end": 50.507,
+   "start": 116.33,
+   "end": 117.39,
+   "speech_start": 116.35,
+   "speech_end": 117.39,
    "duration": 1.06,
    "phrases": [
     {
      "text": "Ring one part into many.",
-     "start": 49.467,
-     "end": 50.507
+     "start": 116.35,
+     "end": 117.39
     }
    ],
    "words": [
     {
      "w": "ring",
-     "start": 49.467,
-     "end": 49.592
+     "start": 116.35,
+     "end": 116.475
     },
     {
      "w": "one",
-     "start": 49.592,
-     "end": 49.792
+     "start": 116.475,
+     "end": 116.675
     },
     {
      "w": "part",
-     "start": 49.792,
-     "end": 49.952
+     "start": 116.675,
+     "end": 116.835
     },
     {
      "w": "into",
-     "start": 49.952,
-     "end": 50.152
+     "start": 116.835,
+     "end": 117.035
     },
     {
      "w": "many",
-     "start": 50.152,
-     "end": 50.507
+     "start": 117.035,
+     "end": 117.39
     }
    ]
   },
@@ -1082,33 +1572,33 @@
    "beat": "f10",
    "file": "audio/f10.wav",
    "text": "Mirror the copies.",
-   "start": 52.217,
-   "end": 53.177,
-   "speech_start": 52.217,
-   "speech_end": 53.147,
+   "start": 119.1,
+   "end": 120.06,
+   "speech_start": 119.1,
+   "speech_end": 120.03,
    "duration": 0.96,
    "phrases": [
     {
      "text": "Mirror the copies.",
-     "start": 52.217,
-     "end": 53.147
+     "start": 119.1,
+     "end": 120.03
     }
    ],
    "words": [
     {
      "w": "mirror",
-     "start": 52.217,
-     "end": 52.402
+     "start": 119.1,
+     "end": 119.285
     },
     {
      "w": "the",
-     "start": 52.402,
-     "end": 52.562
+     "start": 119.285,
+     "end": 119.445
     },
     {
      "w": "copies",
-     "start": 52.562,
-     "end": 53.147
+     "start": 119.445,
+     "end": 120.03
     }
    ]
   },
@@ -1116,43 +1606,43 @@
    "beat": "f11",
    "file": "audio/f11.wav",
    "text": "Combine moves under one control.",
-   "start": 54.932,
-   "end": 56.407,
-   "speech_start": 54.967,
-   "speech_end": 56.407,
+   "start": 121.815,
+   "end": 123.29,
+   "speech_start": 121.85,
+   "speech_end": 123.29,
    "duration": 1.475,
    "phrases": [
     {
      "text": "Combine moves under one control.",
-     "start": 54.967,
-     "end": 56.407
+     "start": 121.85,
+     "end": 123.29
     }
    ],
    "words": [
     {
      "w": "combine",
-     "start": 54.967,
-     "end": 55.217
+     "start": 121.85,
+     "end": 122.1
     },
     {
      "w": "moves",
-     "start": 55.217,
-     "end": 55.517
+     "start": 122.1,
+     "end": 122.4
     },
     {
      "w": "under",
-     "start": 55.517,
-     "end": 55.737
+     "start": 122.4,
+     "end": 122.62
     },
     {
      "w": "one",
-     "start": 55.737,
-     "end": 55.937
+     "start": 122.62,
+     "end": 122.82
     },
     {
      "w": "control",
-     "start": 55.937,
-     "end": 56.407
+     "start": 122.82,
+     "end": 123.29
     }
    ]
   },
@@ -1160,53 +1650,53 @@
    "beat": "f12",
    "file": "audio/f12.wav",
    "text": "And animate it all in one click.",
-   "start": 57.717,
-   "end": 59.202,
-   "speech_start": 57.717,
-   "speech_end": 59.102,
+   "start": 124.6,
+   "end": 126.085,
+   "speech_start": 124.6,
+   "speech_end": 125.985,
    "duration": 1.485,
    "phrases": [
     {
      "text": "And animate it all in one click.",
-     "start": 57.717,
-     "end": 59.102
+     "start": 124.6,
+     "end": 125.985
     }
    ],
    "words": [
     {
      "w": "and",
-     "start": 57.717,
-     "end": 57.847
+     "start": 124.6,
+     "end": 124.73
     },
     {
      "w": "animate",
-     "start": 57.847,
-     "end": 58.147
+     "start": 124.73,
+     "end": 125.03
     },
     {
      "w": "it",
-     "start": 58.147,
-     "end": 58.287
+     "start": 125.03,
+     "end": 125.17
     },
     {
      "w": "all",
-     "start": 58.287,
-     "end": 58.447
+     "start": 125.17,
+     "end": 125.33
     },
     {
      "w": "in",
-     "start": 58.447,
-     "end": 58.567
+     "start": 125.33,
+     "end": 125.45
     },
     {
      "w": "one",
-     "start": 58.567,
-     "end": 58.707
+     "start": 125.45,
+     "end": 125.59
     },
     {
      "w": "click",
-     "start": 58.707,
-     "end": 59.102
+     "start": 125.59,
+     "end": 125.985
     }
    ]
   },
@@ -1214,68 +1704,68 @@
    "beat": "together",
    "file": "audio/together.wav",
    "text": "Put it all together: twenty-one parts, one slider.",
-   "start": 60.827,
-   "end": 63.587,
-   "speech_start": 60.867,
-   "speech_end": 63.587,
+   "start": 127.71,
+   "end": 130.47,
+   "speech_start": 127.75,
+   "speech_end": 130.47,
    "duration": 2.76,
    "phrases": [
     {
      "text": "Put it all together:",
-     "start": 60.867,
-     "end": 61.507
+     "start": 127.75,
+     "end": 128.39
     },
     {
      "text": "twenty-one parts, one slider.",
-     "start": 61.887,
-     "end": 63.587
+     "start": 128.77,
+     "end": 130.47
     }
    ],
    "words": [
     {
      "w": "put",
-     "start": 60.867,
-     "end": 60.967
+     "start": 127.75,
+     "end": 127.85
     },
     {
      "w": "it",
-     "start": 60.967,
-     "end": 61.067
+     "start": 127.85,
+     "end": 127.95
     },
     {
      "w": "all",
-     "start": 61.067,
-     "end": 61.167
+     "start": 127.95,
+     "end": 128.05
     },
     {
      "w": "together",
-     "start": 61.167,
-     "end": 61.507
+     "start": 128.05,
+     "end": 128.39
     },
     {
      "w": "twenty",
-     "start": 61.887,
-     "end": 61.997
+     "start": 128.77,
+     "end": 128.88
     },
     {
      "w": "one",
-     "start": 61.997,
-     "end": 62.107
+     "start": 128.88,
+     "end": 128.99
     },
     {
      "w": "parts",
-     "start": 62.107,
-     "end": 62.607
+     "start": 128.99,
+     "end": 129.49
     },
     {
      "w": "one",
-     "start": 62.607,
-     "end": 62.607
+     "start": 129.49,
+     "end": 129.49
     },
     {
      "w": "slider",
-     "start": 63.007,
-     "end": 63.587
+     "start": 129.89,
+     "end": 130.47
     }
    ]
   },
@@ -1283,58 +1773,58 @@
    "beat": "real",
    "file": "audio/real.wav",
    "text": "And it all happens right in Blender's sidebar.",
-   "start": 70.567,
-   "end": 72.817,
-   "speech_start": 70.567,
-   "speech_end": 72.797,
+   "start": 137.45,
+   "end": 139.7,
+   "speech_start": 137.45,
+   "speech_end": 139.68,
    "duration": 2.25,
    "phrases": [
     {
      "text": "And it all happens right in Blender's sidebar.",
-     "start": 70.567,
-     "end": 72.797
+     "start": 137.45,
+     "end": 139.68
     }
    ],
    "words": [
     {
      "w": "and",
-     "start": 70.567,
-     "end": 70.887
+     "start": 137.45,
+     "end": 137.77
     },
     {
      "w": "it",
-     "start": 70.887,
-     "end": 70.967
+     "start": 137.77,
+     "end": 137.85
     },
     {
      "w": "all",
-     "start": 70.967,
-     "end": 71.107
+     "start": 137.85,
+     "end": 137.99
     },
     {
      "w": "happens",
-     "start": 71.107,
-     "end": 71.427
+     "start": 137.99,
+     "end": 138.31
     },
     {
      "w": "right",
-     "start": 71.427,
-     "end": 71.707
+     "start": 138.31,
+     "end": 138.59
     },
     {
      "w": "in",
-     "start": 71.707,
-     "end": 71.887
+     "start": 138.59,
+     "end": 138.77
     },
     {
      "w": "blender's",
-     "start": 71.887,
-     "end": 72.247
+     "start": 138.77,
+     "end": 139.13
     },
     {
      "w": "sidebar",
-     "start": 72.247,
-     "end": 72.797
+     "start": 139.13,
+     "end": 139.68
     }
    ]
   },
@@ -1342,207 +1832,207 @@
    "beat": "end",
    "file": "audio/end.wav",
    "text": "CopyThat. Now on Superhive!",
-   "start": 73.542,
-   "end": 75.532,
-   "speech_start": 73.567,
-   "speech_end": 75.452,
+   "start": 140.425,
+   "end": 142.415,
+   "speech_start": 140.45,
+   "speech_end": 142.335,
    "duration": 1.99,
    "phrases": [
     {
      "text": "CopyThat.",
-     "start": 73.567,
-     "end": 74.072
+     "start": 140.45,
+     "end": 140.955
     },
     {
      "text": "Now on Superhive!",
-     "start": 74.412,
-     "end": 75.452
+     "start": 141.295,
+     "end": 142.335
     }
    ],
    "words": [
     {
      "w": "copy",
-     "start": 73.567,
-     "end": 73.752
+     "start": 140.45,
+     "end": 140.635
     },
     {
      "w": "that",
-     "start": 73.752,
-     "end": 74.072
+     "start": 140.635,
+     "end": 140.955
     },
     {
      "w": "now",
-     "start": 74.412,
-     "end": 74.612
+     "start": 141.295,
+     "end": 141.495
     },
     {
      "w": "on",
-     "start": 74.612,
-     "end": 74.832
+     "start": 141.495,
+     "end": 141.715
     },
     {
      "w": "super",
-     "start": 74.832,
-     "end": 75.062
+     "start": 141.715,
+     "end": 141.945
     },
     {
      "w": "hive",
-     "start": 75.062,
-     "end": 75.452
+     "start": 141.945,
+     "end": 142.335
     }
    ]
   }
  },
  "wipes": [
   {
-   "t": 11.267,
-   "start": 11.092,
-   "end": 11.442,
-   "whoosh": 11.007,
+   "t": 78.15,
+   "start": 77.975,
+   "end": 78.325,
+   "whoosh": 77.89,
    "from": "open",
    "to": "logo"
   },
   {
-   "t": 15.267,
-   "start": 15.092,
-   "end": 15.442,
-   "whoosh": 15.007,
+   "t": 82.15,
+   "start": 81.975,
+   "end": 82.325,
+   "whoosh": 81.89,
    "from": "logo",
    "to": "idea1"
   },
   {
-   "t": 19.267,
-   "start": 19.092,
-   "end": 19.442,
-   "whoosh": 19.007,
+   "t": 86.15,
+   "start": 85.975,
+   "end": 86.325,
+   "whoosh": 85.89,
    "from": "idea1",
    "to": "idea2"
   },
   {
-   "t": 23.267,
-   "start": 23.092,
-   "end": 23.442,
-   "whoosh": 23.007,
+   "t": 90.15,
+   "start": 89.975,
+   "end": 90.325,
+   "whoosh": 89.89,
    "from": "idea2",
    "to": "idea3"
   },
   {
-   "t": 27.267,
-   "start": 27.092,
-   "end": 27.442,
-   "whoosh": 27.007,
+   "t": 94.15,
+   "start": 93.975,
+   "end": 94.325,
+   "whoosh": 93.89,
    "from": "idea3",
    "to": "f01"
   },
   {
-   "t": 30.017,
-   "start": 29.842,
-   "end": 30.192,
-   "whoosh": 29.757,
+   "t": 96.9,
+   "start": 96.725,
+   "end": 97.075,
+   "whoosh": 96.64,
    "from": "f01",
    "to": "f02"
   },
   {
-   "t": 32.767,
-   "start": 32.592,
-   "end": 32.942,
-   "whoosh": 32.507,
+   "t": 99.65,
+   "start": 99.475,
+   "end": 99.825,
+   "whoosh": 99.39,
    "from": "f02",
    "to": "f03"
   },
   {
-   "t": 35.517,
-   "start": 35.342,
-   "end": 35.692,
-   "whoosh": 35.257,
+   "t": 102.4,
+   "start": 102.225,
+   "end": 102.575,
+   "whoosh": 102.14,
    "from": "f03",
    "to": "f04"
   },
   {
-   "t": 38.267,
-   "start": 38.092,
-   "end": 38.442,
-   "whoosh": 38.007,
+   "t": 105.15,
+   "start": 104.975,
+   "end": 105.325,
+   "whoosh": 104.89,
    "from": "f04",
    "to": "f05"
   },
   {
-   "t": 41.017,
-   "start": 40.842,
-   "end": 41.192,
-   "whoosh": 40.757,
+   "t": 107.9,
+   "start": 107.725,
+   "end": 108.075,
+   "whoosh": 107.64,
    "from": "f05",
    "to": "f06"
   },
   {
-   "t": 43.767,
-   "start": 43.592,
-   "end": 43.942,
-   "whoosh": 43.507,
+   "t": 110.65,
+   "start": 110.475,
+   "end": 110.825,
+   "whoosh": 110.39,
    "from": "f06",
    "to": "f07"
   },
   {
-   "t": 46.517,
-   "start": 46.342,
-   "end": 46.692,
-   "whoosh": 46.257,
+   "t": 113.4,
+   "start": 113.225,
+   "end": 113.575,
+   "whoosh": 113.14,
    "from": "f07",
    "to": "f08"
   },
   {
-   "t": 49.267,
-   "start": 49.092,
-   "end": 49.442,
-   "whoosh": 49.007,
+   "t": 116.15,
+   "start": 115.975,
+   "end": 116.325,
+   "whoosh": 115.89,
    "from": "f08",
    "to": "f09"
   },
   {
-   "t": 52.017,
-   "start": 51.842,
-   "end": 52.192,
-   "whoosh": 51.757,
+   "t": 118.9,
+   "start": 118.725,
+   "end": 119.075,
+   "whoosh": 118.64,
    "from": "f09",
    "to": "f10"
   },
   {
-   "t": 54.767,
-   "start": 54.592,
-   "end": 54.942,
-   "whoosh": 54.507,
+   "t": 121.65,
+   "start": 121.475,
+   "end": 121.825,
+   "whoosh": 121.39,
    "from": "f10",
    "to": "f11"
   },
   {
-   "t": 57.517,
-   "start": 57.342,
-   "end": 57.692,
-   "whoosh": 57.257,
+   "t": 124.4,
+   "start": 124.225,
+   "end": 124.575,
+   "whoosh": 124.14,
    "from": "f11",
    "to": "f12"
   },
   {
-   "t": 60.267,
-   "start": 60.092,
-   "end": 60.442,
-   "whoosh": 60.007,
+   "t": 127.15,
+   "start": 126.975,
+   "end": 127.325,
+   "whoosh": 126.89,
    "from": "f12",
    "to": "together"
   },
   {
-   "t": 70.267,
-   "start": 70.092,
-   "end": 70.442,
-   "whoosh": 70.007,
+   "t": 137.15,
+   "start": 136.975,
+   "end": 137.325,
+   "whoosh": 136.89,
    "from": "together",
    "to": "real"
   },
   {
-   "t": 73.267,
-   "start": 73.092,
-   "end": 73.442,
-   "whoosh": 73.007,
+   "t": 140.15,
+   "start": 139.975,
+   "end": 140.325,
+   "whoosh": 139.89,
    "from": "real",
    "to": "end"
   }
@@ -1553,403 +2043,1069 @@
    "beat": "open"
   },
   {
-   "t": 11.567,
+   "t": 78.45,
    "beat": "logo"
   },
   {
-   "t": 15.567,
+   "t": 82.45,
    "beat": "idea1"
   },
   {
-   "t": 19.567,
+   "t": 86.45,
    "beat": "idea2"
   },
   {
-   "t": 23.567,
+   "t": 90.45,
    "beat": "idea3"
   },
   {
-   "t": 27.567,
+   "t": 94.45,
    "beat": "f01"
   },
   {
-   "t": 30.317,
+   "t": 97.2,
    "beat": "f02"
   },
   {
-   "t": 33.067,
+   "t": 99.95,
    "beat": "f03"
   },
   {
-   "t": 35.817,
+   "t": 102.7,
    "beat": "f04"
   },
   {
-   "t": 38.567,
+   "t": 105.45,
    "beat": "f05"
   },
   {
-   "t": 41.317,
+   "t": 108.2,
    "beat": "f06"
   },
   {
-   "t": 44.067,
+   "t": 110.95,
    "beat": "f07"
   },
   {
-   "t": 46.817,
+   "t": 113.7,
    "beat": "f08"
   },
   {
-   "t": 49.567,
+   "t": 116.45,
    "beat": "f09"
   },
   {
-   "t": 52.317,
+   "t": 119.2,
    "beat": "f10"
   },
   {
-   "t": 55.067,
+   "t": 121.95,
    "beat": "f11"
   },
   {
-   "t": 57.817,
+   "t": 124.7,
    "beat": "f12"
   },
   {
-   "t": 60.567,
+   "t": 127.45,
    "beat": "together"
   },
   {
-   "t": 70.567,
+   "t": 137.45,
    "beat": "real"
   },
   {
-   "t": 73.567,
+   "t": 140.45,
    "beat": "end"
   }
  ],
  "clicks": [
   {
-   "t": 3.055,
+   "t": 3.15,
    "beat": "open",
    "kind": "click",
-   "what": "New Move"
+   "what": "ol:Outer Leader"
   },
   {
-   "t": 3.475,
+   "t": 3.85,
    "beat": "open",
    "kind": "click",
-   "what": "Make Chain"
+   "what": "ol:Inner Leader"
   },
   {
-   "t": 3.895,
+   "t": 4.55,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Core"
+  },
+  {
+   "t": 5.25,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 1"
+  },
+  {
+   "t": 5.95,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 2"
+  },
+  {
+   "t": 6.65,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 3"
+  },
+  {
+   "t": 7.67,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:newmove"
+  },
+  {
+   "t": 8.69,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 3"
+  },
+  {
+   "t": 9.39,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 2"
+  },
+  {
+   "t": 10.09,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 1"
+  },
+  {
+   "t": 11.11,
+   "beat": "open",
+   "kind": "click",
+   "what": "sec:chains"
+  },
+  {
+   "t": 11.83,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:makechain"
+  },
+  {
+   "t": 12.85,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Outer Leader"
+  },
+  {
+   "t": 13.95,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 14.12,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 14.46,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 14.61,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 14.91,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 15.93,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Inner Leader"
+  },
+  {
+   "t": 17.03,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 17.2,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 17.54,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 17.69,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 17.99,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 19.01,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Core"
+  },
+  {
+   "t": 20.11,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:locz"
+  },
+  {
+   "t": 20.28,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:locz"
+  },
+  {
+   "t": 20.62,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:locz"
+  },
+  {
+   "t": 20.77,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:locz"
+  },
+  {
+   "t": 20.92,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:locz"
+  },
+  {
+   "t": 21.07,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:locz"
+  },
+  {
+   "t": 21.37,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:locz"
+  },
+  {
+   "t": 22.12,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotz"
+  },
+  {
+   "t": 22.29,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotz"
+  },
+  {
+   "t": 22.63,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotz"
+  },
+  {
+   "t": 22.78,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotz"
+  },
+  {
+   "t": 23.08,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotz"
+  },
+  {
+   "t": 24.1,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 1"
+  },
+  {
+   "t": 25.2,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 25.37,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 25.71,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 25.86,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 26.16,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 26.96,
+   "beat": "open",
+   "kind": "click",
+   "what": "olx:Leaf 1"
+  },
+  {
+   "t": 27.68,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 2"
+  },
+  {
+   "t": 28.78,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 28.95,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 29.29,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 29.44,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 29.59,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 29.74,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 30.04,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 31.06,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 3"
+  },
+  {
+   "t": 32.16,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 32.33,
+   "beat": "open",
+   "kind": "click",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 32.67,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 32.82,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 32.97,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 33.27,
+   "beat": "open",
+   "kind": "key",
+   "what": "pp:rotx"
+  },
+  {
+   "t": 34.42,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:record_after"
+  },
+  {
+   "t": 35.14,
+   "beat": "open",
+   "kind": "click",
+   "what": "sec:copies"
+  },
+  {
+   "t": 36.16,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Outer Leader"
+  },
+  {
+   "t": 37.18,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:ring"
+  },
+  {
+   "t": 38.28,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:count"
+  },
+  {
+   "t": 38.45,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:count"
+  },
+  {
+   "t": 38.79,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:count"
+  },
+  {
+   "t": 39.09,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:count"
+  },
+  {
+   "t": 39.81,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:round"
+  },
+  {
+   "t": 40.51,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:round:World Origin"
+  },
+  {
+   "t": 41.36,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 41.53,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 41.87,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 42.17,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 42.89,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:ok"
+  },
+  {
+   "t": 43.91,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Inner Leader"
+  },
+  {
+   "t": 44.93,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:ring"
+  },
+  {
+   "t": 46.03,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:count"
+  },
+  {
+   "t": 46.2,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:count"
+  },
+  {
+   "t": 46.54,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:count"
+  },
+  {
+   "t": 46.84,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:count"
+  },
+  {
+   "t": 48.39,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 48.56,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 48.9,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 49.05,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 49.35,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:lead"
+  },
+  {
+   "t": 50.07,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:ok"
+  },
+  {
+   "t": 51.09,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 1"
+  },
+  {
+   "t": 52.11,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:ring"
+  },
+  {
+   "t": 53.21,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:count"
+  },
+  {
+   "t": 53.38,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:count"
+  },
+  {
+   "t": 53.72,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:count"
+  },
+  {
+   "t": 54.02,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:count"
+  },
+  {
+   "t": 55.52,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:ok"
+  },
+  {
+   "t": 56.54,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 3"
+  },
+  {
+   "t": 57.24,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 2"
+  },
+  {
+   "t": 57.94,
+   "beat": "open",
+   "kind": "click",
+   "what": "ol:Leaf 1"
+  },
+  {
+   "t": 58.96,
+   "beat": "open",
+   "kind": "click",
+   "what": "sec:timing"
+  },
+  {
+   "t": 59.68,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:spread_timing"
+  },
+  {
+   "t": 61.53,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:only"
+  },
+  {
+   "t": 62.38,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:start"
+  },
+  {
+   "t": 62.55,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:start"
+  },
+  {
+   "t": 62.89,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:start"
+  },
+  {
+   "t": 63.04,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:start"
+  },
+  {
+   "t": 63.19,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:start"
+  },
+  {
+   "t": 63.34,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:start"
+  },
+  {
+   "t": 63.64,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:start"
+  },
+  {
+   "t": 64.39,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:step"
+  },
+  {
+   "t": 64.56,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:step"
+  },
+  {
+   "t": 64.9,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:step"
+  },
+  {
+   "t": 65.05,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:step"
+  },
+  {
+   "t": 65.2,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:step"
+  },
+  {
+   "t": 65.35,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:step"
+  },
+  {
+   "t": 65.65,
+   "beat": "open",
+   "kind": "key",
+   "what": "dlg:step"
+  },
+  {
+   "t": 66.4,
+   "beat": "open",
+   "kind": "click",
+   "what": "dlg:ok"
+  },
+  {
+   "t": 67.5,
+   "beat": "open",
+   "kind": "click",
+   "what": "tim:Inner Leader"
+  },
+  {
+   "t": 67.67,
+   "beat": "open",
+   "kind": "click",
+   "what": "tim:Inner Leader"
+  },
+  {
+   "t": 68.01,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Inner Leader"
+  },
+  {
+   "t": 68.16,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Inner Leader"
+  },
+  {
+   "t": 68.31,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Inner Leader"
+  },
+  {
+   "t": 68.46,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Inner Leader"
+  },
+  {
+   "t": 68.76,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Inner Leader"
+  },
+  {
+   "t": 69.51,
+   "beat": "open",
+   "kind": "click",
+   "what": "tim:Core"
+  },
+  {
+   "t": 69.68,
+   "beat": "open",
+   "kind": "click",
+   "what": "tim:Core"
+  },
+  {
+   "t": 70.02,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Core"
+  },
+  {
+   "t": 70.17,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Core"
+  },
+  {
+   "t": 70.32,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Core"
+  },
+  {
+   "t": 70.47,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Core"
+  },
+  {
+   "t": 70.77,
+   "beat": "open",
+   "kind": "key",
+   "what": "tim:Core"
+  },
+  {
+   "t": 71.49,
+   "beat": "open",
+   "kind": "click",
+   "what": "sec:path"
+  },
+  {
+   "t": 72.19,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:smooth"
+  },
+  {
+   "t": 73.39,
+   "beat": "open",
+   "kind": "click",
+   "what": "pn:build"
+  },
+  {
+   "t": 74.64,
    "beat": "open",
    "kind": "down",
-   "what": "pose: Outer Leader"
+   "what": "pn:slider"
   },
   {
-   "t": 4.095,
+   "t": 77.14,
    "beat": "open",
    "kind": "up",
-   "what": "pose: Outer Leader"
+   "what": "pn:slider"
   },
   {
-   "t": 4.145,
-   "beat": "open",
-   "kind": "down",
-   "what": "pose: Inner Leader"
-  },
-  {
-   "t": 4.345,
-   "beat": "open",
-   "kind": "up",
-   "what": "pose: Inner Leader"
-  },
-  {
-   "t": 4.395,
-   "beat": "open",
-   "kind": "down",
-   "what": "pose: Core"
-  },
-  {
-   "t": 4.595,
-   "beat": "open",
-   "kind": "up",
-   "what": "pose: Core"
-  },
-  {
-   "t": 4.645,
-   "beat": "open",
-   "kind": "down",
-   "what": "pose: Leaf"
-  },
-  {
-   "t": 4.845,
-   "beat": "open",
-   "kind": "up",
-   "what": "pose: Leaf"
-  },
-  {
-   "t": 5.005,
-   "beat": "open",
-   "kind": "click",
-   "what": "Record After"
-  },
-  {
-   "t": 5.405,
-   "beat": "open",
-   "kind": "click",
-   "what": "Ring… · outer petals"
-  },
-  {
-   "t": 5.835,
-   "beat": "open",
-   "kind": "click",
-   "what": "OK · 7 copies"
-  },
-  {
-   "t": 6.205,
-   "beat": "open",
-   "kind": "click",
-   "what": "Ring… · inner petals"
-  },
-  {
-   "t": 6.635,
-   "beat": "open",
-   "kind": "click",
-   "what": "OK · 5 copies"
-  },
-  {
-   "t": 7.005,
-   "beat": "open",
-   "kind": "click",
-   "what": "Ring… · the leaf"
-  },
-  {
-   "t": 7.435,
-   "beat": "open",
-   "kind": "click",
-   "what": "OK · 1 copy"
-  },
-  {
-   "t": 7.805,
-   "beat": "open",
-   "kind": "click",
-   "what": "Spread… · timing"
-  },
-  {
-   "t": 8.235,
-   "beat": "open",
-   "kind": "click",
-   "what": "OK · delays filled in"
-  },
-  {
-   "t": 8.655,
-   "beat": "open",
-   "kind": "click",
-   "what": "Build Sliders"
-  },
-  {
-   "t": 9.005,
-   "beat": "open",
-   "kind": "down",
-   "what": "drag the slider"
-  },
-  {
-   "t": 10.805,
-   "beat": "open",
-   "kind": "up",
-   "what": "drag the slider"
-  },
-  {
-   "t": 16.367,
+   "t": 83.25,
    "beat": "idea1",
    "kind": "click",
    "what": "Record Before"
   },
   {
-   "t": 17.117,
+   "t": 84,
    "beat": "idea1",
    "kind": "down",
    "what": "grab the part"
   },
   {
-   "t": 18.267,
+   "t": 85.15,
    "beat": "idea1",
    "kind": "up",
    "what": "grab the part"
   },
   {
-   "t": 18.717,
+   "t": 85.6,
    "beat": "idea1",
    "kind": "click",
    "what": "Record After"
   },
   {
-   "t": 20.167,
+   "t": 87.05,
    "beat": "idea2",
    "kind": "click",
    "what": "Build Sliders"
   },
   {
-   "t": 20.867,
+   "t": 87.75,
    "beat": "idea2",
    "kind": "down",
    "what": "drag the slider"
   },
   {
-   "t": 22.917,
+   "t": 89.8,
    "beat": "idea2",
    "kind": "up",
    "what": "drag the slider"
   },
   {
-   "t": 25.217,
+   "t": 92.1,
    "beat": "idea3",
    "kind": "down",
    "what": "drag the slider"
   },
   {
-   "t": 26.467,
+   "t": 93.35,
    "beat": "idea3",
    "kind": "up",
    "what": "drag the slider"
   },
   {
-   "t": 28.217,
+   "t": 95.1,
    "beat": "f01",
    "kind": "down",
    "what": "drag the delay"
   },
   {
-   "t": 28.667,
+   "t": 95.55,
    "beat": "f01",
    "kind": "up",
    "what": "drag the delay"
   },
   {
-   "t": 31.467,
+   "t": 98.35,
    "beat": "f02",
    "kind": "click",
    "what": "OK"
   },
   {
-   "t": 33.717,
+   "t": 100.6,
    "beat": "f03",
    "kind": "click",
    "what": "Pivot: 3D Cursor"
   },
   {
-   "t": 36.517,
+   "t": 103.4,
    "beat": "f04",
    "kind": "click",
    "what": "Step in between"
   },
   {
-   "t": 39.217,
+   "t": 106.1,
    "beat": "f05",
    "kind": "click",
    "what": "Curve the Path"
   },
   {
-   "t": 39.667,
+   "t": 106.55,
    "beat": "f05",
    "kind": "down",
    "what": "drag the handle"
   },
   {
-   "t": 40.267,
+   "t": 107.15,
    "beat": "f05",
    "kind": "up",
    "what": "drag the handle"
   },
   {
-   "t": 41.967,
+   "t": 108.85,
    "beat": "f06",
    "kind": "click",
    "what": "Smooth"
   },
   {
-   "t": 44.717,
+   "t": 111.6,
    "beat": "f07",
    "kind": "click",
    "what": "Make Chain"
   },
   {
-   "t": 47.467,
+   "t": 114.35,
    "beat": "f08",
    "kind": "click",
    "what": "Curl"
   },
   {
-   "t": 50.067,
+   "t": 116.95,
    "beat": "f09",
    "kind": "down",
    "what": "Count"
   },
   {
-   "t": 50.417,
+   "t": 117.3,
    "beat": "f09",
    "kind": "up",
    "what": "Count"
   },
   {
-   "t": 50.717,
+   "t": 117.6,
    "beat": "f09",
    "kind": "click",
    "what": "OK"
   },
   {
-   "t": 52.967,
+   "t": 119.85,
    "beat": "f10",
    "kind": "click",
    "what": "Mirror X"
   },
   {
-   "t": 55.717,
+   "t": 122.6,
    "beat": "f11",
    "kind": "click",
    "what": "Combine"
   },
   {
-   "t": 56.267,
+   "t": 123.15,
    "beat": "f11",
    "kind": "down",
    "what": "drag the combined slider"
   },
   {
-   "t": 57.267,
+   "t": 124.15,
    "beat": "f11",
    "kind": "up",
    "what": "drag the combined slider"
   },
   {
-   "t": 58.467,
+   "t": 125.35,
    "beat": "f12",
    "kind": "click",
    "what": "Animate"
   },
   {
-   "t": 64.067,
+   "t": 130.95,
    "beat": "together",
    "kind": "down",
    "what": "drag the slider"
   },
   {
-   "t": 66.467,
+   "t": 133.35,
    "beat": "together",
    "kind": "up",
    "what": "drag the slider"
   },
   {
-   "t": 70.767,
+   "t": 137.65,
    "beat": "real",
    "kind": "down",
    "what": "drag the real slider"
   },
   {
-   "t": 72.667,
+   "t": 139.55,
    "beat": "real",
    "kind": "up",
    "what": "drag the real slider"
@@ -1961,285 +3117,210 @@
    "name": "Opening"
   },
   {
-   "t": 11.267,
+   "t": 78.15,
    "name": "Logo"
   },
   {
-   "t": 15.267,
+   "t": 82.15,
    "name": "The idea 1/3"
   },
   {
-   "t": 19.267,
+   "t": 86.15,
    "name": "The idea 2/3"
   },
   {
-   "t": 23.267,
+   "t": 90.15,
    "name": "The idea 3/3"
   },
   {
-   "t": 27.267,
+   "t": 94.15,
    "name": "Feature 01 Timing"
   },
   {
-   "t": 30.017,
+   "t": 96.9,
    "name": "Feature 02 Spread"
   },
   {
-   "t": 32.767,
+   "t": 99.65,
    "name": "Feature 03 Pivot"
   },
   {
-   "t": 35.517,
+   "t": 102.4,
    "name": "Feature 04 Steps"
   },
   {
-   "t": 38.267,
+   "t": 105.15,
    "name": "Feature 05 Curves"
   },
   {
-   "t": 41.017,
+   "t": 107.9,
    "name": "Feature 06 Speed"
   },
   {
-   "t": 43.767,
+   "t": 110.65,
    "name": "Feature 07 Chain"
   },
   {
-   "t": 46.517,
+   "t": 113.4,
    "name": "Feature 08 Curl"
   },
   {
-   "t": 49.267,
+   "t": 116.15,
    "name": "Feature 09 Ring"
   },
   {
-   "t": 52.017,
+   "t": 118.9,
    "name": "Feature 10 Mirror"
   },
   {
-   "t": 54.767,
+   "t": 121.65,
    "name": "Feature 11 Combine"
   },
   {
-   "t": 57.517,
+   "t": 124.4,
    "name": "Feature 12 Animate"
   },
   {
-   "t": 60.267,
+   "t": 127.15,
    "name": "Put it together"
   },
   {
-   "t": 70.267,
+   "t": 137.15,
    "name": "Real Blender"
   },
   {
-   "t": 73.267,
+   "t": 140.15,
    "name": "End card"
   }
  ],
  "pops": [
   {
-   "t": 5.915,
-   "beat": "open",
-   "name": "pop"
-  },
-  {
-   "t": 5.965,
-   "beat": "open",
-   "name": "pop_2"
-  },
-  {
-   "t": 6.015,
-   "beat": "open",
-   "name": "pop_3"
-  },
-  {
-   "t": 6.065,
-   "beat": "open",
-   "name": "pop"
-  },
-  {
-   "t": 6.115,
-   "beat": "open",
-   "name": "pop_2"
-  },
-  {
-   "t": 6.165,
-   "beat": "open",
-   "name": "pop_3"
-  },
-  {
-   "t": 6.215,
-   "beat": "open",
-   "name": "pop"
-  },
-  {
-   "t": 6.715,
-   "beat": "open",
-   "name": "pop_2"
-  },
-  {
-   "t": 6.765,
-   "beat": "open",
-   "name": "pop_3"
-  },
-  {
-   "t": 6.815,
-   "beat": "open",
-   "name": "pop"
-  },
-  {
-   "t": 6.865,
-   "beat": "open",
-   "name": "pop_2"
-  },
-  {
-   "t": 6.915,
-   "beat": "open",
-   "name": "pop_3"
-  },
-  {
-   "t": 7.515,
-   "beat": "open",
-   "name": "pop"
-  },
-  {
-   "t": 7.595,
-   "beat": "open",
-   "name": "pop_2"
-  },
-  {
-   "t": 7.675,
-   "beat": "open",
-   "name": "pop_3"
-  },
-  {
-   "t": 50.807,
+   "t": 117.69,
    "beat": "f09",
    "name": "pop"
   },
   {
-   "t": 50.892,
+   "t": 117.775,
    "beat": "f09",
    "name": "pop_2"
   },
   {
-   "t": 50.977,
+   "t": 117.86,
    "beat": "f09",
    "name": "pop_3"
   },
   {
-   "t": 51.062,
+   "t": 117.945,
    "beat": "f09",
    "name": "pop"
   },
   {
-   "t": 51.147,
+   "t": 118.03,
    "beat": "f09",
    "name": "pop_2"
   },
   {
-   "t": 51.232,
+   "t": 118.115,
    "beat": "f09",
    "name": "pop_3"
   },
   {
-   "t": 51.317,
+   "t": 118.2,
    "beat": "f09",
    "name": "pop"
   },
   {
-   "t": 61.157,
+   "t": 128.04,
    "beat": "together",
    "name": "pop_2"
   },
   {
-   "t": 61.247,
+   "t": 128.13,
    "beat": "together",
    "name": "pop_3"
   },
   {
-   "t": 61.337,
+   "t": 128.22,
    "beat": "together",
    "name": "pop"
   },
   {
-   "t": 61.427,
+   "t": 128.31,
    "beat": "together",
    "name": "pop_2"
   },
   {
-   "t": 61.517,
+   "t": 128.4,
    "beat": "together",
    "name": "pop_3"
   },
   {
-   "t": 61.607,
+   "t": 128.49,
    "beat": "together",
    "name": "pop"
   },
   {
-   "t": 61.697,
+   "t": 128.58,
    "beat": "together",
    "name": "pop_2"
   },
   {
-   "t": 61.807,
+   "t": 128.69,
    "beat": "together",
    "name": "pop"
   },
   {
-   "t": 62.007,
+   "t": 128.89,
    "beat": "together",
    "name": "pop_3"
   },
   {
-   "t": 62.097,
+   "t": 128.98,
    "beat": "together",
    "name": "pop"
   },
   {
-   "t": 62.187,
+   "t": 129.07,
    "beat": "together",
    "name": "pop_2"
   },
   {
-   "t": 62.277,
+   "t": 129.16,
    "beat": "together",
    "name": "pop_3"
   },
   {
-   "t": 62.367,
+   "t": 129.25,
    "beat": "together",
    "name": "pop"
   },
   {
-   "t": 62.507,
+   "t": 129.39,
    "beat": "together",
    "name": "pop_2"
   },
   {
-   "t": 62.657,
+   "t": 129.54,
    "beat": "together",
    "name": "pop_3"
   },
   {
-   "t": 62.807,
+   "t": 129.69,
    "beat": "together",
    "name": "pop"
   },
   {
-   "t": 63.057,
+   "t": 129.94,
    "beat": "together",
    "name": "pop_2"
   },
   {
-   "t": 63.157,
+   "t": 130.04,
    "beat": "together",
    "name": "pop_3"
   },
   {
-   "t": 63.257,
+   "t": 130.14,
    "beat": "together",
    "name": "pop"
   }
