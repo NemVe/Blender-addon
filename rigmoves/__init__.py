@@ -494,7 +494,7 @@ def sync_handles(rig, data):
     # knowing where its members already are.
     for carrier, names in carriers(data):
         if carrier.handle and names:
-            wanted[carrier.handle_name or (carrier.name + " handle")] = (carrier, names)
+            wanted[carrier.handle_name or fit_name(carrier.name + " handle")] = (carrier, names)
     wanted = dict(sorted(wanted.items(),
                          key=lambda row: 1 if hasattr(row[1][0], "members") else 0))
     stale = [b.name for b in rig.data.bones
@@ -1505,12 +1505,20 @@ class RIGMOVES_Part(bpy.types.PropertyGroup):
                     "put it into effect")
 
 
+def fit_name(text, limit=63):
+    """The text cut to `limit` bytes, on the edge of a letter. Blender keeps 63
+    bytes of a name; Blender 4.5 cuts a longer one wherever the byte falls,
+    through an accented or CJK letter, and the name cannot be read after that
+    (Python raises UnicodeDecodeError), where 5.0 cuts at a letter."""
+    return text.encode()[:limit].decode("utf-8", "ignore")
+
+
 def safe_prop_name(text):
     kept = "".join(c if (c.isalnum() or c in " _-") else "_" for c in text).strip()
     # Blender holds the name of a custom property to 63 bytes - bytes, so 32
     # accented letters are one too many - and unique_prop_name may add a number
-    # after it. Cut short of that, and on the edge of a letter.
-    kept = kept.encode()[:56].decode("utf-8", "ignore").strip()
+    # after it. Cut short of that.
+    kept = fit_name(kept, 56).strip()
     return kept or "Move"
 
 

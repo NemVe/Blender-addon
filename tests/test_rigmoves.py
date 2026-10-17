@@ -7433,6 +7433,12 @@ class TestAMoveWithALongName(CopyThatCase):
         # 66 bytes, cut to 54: 18 characters of 3 bytes.
         self.check_a_name("移" * 22, "移" * 18)
 
+    def test_a_name_whose_cut_falls_inside_a_letter_builds_and_plays(self):
+        # 64 bytes, and the 63rd, where Blender 4.5 cuts a bone's name, is the
+        # second of a letter's three. The slider's name keeps 55 of them.
+        self.check_a_name("a" + "移" * 21, "a" + "移" * 18)
+        self.assertIn(rig().rigmoves.moves[0].handle_name, rig().data.bones)
+
     def test_two_moves_named_alike_at_sixty_two_bytes_build_and_play_alone(self):
         # Two names that make one slider name ("!" and "?" are both made "_"):
         # the second slider is given a " 2" after its 62 bytes.
