@@ -116,7 +116,7 @@ const f09 = {
             + pr('Round', drop('3D Cursor')) + pr('About', drop('World Z'))
             + pr('', `<div style="display:flex;align-items:center;gap:12px">${cb(true)}<span>Linked copies</span></div>`), { okId: 'ok' }),
           '<div class="tag g" id="tr">1 part</div>');
-        v = cardView(this.index % 2, { pos: [0, 2.9, 5.6], look: [0, 1.75, 0], fov: 30, env: 0.65 }); v.host = qs(el, '.cv');
+        v = cardView(this.index % 2, { pos: [0, 3.8, 5.4], look: [0, 1.7, 0], fov: 30, env: 0.65 }); v.host = qs(el, '.cv');
         const FL = instFlower(ctx.F); FL.pose(0);
         FL.names.forEach(n => { if (n !== 'Outer Leader') FL.parts[n].visible = false; });
         root = FL.root; leader = FL.parts['Outer Leader'];
@@ -141,7 +141,7 @@ const f09 = {
         });
         const n = 1 + copies.filter((_, i) => lt >= 1.5 + 0.085 * i).length;
         qs(el, '#tr').textContent = n === 1 ? '1 part' : `${n} parts · 1 leader`;
-        root.rotation.y = 0.28 * lt;
+        root.rotation.y = 0.55 * lt;
         const g = ramp(lt, 1.62, 1.85);
         qs(el, '.dlg').style.opacity = (1 - 0.7 * g).toFixed(3);
         render(v);
@@ -225,7 +225,7 @@ const f11 = {
         const el = this.el;
         animText(el, lt, dur);
         const s = S(lt), m = ramp(lt, 1.0, 1.3);
-        qs(el, '#cA').style.opacity = (1 - m).toFixed(3); qs(el, '#cB').style.opacity = m.toFixed(3);
+        qs(el, '#cA').style.opacity = (1 - ramp(lt, 1.0, 1.15)).toFixed(3); qs(el, '#cB').style.opacity = ramp(lt, 1.15, 1.35).toFixed(3);
         qs(el, '#cB').style.transform = `translate(0px,${((1 - e3(m)) * 24).toFixed(1)}px)`;
         qs(el, '#cs .fill').style.width = `${(s * 100).toFixed(1)}%`; qs(el, '#cs .v').textContent = `${Math.round(s * 100)}%`;
         qs(el, '#cmb').classList.toggle('hot', pressed(lt, 0.95));
@@ -254,7 +254,7 @@ const f12 = {
           `<div class="tag g">Timeline</div><div class="tl"><div class="ruler">${[0, 10, 20, 30, 40, 50, 60].map(f => `<i class="tk" style="left:${fx(f)}px"><b>${f}</b></i>`).join('')}</div>
             <div class="lane"><i class="dm" id="k0" style="left:${fx(1)}px"></i><i class="dm" id="k1" style="left:${fx(49)}px"></i></div>
             <div class="ph" id="ph" style="left:${fx(1)}px"><b id="phn">1</b></div></div>`);
-        v = cardView(this.index % 2, { pos: [0, 2.5, 9.4], look: [0, 0.2, 0] }); v.host = qs(el, '.cv');
+        v = cardView(this.index % 2, { pos: [0, 2.5, 9.4], look: [0, 0.6, 0] }); v.host = qs(el, '.cv');
         blk = cube(v, BAR);
         const gA = ghost(v, BAR), gB = ghost(v, BAR); gA.position.copy(P(0)); gB.position.copy(P(1)); gB.rotation.z = Math.PI / 2;
         v.scene.add(blk, gA, gB);

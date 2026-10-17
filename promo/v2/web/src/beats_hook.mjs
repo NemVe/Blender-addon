@@ -211,16 +211,16 @@ const logo = {
     return {
       cues: [],
       build(el) {
-        const word = (w, top, gold) => `<div class="wm" style="position:absolute;left:146px;top:${top}px;font:800 236px/1 Inter;letter-spacing:-.035em;white-space:nowrap;${gold ? 'color:#C9A76A' : 'color:#fff'}">${
+        const word = (w, top, gold) => `<div class="wm" style="position:absolute;left:146px;top:${top}px;font:800 212px/1 Inter;letter-spacing:-.035em;white-space:nowrap;${gold ? 'color:#C9A76A' : 'color:#fff'}">${
           w.split('').map(l => `<span style="display:inline-block">${l}</span>`).join('')}</div>`;
         el.innerHTML = `
           <div class="full" style="-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 34%);mask-image:linear-gradient(90deg,transparent 0,#000 34%)">
             <img class="foot a" style="transform-origin:68% 62%"><img class="foot b" style="transform-origin:68% 62%"></div>
           <div class="shade"></div>
-          <div class="kick" style="left:154px;top:318px">A Blender add-on</div>
-          ${word('COPY', 366, false)}${word('THAT', 584, true)}
-          <div class="rule" style="position:absolute;left:154px;top:850px;height:4px;background:#C9A76A;width:0"></div>
-          <div class="tagl" style="position:absolute;left:154px;top:888px;font:500 60px/1.1 Inter;letter-spacing:-.01em;color:#F2EADB;white-space:nowrap">Record a move. Get a <em style="font-style:normal;color:#C9A76A">slider</em>.</div>`;
+          <div class="kick" style="left:154px;top:342px">A Blender add-on</div>
+          ${word('COPY', 390, false)}${word('THAT', 585, true)}
+          <div class="rule" style="position:absolute;left:154px;top:826px;height:4px;background:#C9A76A;width:0"></div>
+          <div class="tagl" style="position:absolute;left:154px;top:864px;font:500 60px/1.1 Inter;letter-spacing:-.01em;color:#F2EADB;white-space:nowrap">Record a move. Get a <em style="font-style:normal;color:#C9A76A">slider</em>.</div>`;
         this.a = el.querySelector('.foot.a'); this.b = el.querySelector('.foot.b');
       },
       update(lt, dur) {

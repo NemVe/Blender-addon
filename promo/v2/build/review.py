@@ -23,14 +23,15 @@ def main():
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", FILM, "-vf", "fps=1,scale=480:-1", os.path.join(tmp, "%03d.png")], check=True)
     files = sorted(os.listdir(tmp))
     cols, tw = 8, 480
-    first = Image.open(os.path.join(tmp, files[0]))
-    th = first.height
+    with Image.open(os.path.join(tmp, files[0])) as first:
+        th = first.height
     rows = (len(files) + cols - 1) // cols
     sheet = Image.new("RGB", (cols * tw, rows * th), (20, 20, 20))
     draw = ImageDraw.Draw(sheet)
     for i, f in enumerate(files):
         x, y = (i % cols) * tw, (i // cols) * th
-        sheet.paste(Image.open(os.path.join(tmp, f)).convert("RGB"), (x, y))
+        with Image.open(os.path.join(tmp, f)) as im:
+            sheet.paste(im.convert("RGB"), (x, y))
         draw.rectangle([x, y, x + 46, y + 16], fill=(0, 0, 0))
         draw.text((x + 4, y + 2), "{:d} s".format(i), fill=(255, 220, 140))
         os.remove(os.path.join(tmp, f))
