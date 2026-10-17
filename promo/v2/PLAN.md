@@ -119,3 +119,117 @@ action needs. Leave 0.3-0.5 s of air between lines.
   Never commit the vault.
 - No checkers, no second opinions. Look at your own renders before calling
   them done.
+
+---
+
+# v2.1 (NemVe3D, 2026-10-17): flash style. This SUPERSEDES the script and shot list above.
+
+The reference is "Auto Unwrap 2 Teaser" by 3DRedBox
+(youtube.com/watch?v=p1TyTzM_1ag). The planner studied its frames; this
+section describes the template, so there is no need to watch it.
+- Every feature is shown "flash style", 2-3 s each, with a stylish delivery.
+- The screen recording is only one ingredient among others.
+- Everything above still holds unless this section says otherwise: the
+  rules, the outputs, the cursor, the voiceover tool and the sound effects.
+
+## The template: one beat per feature, 2-3 s
+- **Background:** #0A0A0C, a warm gold glow from one corner (a radial, about
+  12%), and subtle grain.
+- **Left column** (x 6-38%), top to bottom:
+  - **Kicker:** small caps, Inter SemiBold, about 22 px at 1440, tracking
+    0.18 em. A gold number and label, "07 · CHAIN".
+  - **Headline:** Inter ExtraBold, about 76 px, white, 2 lines at most,
+    with the key word in gold #C9A76A.
+  - **Subline:** Inter Regular, about 26 px, #9A968E, one line.
+  - **Mini UI card:** one row of the CopyThat panel (Blender dark theme),
+    showing that feature's real control and animating the setting.
+- **Right** (x 42-94%): a rounded card (18 px radius, soft shadow) showing
+  the action. It is a Three.js mini-scene, or a crop of the real Blender
+  recording, with the cursor clicking. Small caps labels in a card corner
+  when useful ("BEFORE", "AFTER", "REAL BLENDER").
+- **Text motion:** the kicker fades and slides in (0.15 s), the headline
+  lines slide up with a small stagger, then the subline; all fade out fast.
+- **Between beats:** a diagonal stripe wipe, a white band then a gold band
+  slanted about 20°, 0.35 s, with a whoosh.
+- **Fonts:** download the Inter family (OFL, rsms/inter releases) for the
+  web: SemiBold, ExtraBold, Regular.
+
+## Structure, about 76 s
+| Time | Beat | On screen | Voiceover |
+|---|---|---|---|
+| 0-3 | Hook 1 | kicker "RIGGING"; "Hours of building rigs." over a Three.js shot of the flower tangled in bones and constraint lines (wireframe, gold) | Rigging takes hours. |
+| 3-6 | Hook 2 | "Bones." / "Constraints." / "Drivers." / "Keys." stacking, the last in gold | Bones. Constraints. Drivers. Keys. |
+| 6-9 | Hook 3 | "What if you just showed it the move?" over a cube leaving a gold ghost trail | What if you just showed it the move? |
+| 9-13 | Logo | the COPYTHAT wordmark (ExtraBold, gold accent) and "Record a move. Get a slider." over the Cycles bloom (hook C) | This is CopyThat. Record a move, get a slider. |
+| 13-17 | THE IDEA 1/3 | "Pose it. Record it." The cube: Record Before, a drag, Record After | Pose it, and record. |
+| 17-21 | THE IDEA 2/3 | "Build. One slider." Build Sliders, then the slider dragged as the cube glides | Press Build. One slider plays the move. |
+| 21-25 | THE IDEA 3/3 | "Many parts. One move." 12 cubes rise and flip | Select many parts: one move. |
+| 25-58 | FEATURES 01-12 | 2.5-3 s each (list below) | one short line each |
+| 58-68 | PUT IT TOGETHER | "21 parts. One slider." The Three.js flower (real geometry and motion): ring, spread, bloom on the slider, then a dissolve into the Cycles render | Put it together: twenty-one parts, one slider. |
+| 68-71 | REAL BLENDER | "Right in the sidebar." The real slider take in the card, with the cursor dragging the real slider | All right in Blender's sidebar. |
+| 71-76 | End card | the wordmark; "Record a move. Get a slider."; a gold pill "Now on Superhive"; "by NemVe3D · creators.sa/nemve" | CopyThat. Now on Superhive. |
+
+## Features: kicker · headline (key word in gold) · mini UI · the card · voiceover
+1. **01 · TIMING.** "Each part, its own **delay**."
+   - Mini UI: a Delay slider row.
+   - Card: three cubes start one after another.
+   - Voiceover: "Give each part its own delay."
+2. **02 · SPREAD.** "A **wave** in one click."
+   - Mini UI: the Spread... dialog.
+   - Card: the real recording's Spread dialog crop, then a cube wave.
+   - Voiceover: "Spread the timing into a wave."
+3. **03 · PIVOT.** "Turn about **any point**."
+   - Mini UI: Origin | Cursor | Base.
+   - Card: a lid turning on its hinge.
+   - Voiceover: "Turn about any point."
+4. **04 · STEPS.** "Steps **in between**."
+   - Mini UI: "+ Step in between".
+   - Card: a path bending through an added pose.
+   - Voiceover: "Add steps in between."
+5. **05 · CURVES.** "Curve the path. **Edit its curve.**"
+   - Mini UI: Curve the Path / Edit the Curve.
+   - Card: a coin on a bezier, the cursor dragging a handle.
+   - Voiceover: "Curve the path, and edit its curve."
+6. **06 · SPEED.** "**Smooth** or even."
+   - Mini UI: Smooth / Even speed.
+   - Card: two balls, eased and linear.
+   - Voiceover: "Smooth, or even speed."
+7. **07 · CHAIN.** "Joints that **follow**."
+   - Mini UI: Make Chain plus the Follows list.
+   - Card: a three-block finger, or the real Make Chain crop.
+   - Voiceover: "Chain parts, so joints follow."
+8. **08 · CURL.** "**Curl** it in one go."
+   - Mini UI: Curl.
+   - Card: the finger curls.
+   - Voiceover: "Curl a whole chain at once."
+9. **09 · RING.** "One part, a **ring**."
+   - Mini UI: the Ring... dialog, Count 8.
+   - Card: the real Ring dialog crop, then a petal becoming 8.
+   - Voiceover: "Ring one part into many."
+10. **10 · MIRROR.** "Copies that **mirror**."
+    - Mini UI: Mirror X.
+    - Card: left and right doors opening mirrored.
+    - Voiceover: "Mirror the copies."
+11. **11 · COMBINE.** "Many moves, **one control**."
+    - Mini UI: two sliders merging.
+    - Card: two moves under one control.
+    - Voiceover: "Combine moves under one control."
+12. **12 · ANIMATE.** "Keyed in **one click**."
+    - Mini UI: Frames 48 ▶ Animate.
+    - Card: timeline keys appear and it plays.
+    - Voiceover: "Animate it in one click."
+
+## Real recording crops (from `dist/promo/rec/main`)
+Use them where they fit:
+- Spread's dialog, about +37.4-38.9 s after the flash at 10.50 s;
+- Ring's dialog, +22.6-24.1;
+- Make Chain, +4.4-7.4;
+- Build and the slider, +44-55.
+
+Scale the region of interest up inside the card.
+
+## Audio
+- Voiceover lines as in the tables (Kokoro). The feature lines must fit 2.5 s.
+- Sound effects: a click on every UI click, a whoosh on every wipe, pops for
+  ring copies, a soft tick as each headline lands.
+- No music, as before; NemVe3D adds a track. Put markers on the beat grid.
