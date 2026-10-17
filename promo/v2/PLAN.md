@@ -233,3 +233,80 @@ Scale the region of interest up inside the card.
 - Sound effects: a click on every UI click, a whoosh on every wipe, pops for
   ring copies, a soft tick as each headline lands.
 - No music, as before; NemVe3D adds a track. Put markers on the beat grid.
+
+---
+
+# v2.2 (NemVe3D, 2026-10-17): a new opening, a lively voice, quieter whooshes
+
+NemVe3D likes the v2.1 film; three changes only. Everything else stays: the
+logo, the idea beats, the features 01-12, "21 parts", real Blender and the
+end card.
+
+## 1. The opening replaces hook1-3 (0-9 s)
+- **"Let's rig this flower in N clicks."**
+  - N is the honest count of the button clicks and dialog OKs shown on
+    screen, taken from the fast flower's steps
+    (`promo/files/FLOWER_FAST.md`) and the add-on's real buttons.
+  - Pose drags are not counted, but they are shown, quickly.
+- **About 10-12 s, fast and fun:**
+  - the real flower (`assets/flower.glb`) and a copy of the 0.20 panel;
+  - a big counter, "CLICKS 0/N", that ticks with every click, each with
+    the click sound;
+  - the cursor races through New Move, Record (Before / After), Ring... OK
+    (outer), Ring... OK (inner), Make Chain (leaf), Spread... OK, Build
+    Sliders;
+  - each step lights its parts gold (the ring copies spin in, the timing
+    bars fill);
+  - the last click drags the slider, and the flower blooms with its real
+    motion (`flower_motion.json`).
+- **Then the logo beat, as before.**
+
+## 2. The voice: enthusiastic, one continuous flow
+NemVe3D: v2.1's voice was "boring, not enthusiastic, like reading from a
+script". The lines were made one by one, so each reset its intonation.
+- **Engine:** Chatterbox (Resemble AI, MIT, local on the RTX 3090), with
+  more exaggeration (about 0.6-0.7) and a lower cfg (about 0.35-0.45) for
+  livelier pacing.
+  - If it will not install on Python 3.13, make a 3.11 venv with `uv` (it
+    downloads its own Python).
+  - Fallback: Kokoro with a livelier voice (am_puck or af_bella), speed
+    1.08.
+- **Generate passages, not lines:** a few continuous takes (the opening, the
+  idea, the features, the close). Then cut them at the word times with
+  faster-whisper, and place each cut on its beat. Nudge beats by at most
+  ±0.3 s, or time-stretch a cut by at most ±8%.
+- **The script,** conversational:
+  - Opening: "Let's rig this flower in N clicks. Watch this!", then the
+    clicks with no voice, then "Done! One slider, and it blooms."
+  - Logo: "This is CopyThat: record a move, and get a slider."
+  - Ideas: "Pose your object, and hit Record." / "Press Build, and the whole
+    move lives on one slider." / "Select as many parts as you like; they all
+    share one move."
+  - Features:
+    - "Give every part its own delay."
+    - "Spread the timing into a wave."
+    - "Turn around any point you want."
+    - "Add steps in between."
+    - "Curve the path, then edit the curve."
+    - "Smooth, or perfectly even."
+    - "Chain parts, so the joints follow."
+    - "Curl a whole chain at once."
+    - "Ring one part into many."
+    - "Mirror the copies."
+    - "Combine moves under one control."
+    - "And animate it all in one click."
+  - Close: "Put it all together: twenty-one parts, one slider." / "And it
+    all happens right in Blender's sidebar." / "CopyThat. Now on Superhive!"
+- **Processing:** light compression, a little presence; the voice at about
+  -16 LUFS before the mix.
+
+## 3. Whooshes about 9 dB quieter
+Keep them under the voice. The ticks and pops stay as they are.
+
+## Re-render only what changed
+1. The opening segment.
+2. The audio mix.
+3. The film assembly.
+4. The After Effects project, rebuilt with its script.
+5. A new contact sheet and stills for the opening, in
+   `promo_v2_review/v22/`.
