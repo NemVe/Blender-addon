@@ -2454,10 +2454,14 @@ def reach_of(obj, corners=None):
 def triangle_frame(a, b, c):
     """A frame standing on the first of three points: its X along the first
     edge, its Z square to the triangle, its Y between. None when the three lie
-    (nearly) in a line, and no frame stands on them."""
+    (nearly) in a line, and no frame stands on them: when the sine of the angle at
+    the first is under 1e-7, the third is off the line by about as much as the
+    positions are rounded (a float keeps 6e-8 of its size). Anything over that is
+    a frame - a rod a hundred metres long and 1 cm across has one, and a part that
+    thin must not be taken for dragged when its origin is set."""
     along, across = b - a, c - a
     normal = along.cross(across)
-    if along.length < 1e-12 or normal.length < 1e-4 * along.length * across.length:
+    if along.length < 1e-12 or normal.length < 1e-7 * along.length * across.length:
         return None
     x = along.normalized()
     z = normal.normalized()

@@ -10538,6 +10538,89 @@ class TestAPartWithAnUnappliedScaleOf200(CopyThatCase):
         self.assertNotIn("moved and not recorded", rig().rigmoves.report)
 
 
+class TestAVeryThinPartGivenANewOrigin(CopyThatCase):
+    """A rod a hundred metres long and 1 cm across is built, and then given a new
+    origin. The three vertices that tell a part framed another way from one
+    dragged stand all but in a line on a rod this thin, and no frame was fitted
+    on three points that near a line (the sine of their angle under 1e-4): the
+    rod was taken for dragged and put back on its Before, and its mesh ended up
+    where the origin had been moved to."""
+
+    # (radius, length): 1e4 to 1 as long as it is across, and 1e5 to 1.
+    RODS = ((0.005, 100.0), (0.001, 200.0))
+    SAID = "had its origin, scale or rotation changed after it was bound"
+
+    def make_rod(self, radius, length):
+        """The rod and a cube, both lifted a metre, the rod turned too: built."""
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=length, vertices=12,
+                                            location=(0.0, 0.0, length / 2 + 0.1))
+        self.rod = bpy.context.object
+        self.rod.name = "Rod"
+        other = cube("Other", (6.0, 0.0, 0.5))
+
+        def pose():
+            self.rod.location.z += 1.0
+            self.rod.rotation_euler.y = 0.5
+            other.location.z += 1.0
+
+        record_move([self.rod, other], pose)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.move = rig().rigmoves.moves[0]
+
+    def seen(self):
+        """Where the rod is at both ends of its slider and half way."""
+        out = {}
+        for share in (0.0, 0.5, 1.0):
+            drive(self.move, share)
+            out[share] = world_points(self.rod)
+        drive(self.move, 0.0)
+        return out
+
+    def check_unmoved(self, was):
+        for share, points in was.items():
+            drive(self.move, share)
+            self.assertLess(drift(self.rod, points), TOLERANCE, "{:.0%}".format(share))
+        drive(self.move, 0.0)
+
+    def test_set_origin_to_the_cursor_moves_nothing(self):
+        for radius, length in self.RODS:
+            with self.subTest(radius=radius, length=length):
+                self.make_rod(radius, length)
+                was = self.seen()
+                bpy.context.scene.cursor.location = (self.rod.matrix_world.translation
+                                                     + Vector((0.2, 0.1, 0.3)))
+                select(self.rod)
+                self.assertEqual(bpy.ops.object.origin_set(type="ORIGIN_CURSOR"), {"FINISHED"})
+                bpy.context.view_layer.update()
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.check_unmoved(was)
+                self.assertIn(self.SAID, rig().rigmoves.report)
+                self.assertNotIn("put back on its Before", rig().rigmoves.report)
+
+    def test_a_thin_part_dragged_by_hand_is_still_put_back(self):
+        for radius, length in self.RODS:
+            with self.subTest(radius=radius, length=length):
+                self.make_rod(radius, length)
+                was = self.seen()
+                self.rod.location.x += 0.3
+                self.rod.location.z += 0.7
+                bpy.context.view_layer.update()
+                select(self.rod)
+                self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+                self.assertIn("put back on its Before", rig().rigmoves.report)
+                self.assertNotIn(self.SAID, rig().rigmoves.report)
+                self.check_unmoved(was)
+
+    def test_three_points_a_hair_off_a_line_have_a_frame(self):
+        # A rod's marks: 100 m between the ends, and the third 2 mm off the line.
+        then = [Vector((0.0, 0.0, 0.0)), Vector((100.0, 0.0, 0.0)), Vector((50.0, 0.002, 0.0))]
+        move = turn_about(Vector((1.0, 2.0, 3.0)), (0.3, 0.5, 0.8), 37.0)
+        fit, miss = rigmoves.rigid_fit(then, [move @ p for p in then])
+        self.assertIsNotNone(fit)
+        self.assertLess(miss, 1e-4)
+
+
 if __name__ == "__main__":
     # Inside a Blender binary sys.argv is Blender's own command line; only what
     # follows "--" is meant for the tests.
