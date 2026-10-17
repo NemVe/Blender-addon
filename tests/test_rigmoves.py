@@ -7106,6 +7106,135 @@ class TestRingAnimatedChild(RingFlows):
         self.assertGreater(drift_of(self.seen_at([bee])[10]["Bee"], was[10]["Bee"]), 0.1)
 
 
+class TestAnAltDCopyHasTheRigsKeysOfItsOwn(CopiedModel):
+    """The keys on a handle - from Animate, or put there by hand - are in the rig's
+    own Action, and Alt+D of the whole model plays that very Action on the copy.
+    Remove on the copy took the handle's curve out of the original's too, so the
+    original stood still; Animate and Key the Control on the copy wrote into it,
+    moving the original's last key and adding one. And the path both rigs play is
+    one Action until a button gives the copy its own, so a Path length set on the
+    copy (by Python: it is not on the panel) stretched the original's. A Shift+D
+    copy has the path in common as well, but not the handle's keys."""
+
+    FRAMES = (1, 13, 25, 30, 37, 49, 60)
+
+    def setUp(self):
+        super().setUp()
+        self.chest()
+        bpy.context.scene.frame_set(1)
+
+    def where_they_are(self, objects):
+        """Where these objects are on each of the frames, as the timeline plays them."""
+        out = {}
+        for frame in self.FRAMES:
+            bpy.context.scene.frame_set(frame)
+            out[frame] = [world_points(obj) for obj in objects]
+        bpy.context.scene.frame_set(1)
+        return out
+
+    def check_they_play(self, objects, was, after):
+        """Each of these is where it was on every one of the frames."""
+        for frame in self.FRAMES:
+            bpy.context.scene.frame_set(frame)
+            for obj, points in zip(objects, was[frame]):
+                self.assertLess(drift(obj, points), TOLERANCE,
+                                "{:s} on frame {:d}, after {:s}".format(obj.name, frame, after))
+        bpy.context.scene.frame_set(1)
+
+    def handle_keys(self, owner, move):
+        """(frame, place along the rail) of every key on the move's handle."""
+        path = owner.pose.bones[move.handle_name].path_from_id("location")
+        _holder, curve = rigmoves.action_curve(owner, path, 1)
+        if curve is None:
+            return []
+        return [(round(point.co[0]), round(point.co[1], 4)) for point in curve.keyframe_points]
+
+    def animated_and_copied(self):
+        """The original animated over frames 1 to 49, then copied with Alt+D."""
+        select(self.rig1)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        self.was = self.where_they_are([self.lid])
+        # It does play, so that what is lost shows.
+        self.assertGreater(drift_of(self.was[49][0], self.was[1][0]), 1.0)
+        rig2, part2 = self.copy_everything(linked=True)
+        self.assertIs(rig2.animation_data.action, self.rig1.animation_data.action)
+        bpy.context.scene.frame_set(1)
+        return rig2, part2
+
+    def test_removing_the_copys_move_leaves_the_original_playing(self):
+        rig2, _part2 = self.animated_and_copied()
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.remove(index=0), {"FINISHED"})
+        self.check_they_play([self.lid], self.was, "Remove on the copy")
+
+    def test_animating_the_copy_leaves_the_original_playing_and_the_copy_plays_its_own(self):
+        rig2, part2 = self.animated_and_copied()
+        move1, move2 = self.rig1.rigmoves.moves[0], rig2.rigmoves.moves[0]
+        move2.play_frames = 100
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        self.check_they_play([self.lid], self.was, "Animate on the copy")
+        self.assertEqual(self.handle_keys(self.rig1, move1), [(1, 0.0), (49, round(move1.rail, 4))])
+        # The copy plays the hundred frames it was given, 6 m along.
+        self.assertEqual(self.handle_keys(rig2, move2), [(1, 0.0), (101, round(move2.rail, 4))])
+        for frame, share in ((1, 0.0), (101, 1.0)):
+            bpy.context.scene.frame_set(frame)
+            self.assertLess(drift(part2, [self.OFF @ p for p in self.plays[share]]), TOLERANCE,
+                            "the copy on frame {:d}".format(frame))
+
+    def test_keying_the_copys_control_leaves_the_original_playing_and_the_copy_has_the_key(self):
+        rig2, _part2 = self.animated_and_copied()
+        move1, move2 = self.rig1.rigmoves.moves[0], rig2.rigmoves.moves[0]
+        bpy.context.scene.frame_set(30)
+        rig2.pose.bones[move2.handle_name].location.y = move2.rail * 0.5
+        bpy.context.view_layer.update()
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.key_control(index=0), {"FINISHED"})
+        self.check_they_play([self.lid], self.was, "Key the Control on the copy")
+        self.assertEqual(self.handle_keys(self.rig1, move1), [(1, 0.0), (49, round(move1.rail, 4))])
+        self.assertEqual(self.handle_keys(rig2, move2),
+                         [(1, 0.0), (30, round(move2.rail * 0.5, 4)), (49, round(move2.rail, 4))])
+
+    def stretch_the_copys_path(self, linked):
+        rig2, part2 = self.copy_everything(linked=linked)
+        move1, move2 = self.rig1.rigmoves.moves[0], rig2.rigmoves.moves[0]
+        # Until a button is pressed on it, the copy plays the original's path.
+        self.assertEqual(move2.action_name, move1.action_name)
+        move2.frames = 40
+        bpy.context.view_layer.update()
+        self.check_original()
+        # The copy was given a path of its own to stretch, and plays it from its
+        # Build on.
+        self.assertNotEqual(move2.action_name, move1.action_name)
+        select(rig2)
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.check_original()
+        self.check_copy(rig2, part2)
+
+    def test_a_longer_path_on_an_alt_d_copy_leaves_the_original_playing(self):
+        self.stretch_the_copys_path(linked=True)
+
+    def test_a_longer_path_on_a_shift_d_copy_leaves_the_original_playing(self):
+        self.stretch_the_copys_path(linked=False)
+
+    def test_a_rig_whose_nla_is_being_tweaked_still_builds(self):
+        # Not a fault of 0.19.1's but of making the rig's Action its own at every
+        # button: tweaking, the Action is a strip's and Blender will not swap it.
+        select(self.rig1)
+        self.assertEqual(bpy.ops.rigmoves.animate(index=0), {"FINISHED"})
+        animation = self.rig1.animation_data
+        track = animation.nla_tracks.new()
+        strip = track.strips.new("Opening", 1, animation.action)
+        animation.nla_tracks.active = track
+        strip.select = True
+        animation.use_tweak_mode = True
+        self.assertTrue(animation.use_tweak_mode)
+        action = animation.action
+        self.assertEqual(bpy.ops.rigmoves.build(), {"FINISHED"})
+        self.assertTrue(animation.use_tweak_mode)
+        self.assertIs(animation.action, action)
+
+
 def drift_of(points, expected):
     """How far the furthest of these points is from the same one of the others."""
     return max((a - b).length for a, b in zip(points, expected))

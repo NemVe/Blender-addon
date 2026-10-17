@@ -1536,6 +1536,11 @@ def _frames_changed(self, context):
     """Keep the recorded path when its length is changed."""
     wanted = max(1, self.frames)
     if self.frames_applied and self.frames_applied != wanted:
+        # Before the keys are stretched, and before any button has been pressed:
+        # a copy of the whole model plays the Action of the model it was copied
+        # from until it takes one of its own, and stretching that one stretched
+        # the original's path too.
+        own_actions(self.id_data, self.id_data.rigmoves)
         rescale_keys(self, self.frames_applied, wanted)
     self.frames_applied = wanted
 
@@ -1984,6 +1989,20 @@ def own_action(obj):
         mine.slots.remove(other)
     animation.action = mine
     animation.action_slot = next((s for s in mine.slots if s.identifier == identifier), None)
+
+
+def own_rig_action(rig):
+    """own_action for the rig itself, whose Action holds the handles' keys: what
+    Animate and a handle keyed by hand leave.
+
+    Not while its NLA is being tweaked: the Action is then a strip's, which
+    Blender will not swap for another (own_action would fail on it at every
+    button), and keys written into it are the strip's by design.
+    """
+    animation = rig.animation_data
+    if animation is not None and animation.use_tweak_mode:
+        return
+    own_action(rig)
 
 
 def our_bone_names(data):
@@ -2832,6 +2851,10 @@ def catch_up(rig, data=None, reframe=True):
     follow_renames(rig, data)
     point_at_objects(rig, data)
     own_actions(rig, data)
+    # The rig's own keys too - what Animate and a handle keyed by hand leave. An
+    # Alt+D copy of the whole model plays the same Action, so Remove on the copy
+    # took the handle's keys out of the original's as well.
+    own_rig_action(rig)
     own_armature(rig)
     own_curves(rig, data)
     now = seat_of(rig)
@@ -9027,6 +9050,10 @@ class RIGMOVES_OT_animate(bpy.types.Operator):
             data.report = "Build first: there is no control to animate yet."
             self.report({"WARNING"}, data.report)
             return {"CANCELLED"}
+        # The keys go into the rig's own Action, which no button has made its
+        # own yet on a rig that was just copied with Alt+D: written there, they
+        # moved the original's too.
+        own_rig_action(rig)
         # Whatever the control was keyed to do before goes: two keys, start
         # and end, are the whole of the instruction.
         full = owner.path_from_id(path)
@@ -9075,6 +9102,9 @@ class RIGMOVES_OT_key_control(bpy.types.Operator):
         carrier = carriers[self.index]
         handle, bone = control_of(carrier)
         frame = context.scene.frame_current
+        # As in Animate: the key goes into the rig's own Action, which is the
+        # original's too on a copy no button has been pressed on.
+        own_rig_action(rig)
         if handle is not None:
             handle.keyframe_insert("location", index=1, frame=frame)
         elif bone is not None and carrier.prop in bone.keys():
