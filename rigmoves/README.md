@@ -1,4 +1,4 @@
-# CopyThat - v0.19.2
+# CopyThat - v0.19.3
 
 Move the parts of a machine by hand, record where they were and where they
 ended up, and get one control that plays it. There is no rig to build first:
@@ -20,7 +20,7 @@ with RigMoves keep working: the panel is now the **CopyThat** tab.
 CopyThat is a Blender extension, and it needs Blender 4.5 or newer: Blender
 will not install it on an older one. First, if an older RigMoves or CopyThat
 is listed under Edit > Preferences > **Add-ons**, switch it off and remove it:
-the two cannot be on at once. Then drag `CopyThat-0.19.2.zip` into Blender,
+the two cannot be on at once. Then drag `CopyThat-0.19.3.zip` into Blender,
 or use Edit > Preferences > **Get Extensions** > the drop-down at the top
 right > **Install from Disk**. Panel: 3D view sidebar (**N**), tab
 **CopyThat**. Files made with older versions keep working.
@@ -1648,6 +1648,20 @@ and one lifted 1 m:
 - **On Blender 5.0 and 5.2 the select icon beside a bone part in the Timing list
   raised an error.**
 
+- **Scaling or turning the whole model on its rig and then applying it made the
+  next Build put the parts back.** S 2 or R Z 90 on the rig, then Ctrl+A >
+  Scale or Rotation with no button pressed in between, and the lid ended up
+  1.6 m or 2.2 m off. The model is carried by the scale or the turn now, as it
+  is when the rig is moved; editing the Root bone in Edit Mode is still no move.
+- **A mesh joined into a built part with Ctrl+J stayed behind if it had a vertex
+  group of its own** - a knob that was a part of the move too, or a mesh with a
+  group such as "Pin". A vertex counts as weighted now only by a weight on a
+  bone of the rig that deforms; the rest join the part's group and keep their
+  other groups.
+- **On an Alt+D copy of a whole model, bending its curve - with Edit the Curve,
+  or with Tab - bent the original's curve too.** The copy's curves are its own
+  as soon as the copy is made.
+
 ## Known rough edges
 
 - While a finger is shown bent, dragging its base opens the bent joints on
@@ -1700,6 +1714,8 @@ and one lifted 1 m:
   can be read as a drag, and Build puts the part back. Press any CopyThat button
   between the two (the eye will do).
 - Apply Scale on a rig that is scaled unevenly is still read as a move of the model.
+- Every vertex of a part moves with it at full weight: a Build sets a vertex painted to
+  0 in the part's own group back to 1. CopyThat moves parts whole.
 - On a frame where the rig is scaled to nothing, Record, Build, Remove, Set Pivot and Ring
   are refused. Go to a frame where it has a size.
 - A rider copies its leader from where it stood when it joined. To move one,

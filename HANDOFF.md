@@ -111,6 +111,7 @@ Features, in the order the user asked for them:
 | 0.18.3 | **The Riding along list reads at the sidebar's usual width** (found in a real 5.2.1 window, sidebar at its default 280 px). The Spread... button of the Riding along and Timing headers sits in a right-aligned sub-row: it took half the header, and the count was cut ("Riding alon…"). A rider's name is cut from the front to the room its row has, measured with `blf` in the panel's font, so Ring's copy numbers show: it was `short(name, 13)`, which Blender then cut at the end as well, seven rows of "…ter Lead…". Tests draw the panel for a sidebar of a given width (`Sidebar`, `drawn_panel`, and the logging layout now notes labels and alignments) | `fitted`, `_draw_move`, `TestNamesBesideControls` |
 | 0.19.0 | The review of 0.18.3, 17 confirmed findings: a part is its object (`part_object`, renames, whole-model copies with their own Action), the rig's seat (`catch_up`: a moved model is carried), re-framed parts put back (fingerprints), one object in one move, copies join a move free, children named; Ring's shared-mesh settle and rollback, shared actions (own slot, own copy), keyed children, NLA/driver parts named, stacked duplicates, Spread's step re-sized live, SKIP_SAVE on Ring's Lead step and Spread's toggles, reports | see the batch commits and the guide's bug list |
 | 0.19.1 | The review of 0.19.0, 22 confirmed items in two batches. Who is who: a deleted part is let go of and taken out of its move at the next button (kept as "Name (deleted)" while riders copy it or hang from it), and a new object given its name is not it; the deletion timer no longer removes objects from the list it loops over; a big scene stays quick (users, not collections); a copy of a whole model, Alt+D too, owns its Armature and its path curves; the object a part hung from is kept by pointer; Build no longer empties an NLA strip that plays the part's own action, and a muted strip on a track that plays is named (the advice is the track); New Rig is not remembered; Ring says what is wrong with a deleted part or a non-mesh. Where things stand: a part is told from a drag by a rigid fit of three far-apart vertices (so a drag on top of Set Origin or Apply is kept, and parts not built yet are looked at), the marks are kept current as the mesh is edited, the model's seat is its Root bone (Ctrl+A and Set Origin on the rig move nothing), `same_place` allows for the rounding far from the origin, a rig scaled to nothing is left alone and Record and Build refuse it, a rig that moves itself is not seated, a rig switched off in the viewport is refused before anything changes, re-framed children are hung again as Build hangs a follower, a refused re-frame names its blocker, and riders' seats are worked out in the rig's own space | `let_go_of_deleted`, `take_out_gone`, `own_armature`, `own_curves`, `home_of`, `clip_strips`, `spread_vertices`, `was_reframed`, `retake_marks`, `marks_handler`, `seat_of`, `same_place`, `has_no_size`, `unavailable`; see the batch commits and the guide's bug list |
+| 0.19.3 | The light review of 0.19.2 (one Opus reviewer): 3 fixes - scale or turn then Apply on the rig, Ctrl+J joins, a fresh Alt+D copy's curves; 638 tests on 4.5/5.0/5.2. | see the fix-0193 commits and the guide's bug list |
 | 0.19.2 | The review of 0.19.1's 14 confirmed bugs fixed in four batches; 629 tests on 4.5/5.0/5.2. | see the batch commits and the guide's bug list |
 
 ## The model underneath (read before changing any maths)
@@ -492,6 +493,22 @@ Features, in the order the user asked for them:
   constraint -> the part -> the handle) and the part plays one evaluation
   behind. The slider property itself may sit on a part bone; that is no cycle.
   `default_control` is unchanged (first bone with no parent).
+- **The model scaled or turned, then applied (0.19.3):** `rig_stayed` no
+  longer decides alone. When the object stayed but the Root's seat changed by
+  `shift`, `model_went_with_the_seat(data, now)` asks the bound parts: more on
+  `shift @ Before` than on `Before` means the model went with it (carry, as
+  for a move); otherwise it was a Root edit (`store_seat`, nothing carried). A
+  part in neither place votes for neither; no bound parts means a Root edit.
+  `moved_since` asks the same.
+- **Weighted, for new geometry (0.19.3):** in `bind_new_geometry` a vertex is
+  weighted only by a weight above 0 in a group named after a deforming bone of
+  this rig; every other vertex joins the part's group at 1.0 and keeps its
+  other groups.
+- **A copy's curves (0.19.3):** `own_curves` also runs from `edit_curve`
+  (in full) and from `settle_old_rig`'s once-per-rig look-over as
+  `own_curves(rig, data, objects=False)`, which parts only a shared Curve and
+  makes no curve object. A copy made without its curve still points at the
+  original's curve object until Edit the Curve or the first button.
 - **Show (the eye):** pauses the sliders, reseats objects, and poses the
   bones at the frame (`pose_at`). It then uses `ride_shown` and
   `shown_places` for followers that aren't built yet, and puts objects in

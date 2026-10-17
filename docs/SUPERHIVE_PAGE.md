@@ -11,7 +11,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 - Author: **NemVe3D** (https://creators.sa/nemve)
 - Licence: **GPL-3.0-or-later** (the GNU General Public License, version 3 or any later version)
 - Needs: **Blender 4.5 or newer**
-- In the download: one `.zip` file, `CopyThat-0.19.2.zip`, which is the Blender extension (see Installation)
+- In the download: one `.zip` file, `CopyThat-0.19.3.zip`, which is the Blender extension (see Installation)
 - Support: through this product's page on Superhive, or at https://creators.sa/nemve (see Support and credits at the end)
 - Where it lives: the 3D Viewport sidebar (press **N**), tab **CopyThat**
 
@@ -32,7 +32,7 @@ Everything is explained below, step by step. You do not need to know rigging.
 
 ## Installation
 
-CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.19.2.zip`).
+CopyThat is installed as a Blender **extension**. You do not unzip anything: keep the download as a `.zip` file (named like `CopyThat-0.19.3.zip`).
 
 **What is in the download.** One file: that `.zip`, which is the extension itself. Inside it are the add-on (plain Python, so it is also the full source code), its manifest, the user guide (`README.md`) and the licence (`LICENSE`).
 
@@ -703,6 +703,7 @@ Read the grey report box at the bottom of the panel first. It says what happened
 
 ## Version history
 
+- **0.19.3:** The light review of 0.19.2, fixed: a model scaled or turned on its rig and then applied, meshes joined into a built part, and the curves of an Alt+D copy.
 - **0.19.2:** The review of 0.19.1, fixed: copies and deleted parts, old files, very large or very thin models, added geometry, long names, hand-built rigs.
 - **0.19.1:** deleting a part no longer risks closing Blender or slowing a big scene, and the part leaves its move; a copy of a whole model made with Alt+D is independent of the original; Set Origin and Apply (Ctrl+A) on a built part or on the rig no longer throw the move off, and neither does a model carried far from the origin, a rig with keys of its own, or one scaled to nothing; and the advice for a part moved by an NLA strip says to mute its track, which works, instead of the strip, which does not.
 - **0.19.0:** a full review's fixes. A finished model can be moved, hung on something that moves, copied whole with Shift+D, or have its parts renamed, and it keeps playing right. Set Origin or Apply Scale on a built part no longer throws it off: it is put back on its frame, and nothing moves. An object takes part in one move (a second move is turned down with the reason, instead of breaking both), and a part's unselected children are named. Ring no longer stops with an error on petals copied with Alt+D, and Build never takes animation away from other objects; parts moved by an NLA strip or a driver are named. Spread's Step follows what you change in its dialog, and Ring's Lead step starts at 0 every time. Clearer reports.
