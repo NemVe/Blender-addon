@@ -1,0 +1,673 @@
+// Written by edit_list.py: the cuts, speeds, captions and markers of the promo. Do not edit;
+// change edit_list.py and run it again. Frames are 30 fps; "src" is a frame of the recording's
+// file, "start" a frame of the shot (or the film).
+var EDIT = {
+ "bloom": {
+  "first": "bloom_0001.png",
+  "folder": "viewport_bloom",
+  "frames": 151,
+  "last": "bloom_0151.png"
+ },
+ "demo": {
+  "beats": [
+   {
+    "caption": "Select the parts. New Move.",
+    "frames": 96,
+    "lt_frames": 93,
+    "name": "new_move",
+    "start": 0
+   },
+   {
+    "caption": "Make Chain: the leaf's joints hang from one another.",
+    "frames": 75,
+    "lt_frames": 72,
+    "name": "make_chain",
+    "start": 96
+   },
+   {
+    "caption": "Pose it once. Record.",
+    "frames": 288,
+    "lt_frames": 120,
+    "name": "pose_record",
+    "start": 171
+   },
+   {
+    "caption": "Ring: one petal becomes a ring of eight.",
+    "frames": 99,
+    "lt_frames": 96,
+    "name": "ring_outer",
+    "start": 459
+   },
+   {
+    "caption": "Ring the inner petals and the leaf.",
+    "frames": 237,
+    "lt_frames": 120,
+    "name": "ring_inner_leaf",
+    "start": 558
+   },
+   {
+    "caption": "Spread: the timing, in one go.",
+    "frames": 187,
+    "lt_frames": 120,
+    "name": "spread",
+    "start": 795
+   },
+   {
+    "caption": "Build: one slider plays all 21 parts.",
+    "frames": 208,
+    "lt_frames": 120,
+    "name": "build",
+    "start": 982
+   },
+   {
+    "caption": "Animate: keyed over 150 frames.",
+    "frames": 70,
+    "lt_frames": 67,
+    "name": "animate",
+    "start": 1190
+   }
+  ],
+  "file": "rec/main/CopyThat_rec_main_709.mov",
+  "flash": 315,
+  "frames": 1260,
+  "hold": 38,
+  "segments": [
+   {
+    "beat": 0,
+    "frames": 58,
+    "kind": "P",
+    "src": 317,
+    "src_frames": 58,
+    "start": 0
+   },
+   {
+    "beat": 0,
+    "frames": 38,
+    "kind": "P",
+    "src": 394,
+    "src_frames": 38,
+    "start": 58
+   },
+   {
+    "beat": 1,
+    "frames": 32,
+    "kind": "M",
+    "src": 447,
+    "src_frames": 48,
+    "start": 96
+   },
+   {
+    "beat": 1,
+    "frames": 43,
+    "kind": "P",
+    "src": 495,
+    "src_frames": 43,
+    "start": 128
+   },
+   {
+    "beat": 2,
+    "frames": 37,
+    "kind": "M",
+    "src": 554,
+    "src_frames": 55,
+    "start": 171
+   },
+   {
+    "beat": 2,
+    "frames": 6,
+    "kind": "P",
+    "src": 609,
+    "src_frames": 6,
+    "start": 208
+   },
+   {
+    "beat": 2,
+    "frames": 9,
+    "kind": "P",
+    "src": 617,
+    "src_frames": 9,
+    "start": 214
+   },
+   {
+    "beat": 2,
+    "frames": 28,
+    "kind": "M",
+    "src": 626,
+    "src_frames": 41,
+    "start": 223
+   },
+   {
+    "beat": 2,
+    "frames": 6,
+    "kind": "P",
+    "src": 667,
+    "src_frames": 6,
+    "start": 251
+   },
+   {
+    "beat": 2,
+    "frames": 9,
+    "kind": "P",
+    "src": 674,
+    "src_frames": 9,
+    "start": 257
+   },
+   {
+    "beat": 2,
+    "frames": 31,
+    "kind": "M",
+    "src": 684,
+    "src_frames": 46,
+    "start": 266
+   },
+   {
+    "beat": 2,
+    "frames": 6,
+    "kind": "P",
+    "src": 730,
+    "src_frames": 6,
+    "start": 297
+   },
+   {
+    "beat": 2,
+    "frames": 7,
+    "kind": "P",
+    "src": 738,
+    "src_frames": 7,
+    "start": 303
+   },
+   {
+    "beat": 2,
+    "frames": 25,
+    "kind": "M",
+    "src": 745,
+    "src_frames": 37,
+    "start": 310
+   },
+   {
+    "beat": 2,
+    "frames": 6,
+    "kind": "P",
+    "src": 782,
+    "src_frames": 6,
+    "start": 335
+   },
+   {
+    "beat": 2,
+    "frames": 4,
+    "kind": "M",
+    "src": 789,
+    "src_frames": 5,
+    "start": 341
+   },
+   {
+    "beat": 2,
+    "frames": 3,
+    "kind": "P",
+    "src": 794,
+    "src_frames": 3,
+    "start": 345
+   },
+   {
+    "beat": 2,
+    "frames": 27,
+    "kind": "M",
+    "src": 797,
+    "src_frames": 40,
+    "start": 348
+   },
+   {
+    "beat": 2,
+    "frames": 6,
+    "kind": "P",
+    "src": 837,
+    "src_frames": 6,
+    "start": 375
+   },
+   {
+    "beat": 2,
+    "frames": 7,
+    "kind": "P",
+    "src": 844,
+    "src_frames": 7,
+    "start": 381
+   },
+   {
+    "beat": 2,
+    "frames": 27,
+    "kind": "M",
+    "src": 851,
+    "src_frames": 40,
+    "start": 388
+   },
+   {
+    "beat": 2,
+    "frames": 6,
+    "kind": "P",
+    "src": 891,
+    "src_frames": 6,
+    "start": 415
+   },
+   {
+    "beat": 2,
+    "frames": 38,
+    "kind": "P",
+    "src": 907,
+    "src_frames": 38,
+    "start": 421
+   },
+   {
+    "beat": 3,
+    "frames": 15,
+    "kind": "M",
+    "src": 970,
+    "src_frames": 22,
+    "start": 459
+   },
+   {
+    "beat": 3,
+    "frames": 46,
+    "kind": "D",
+    "src": 992,
+    "src_frames": 46,
+    "start": 474
+   },
+   {
+    "beat": 3,
+    "frames": 38,
+    "kind": "P",
+    "src": 1038,
+    "src_frames": 38,
+    "start": 520
+   },
+   {
+    "beat": 4,
+    "frames": 15,
+    "kind": "M",
+    "src": 1100,
+    "src_frames": 22,
+    "start": 558
+   },
+   {
+    "beat": 4,
+    "frames": 46,
+    "kind": "D",
+    "src": 1122,
+    "src_frames": 46,
+    "start": 573
+   },
+   {
+    "beat": 4,
+    "frames": 38,
+    "kind": "P",
+    "src": 1168,
+    "src_frames": 38,
+    "start": 619
+   },
+   {
+    "beat": 4,
+    "frames": 9,
+    "kind": "P",
+    "src": 1230,
+    "src_frames": 9,
+    "start": 657
+   },
+   {
+    "beat": 4,
+    "frames": 1,
+    "kind": "M",
+    "src": 1250,
+    "src_frames": 1,
+    "start": 666
+   },
+   {
+    "beat": 4,
+    "frames": 46,
+    "kind": "D",
+    "src": 1251,
+    "src_frames": 46,
+    "start": 667
+   },
+   {
+    "beat": 4,
+    "frames": 73,
+    "kind": "P",
+    "src": 1297,
+    "src_frames": 73,
+    "start": 713
+   },
+   {
+    "beat": 4,
+    "frames": 9,
+    "kind": "P",
+    "src": 1380,
+    "src_frames": 9,
+    "start": 786
+   },
+   {
+    "beat": 5,
+    "frames": 32,
+    "kind": "M",
+    "src": 1389,
+    "src_frames": 47,
+    "start": 795
+   },
+   {
+    "beat": 5,
+    "frames": 2,
+    "kind": "P",
+    "src": 1436,
+    "src_frames": 2,
+    "start": 827
+   },
+   {
+    "beat": 5,
+    "frames": 44,
+    "kind": "D",
+    "src": 1438,
+    "src_frames": 44,
+    "start": 829
+   },
+   {
+    "beat": 5,
+    "frames": 9,
+    "kind": "P",
+    "src": 1482,
+    "src_frames": 9,
+    "start": 873
+   },
+   {
+    "beat": 5,
+    "frames": 38,
+    "kind": "P",
+    "src": 1500,
+    "src_frames": 38,
+    "start": 882
+   },
+   {
+    "beat": 5,
+    "frames": 9,
+    "kind": "P",
+    "src": 1546,
+    "src_frames": 9,
+    "start": 920
+   },
+   {
+    "beat": 5,
+    "frames": 12,
+    "kind": "M",
+    "src": 1557,
+    "src_frames": 17,
+    "start": 929
+   },
+   {
+    "beat": 5,
+    "frames": 12,
+    "kind": "P",
+    "src": 1574,
+    "src_frames": 12,
+    "start": 941
+   },
+   {
+    "beat": 5,
+    "frames": 9,
+    "kind": "P",
+    "src": 1593,
+    "src_frames": 9,
+    "start": 953
+   },
+   {
+    "beat": 5,
+    "frames": 14,
+    "kind": "M",
+    "src": 1604,
+    "src_frames": 21,
+    "start": 962
+   },
+   {
+    "beat": 5,
+    "frames": 6,
+    "kind": "P",
+    "src": 1625,
+    "src_frames": 6,
+    "start": 976
+   },
+   {
+    "beat": 6,
+    "frames": 32,
+    "kind": "M",
+    "src": 1639,
+    "src_frames": 47,
+    "start": 982
+   },
+   {
+    "beat": 6,
+    "frames": 41,
+    "kind": "P",
+    "src": 1686,
+    "src_frames": 41,
+    "start": 1014
+   },
+   {
+    "beat": 6,
+    "frames": 62,
+    "kind": "M",
+    "src": 1742,
+    "src_frames": 92,
+    "start": 1055
+   },
+   {
+    "beat": 6,
+    "frames": 6,
+    "kind": "P",
+    "src": 1834,
+    "src_frames": 6,
+    "start": 1117
+   },
+   {
+    "beat": 6,
+    "frames": 61,
+    "kind": "M",
+    "src": 1848,
+    "src_frames": 91,
+    "start": 1123
+   },
+   {
+    "beat": 6,
+    "frames": 6,
+    "kind": "P",
+    "src": 1939,
+    "src_frames": 6,
+    "start": 1184
+   },
+   {
+    "beat": 7,
+    "frames": 30,
+    "kind": "M",
+    "src": 1958,
+    "src_frames": 45,
+    "start": 1190
+   },
+   {
+    "beat": 7,
+    "frames": 40,
+    "kind": "P",
+    "src": 2003,
+    "src_frames": 40,
+    "start": 1220
+   }
+  ]
+ },
+ "fps": 30,
+ "frames": 1830,
+ "hooks": {
+  "A": {
+   "first": "hook_A_0030.png",
+   "folder": "hooks_1440/hook_A",
+   "frames": 61,
+   "last": "hook_A_0090.png"
+  },
+  "B": {
+   "first": "hook_B_0106.png",
+   "folder": "hooks_1440/hook_B",
+   "frames": 45,
+   "last": "hook_B_0150.png"
+  },
+  "C": {
+   "first": "hook_C_0152.png",
+   "folder": "hooks_1440/hook_C",
+   "frames": 46,
+   "last": "hook_C_0197.png"
+  }
+ },
+ "markers": [
+  {
+   "comment": "Shot 01 Bloom",
+   "frame": 0
+  },
+  {
+   "comment": "Shot 02 Turn",
+   "frame": 45
+  },
+  {
+   "comment": "Shot 03 Push-in",
+   "frame": 90
+  },
+  {
+   "comment": "Shot 04 Slider",
+   "frame": 135
+  },
+  {
+   "comment": "Shot 05 Title",
+   "frame": 240
+  },
+  {
+   "comment": "Beat 1: new_move - Select the parts. New Move.",
+   "frame": 300
+  },
+  {
+   "comment": "Shot 06 Demo",
+   "frame": 300
+  },
+  {
+   "comment": "Beat 2: make_chain - Make Chain: the leaf's joints hang from one another.",
+   "frame": 396
+  },
+  {
+   "comment": "Beat 3: pose_record - Pose it once. Record.",
+   "frame": 471
+  },
+  {
+   "comment": "Beat 4: ring_outer - Ring: one petal becomes a ring of eight.",
+   "frame": 759
+  },
+  {
+   "comment": "Beat 5: ring_inner_leaf - Ring the inner petals and the leaf.",
+   "frame": 858
+  },
+  {
+   "comment": "Beat 6: spread - Spread: the timing, in one go.",
+   "frame": 1095
+  },
+  {
+   "comment": "Beat 7: build - Build: one slider plays all 21 parts.",
+   "frame": 1282
+  },
+  {
+   "comment": "Beat 8: animate - Animate: keyed over 150 frames.",
+   "frame": 1490
+  },
+  {
+   "comment": "Shot 07 Match cut",
+   "frame": 1560
+  },
+  {
+   "comment": "Shot 08 End card",
+   "frame": 1710
+  }
+ ],
+ "match_cut": {
+  "dissolve_frames": 30,
+  "dissolve_start": 45,
+  "tag_start": 72
+ },
+ "outro": {
+  "first": "outro_0001.png",
+  "folder": "outro_frames_1440",
+  "frames": 210,
+  "last": "outro_0210.png"
+ },
+ "shots": [
+  {
+   "frames": 45,
+   "n": 1,
+   "name": "01 Bloom",
+   "start": 0
+  },
+  {
+   "frames": 45,
+   "n": 2,
+   "name": "02 Turn",
+   "start": 45
+  },
+  {
+   "frames": 45,
+   "n": 3,
+   "name": "03 Push-in",
+   "start": 90
+  },
+  {
+   "frames": 105,
+   "n": 4,
+   "name": "04 Slider",
+   "start": 135
+  },
+  {
+   "frames": 60,
+   "n": 5,
+   "name": "05 Title",
+   "start": 240
+  },
+  {
+   "frames": 1260,
+   "n": 6,
+   "name": "06 Demo",
+   "start": 300
+  },
+  {
+   "frames": 150,
+   "n": 7,
+   "name": "07 Match cut",
+   "start": 1560
+  },
+  {
+   "frames": 120,
+   "n": 8,
+   "name": "08 End card",
+   "start": 1710
+  }
+ ],
+ "slider": {
+  "caption": "This is Blender. This is the whole rig.",
+  "file": "rec/slider/CopyThat_rec_slider_709.mov",
+  "flash": 317,
+  "frames": 105,
+  "move_ends": 4.075,
+  "src_frames": 124,
+  "start": 319
+ },
+ "statements": [
+  {
+   "text": "21 moving parts.",
+   "y": 170
+  },
+  {
+   "text": "No rig to build.",
+   "y": 170
+  },
+  {
+   "text": "One slider.",
+   "y": 770
+  }
+ ]
+};
