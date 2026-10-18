@@ -557,3 +557,178 @@ The lines from the logo on stay v2.2's.
 - **Re-rendered:** only the opening (`segments/01_open.mp4`); the other 19 segments are v2.2's (`segments_v22/` keeps the whole v2.2 set,
   and `CopyThat_promo_v2.2_1440p60.mp4` the v2.2 film). The logo's timing did not change, so it was not re-rendered.
 
+
+---
+
+# v3 (NemVe3D, 2026-10-18): bloom first, many moves at once, cube to flower as people really work, one handle
+
+NemVe3D, on v2.3:
+- "make it start with showing the final bloom so users don't wait 110 seconds
+  to see it (because people have low attention spans)"
+- "remove the timer"
+- "First thing they see is 6 or more different animations on screen (simple
+  ones) showing the prominent features of the tool, and then you'd start with
+  Cube to More complex and then rig the flower"
+- "I want them to see you rig it as they would do it, nobody rotates using
+  'Transform' instead they do it in their layout with keyboard shortcuts"
+- "I want the voiceover to put emphasis on the before-after record and how you
+  can manipulate it"
+- "remove the outro (CopyThat, now on Superhive), and just add a non verbal
+  Made by NemVe3D"
+- "put an emphasis on the rig UI appearing and every time you add something
+  it's only one rig UI, instead of the Slider. Slider is only optional way to
+  control and not the primary"
+
+**The rig UI** is the arrow handle (the move's control bone) that Build puts
+on the model. It is the hero of this film.
+- The panel's slider moves with it. Mention the slider once, as the optional
+  other way.
+- Every time something is added (parts, a ring, a chain, a second move
+  combined), there is still ONE handle. Say so on screen ("1 handle") and in
+  the voice.
+
+## The reference: how NemVe3D really uses it
+`promo/reference/MedalTVScreenRecording…-trim-….mp4`: 52.5 s, 2580x1080. The
+Blender window is the left ~1400 px; the audio tracks are silent.
+- **0-6 s:** the two leader petals selected in the viewport (orange outline),
+  New Move. Panel: Move 1, ✓ Before, 2 parts.
+- **8 s:** R pressed over the viewport, the petals rotated with the mouse. The
+  header reads "Rotation: …".
+- **13 s:** after Record After and Build, the black arrow handle stands above
+  the stem. Object Mode, Move 1 0%.
+- **15 s:**
+  - Pose Mode, the handle selected (cyan) and moved with G (the header shows
+    Dx/Dy/Dz).
+  - The petals open, and the panel's slider reads 100% by itself.
+- **21-30 s:** TIMING opened, COPIES opened, Ring… pressed (its dialog at
+  28-30 s).
+- **32-38 s:** the bud fills in.
+- **40-50 s:** the handle dragged up (bloom) and back down (shut).
+
+Mimic this: selection by clicking in the viewport, posing with shortcuts over
+the viewport, testing with the handle in Pose Mode. Extract frames from it for
+the look of the handle (black outline at rest, cyan when selected in Pose Mode)
+and of Blender's header during a transform.
+
+## Structure (about 100-120 s)
+1. **The bloom (0-3 s).**
+   - The Cycles render of the bloom, `dist/promo/outro_frames_1440/`
+     (210 frames, 2560x1440). The very first frame is already the flower.
+   - "CopyThat" comes up with the line "Record a move. Play it with one
+     handle."
+2. **The wall (3-10 s).**
+   - The bloom shrinks into the middle tile of a 3x3 grid; around it, eight
+     simple animations play at once.
+   - Each tile has a small label and its own single handle sliding: DELAYS
+     (blocks leave in a wave), RING (one blade becomes a fan), CHAIN, CURL,
+     CURVE (a part follows a bent path), STEPS (a step in between), PIVOT (a
+     lid on its hinge), MIRROR or COMBINE.
+   - Build them from the 3D stages of the v2 feature beats
+     (`web/src/beats_feat.mjs`, `beats_feat2.mjs`), without their text and
+     mock panels.
+3. **Before and After on one cube (10-30 s).** The idea, slow and clear.
+   - **The setting:** a Blender-like viewport with the CopyThat panel. Key
+     chips at the bottom show each key as it is pressed, like Screencast Keys.
+   - **New Move:** click the cube, press New Move: "✓ Before".
+   - **After:** move it with G (Z, 2, Enter) and turn it with R (Z, 90,
+     Enter). Blender's header text shows during each transform. Press Record on
+     After: "✓ After".
+   - **Build Sliders:** the arrow handle appears on the cube. Make this a
+     moment: a short push-in and a gold glow round the handle.
+   - **Play:** Ctrl+Tab to Pose Mode, click the handle, G, and drag it. The
+     cube travels Before to After and back.
+   - **The slider:** the panel's slider follows by itself. One short line says
+     it can be used instead.
+4. **Change the move (30-48 s).** Before and After stay editable:
+   - the eye shows Before, then After;
+   - Pause, pose a new After, press Record on After again, Build, and the
+     handle plays the new move;
+   - Curve the Path, then Tab into the curve and G a point to bend it; the
+     handle plays the curved move;
+   - Step in between: a middle pose.
+5. **From simple to complex (48-65 s).** Each ends with the handle dragged, and
+   each time ONE handle:
+   - three cubes in one move, Spread: they leave in a wave;
+   - a box lid with its Pivot on the hinge;
+   - Make Chain and Curl on a few segments;
+   - one blade Ringed into a fan: copies added, still one handle (a "1 handle"
+     callout).
+6. **The flower, as people really do it (65-110 s).** At a normal pace, with
+   the included file and the values of `promo/files/FLOWER_FAST.md`, but posed
+   in the viewport with shortcuts and key chips:
+   - **Select and record Before:** Shift+click the six parts in the viewport
+     (or the Outliner), New Move.
+   - **The petals and the core:**
+     - Outer Leader: R, X, X, 75, Enter;
+     - Inner Leader: R, X, X, 45, Enter;
+     - Core: G, Z, .18, Enter, then R, Z, 60, Enter.
+   - **The leaf:** Leaf 3, Shift+click Leaf 2 and Leaf 1, CHAINS > Make Chain.
+     Then Leaf 1 R X X 28, Leaf 2 R X X -145, Leaf 3 R X X 172.
+   - **Record and test:** Record on After, then Build Sliders: the handle
+     appears. Ctrl+Tab, click the handle, G up a little: it opens. Back down.
+   - **The rings:** COPIES > Ring… three times with the real dialog values:
+     - Count 8, World Origin, Lead step 9;
+     - Count 6, Lead step 14;
+     - Count 2, Lead step 0.
+
+     "Riding along (13)", and still one handle (callout).
+   - **The timing:** TIMING > Spread… on the leaf (Down a chain, Only the
+     selected, 0.10, 0.15), then the delays 0.34 (Inner Leader) and 0.40
+     (Core).
+   - **Build:** PATH > Smooth, then Build Sliders.
+   - **The bloom:** G the handle up, slowly. The real bloom
+     (`flower_motion.json`).
+7. **The end (110-116 s).** The Cycles bloom once more, then a silent card,
+   "Made by NemVe3D". No voice, and no store line.
+
+No timer anywhere. The v2 sections that go: the 12 feature flashes as their
+own beats (their stages feed the wall and step 5), "Put it together", "Real
+Blender", and the old end card with its line.
+
+## The voice: the same Chatterbox voice, on Before, After and the handle
+Chatterbox 0.1.7, default voice, exaggeration 0.65, cfg 0.4, temperature 0.8.
+Generate continuous passages with several takes each, and cut them as v2.2 does
+(`gen_vo.py`, `cut_vo.py`). Lines, to be tuned to the cuts:
+- **Hook:** "Every part of this flower moves with one handle."
+- **Wall:** "Delays, rings, chains, curves... all on one handle. And you never
+  build a rig."
+- **Cube:**
+  - "Here's how it works. Select your object, and press New Move. Where it
+    stands now is Before."
+  - "Move it to where it should end up, and press Record. That's After."
+  - "Press Build... and a handle appears. Grab it, and the move plays, from
+    Before to After."
+  - "The slider in the panel does the same, if you prefer."
+- **Change:**
+  - "Before and After stay yours to change. Peek at either one with the eye."
+  - "Pause, pose a new After, and record it again."
+  - "Bend the path between them."
+  - "Or add a step in between."
+- **Complex:**
+  - "Add more parts, and each one waits its turn."
+  - "Set a pivot, and the lid swings on its hinge."
+  - "Chain the joints, and curl them all at once."
+  - "Ring one blade into a fan. Still one handle."
+- **Flower:**
+  - "Now the flower, the way you'd really do it."
+  - "Select the parts, New Move."
+  - "Rotate them open, right in the viewport."
+  - "Record After, and Build."
+  - "Ring the petals round the stem, spread the timing..."
+  - "and grab the handle."
+- **End:** no voice.
+
+## Sound
+- Mouse clicks; quiet keyboard ticks on every key chip.
+- Whooshes as v2.2, on the wall's reveal and the section turns.
+
+## Outputs
+- **The film:** `dist/promo/v2/CopyThat_promo_v2_1440p60.mp4`. Keep v2.3 as
+  `CopyThat_promo_v2.3_1440p60.mp4` with its segments set aside.
+- **The After Effects project,** rebuilt, with captions.
+- **A review folder,** `promo_v2_review/v3/` in the session scratchpad:
+  - a contact sheet of the whole film at 1 fps;
+  - stills of: the bloom's first frame, the wall, the handle appearing on the
+    cube, the handle dragged in Pose Mode, the re-recorded After, the bent
+    curve, the fan with "1 handle", the flower's R X X 75 with its key chips,
+    the Ring dialog, and the final bloom from the handle.
